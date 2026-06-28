@@ -256,6 +256,17 @@ public:
     [[nodiscard]] int oxidation_model()     const noexcept { return oxidation_model_; }
     [[nodiscard]] int coagulation_model()   const noexcept { return coagulation_model_; }
 
+    // ── CRTP extension points — process source storage owned by ThreeEquations ─
+    //
+    // ThreeEquations models: nucleation, coagulation, condensation, growth, oxidation.
+    // NOT modelled: sintering → base class returns zero span automatically.
+
+    [[nodiscard]] std::span<const double> sources_nucleation_impl()   const noexcept { return { source_nucleation_.data(),   this->n_equations }; }
+    [[nodiscard]] std::span<const double> sources_coagulation_impl()  const noexcept { return { source_coagulation_.data(),  this->n_equations }; }
+    [[nodiscard]] std::span<const double> sources_condensation_impl() const noexcept { return { source_condensation_.data(), this->n_equations }; }
+    [[nodiscard]] std::span<const double> sources_growth_impl()       const noexcept { return { source_growth_.data(),       this->n_equations }; }
+    [[nodiscard]] std::span<const double> sources_oxidation_impl()    const noexcept { return { source_oxidation_.data(),    this->n_equations }; }
+
 	void WriteHeaderLine(MOM::OutputFileColumns& fOutput, const unsigned int precision);
 
 	void WriteOutputLine( MOM::OutputFileColumns& fOutput,
@@ -359,6 +370,17 @@ private:
     double Ns_min_ = 1.e6;      //!< [#/m3]
     double Ss_min_ = 1.e-15;    //!< [m2/m3]
     double vs_min_ = 1.e-30;    //!< [m3/#]
+
+    // ── Per-process source storage (owned by ThreeEquations, not by base) ─────
+    //
+    // Only processes ThreeEquations models are declared here.
+    // sintering is absent: base class returns zero span for sources_sintering().
+
+    MomentVector source_nucleation_   = MomentVector::Zero();
+    MomentVector source_coagulation_  = MomentVector::Zero();
+    MomentVector source_condensation_ = MomentVector::Zero();
+    MomentVector source_growth_       = MomentVector::Zero();
+    MomentVector source_oxidation_    = MomentVector::Zero();
 
     // ── Initial moments cache ──────────────────────────────────────────────────
     MomentVector initial_moments_cache_ = MomentVector::Zero();

@@ -198,7 +198,12 @@ HMOM<Thermo>::HMOM(const Thermo& thermo)
 template <ThermoMap Thermo>
 void HMOM<Thermo>::MemoryAllocation()
 {
-    this->ZeroSources();
+    this->ZeroSources();                // zeros source_all_, omega_gas_ (base class)
+    source_nucleation_.setZero();      // owned by HMOM
+    source_coagulation_.setZero();
+    source_condensation_.setZero();
+    source_growth_.setZero();
+    source_oxidation_.setZero();
 
     source_coagulation_discrete_   = MomentVector::Zero();
     source_coagulation_ss_         = MomentVector::Zero();
@@ -913,7 +918,13 @@ void HMOM<Thermo>::SootCoagulationContinuousLargeLargeM4(double lambda)
 template <ThermoMap Thermo>
 void HMOM<Thermo>::CalculateSourceMoments() noexcept
 {
-    this->ZeroSources();
+    this->ZeroSources();                // zeros source_all_, omega_gas_ (base class)
+    source_nucleation_.setZero();      // owned by HMOM — must be zeroed explicitly
+    source_coagulation_.setZero();
+    source_condensation_.setZero();
+    source_growth_.setZero();
+    source_oxidation_.setZero();
+
     source_coagulation_discrete_   = MomentVector::Zero();
     source_coagulation_ss_         = MomentVector::Zero();
     source_coagulation_sl_         = MomentVector::Zero();

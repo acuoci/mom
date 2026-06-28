@@ -201,6 +201,16 @@ public:
 
     [[nodiscard]] const std::string& sg_species() const noexcept { return sg_species_; }
 
+    // ── CRTP extension points — process source storage owned by BrookesMoss ───
+    //
+    // BrookesMoss models: nucleation, coagulation, growth, oxidation.
+    // NOT modelled: condensation, sintering → base class returns zero span.
+
+    [[nodiscard]] std::span<const double> sources_nucleation_impl()  const noexcept { return { source_nucleation_.data(),  this->n_equations }; }
+    [[nodiscard]] std::span<const double> sources_coagulation_impl() const noexcept { return { source_coagulation_.data(), this->n_equations }; }
+    [[nodiscard]] std::span<const double> sources_growth_impl()      const noexcept { return { source_growth_.data(),      this->n_equations }; }
+    [[nodiscard]] std::span<const double> sources_oxidation_impl()   const noexcept { return { source_oxidation_.data(),   this->n_equations }; }
+
 	void WriteHeaderLine(MOM::OutputFileColumns& fOutput, const unsigned int precision);
 
 	void WriteOutputLine( MOM::OutputFileColumns& fOutput,
@@ -295,6 +305,16 @@ private:
     double dMdt_nucleation_BMH_2_= 0.;
     double dMdt_surface_growth_  = 0.;
     double dMdt_oxidation_       = 0.;
+
+    // ── Per-process source storage (owned by BrookesMoss, not by base) ────────
+    //
+    // BrookesMoss models: nucleation, coagulation, growth, oxidation.
+    // condensation and sintering are absent; base class returns zero span for both.
+
+    MomentVector source_nucleation_  = MomentVector::Zero();
+    MomentVector source_coagulation_ = MomentVector::Zero();
+    MomentVector source_growth_      = MomentVector::Zero();
+    MomentVector source_oxidation_   = MomentVector::Zero();
 
     // ── Initial moments cache ──────────────────────────────────────────────────
     MomentVector initial_moments_cache_ = MomentVector::Zero();

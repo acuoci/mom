@@ -149,7 +149,12 @@ BrookesMoss<Thermo>::BrookesMoss(const Thermo& thermo)
 template <ThermoMap Thermo>
 void BrookesMoss<Thermo>::MemoryAllocation()
 {
-    this->ZeroSources();
+    this->ZeroSources();               // zeros source_all_, omega_gas_ (base class)
+    source_nucleation_.setZero();     // owned by BrookesMoss — zeroed explicitly
+    source_coagulation_.setZero();
+    source_growth_.setZero();
+    source_oxidation_.setZero();
+
     this->omega_gas_ = Eigen::VectorXd::Zero(
         static_cast<Eigen::Index>(thermo_.NumberOfSpecies()));
 
@@ -391,8 +396,11 @@ void BrookesMoss<Thermo>::CheckBrookesMossHallSpecies()
 template <ThermoMap Thermo>
 void BrookesMoss<Thermo>::CalculateSourceMoments() noexcept
 {
-    // Reset all source vectors and gas sources
-    this->ZeroSources();
+    this->ZeroSources();               // zeros source_all_, omega_gas_ (base class)
+    source_nucleation_.setZero();     // owned by BrookesMoss — zeroed explicitly
+    source_coagulation_.setZero();
+    source_growth_.setZero();
+    source_oxidation_.setZero();
 
     // Reset intermediate quantities
     dMdt_nucleation_       = 0.;

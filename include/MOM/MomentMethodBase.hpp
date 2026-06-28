@@ -62,9 +62,13 @@ namespace MOM {
 //   NEq <= ~16), are fully unrolled by the compiler, and are SIMD-vectorised
 //   without any heap allocation in the computational hot loop.
 //
-// * All physical sub-process source vectors are stored here (initialised to
-//   zero). Each concrete derived class fills only the processes it models;
-//   the rest remain zero, which is physically correct.
+// * Physical sub-process source vectors (nucleation, coagulation, …) are
+//   owned by the Derived class for each process it models, NOT stored here.
+//   The base class provides a compile-time zero-span fallback via CRTP
+//   detection: `if constexpr (requires(const Derived& d) { d.sources_X_impl(); })`
+//   forwards to the derived implementation; otherwise it returns a view of
+//   a static constexpr zero array. Zero overhead — the branch is resolved
+//   at compile time and the non-taken arm is never instantiated.
 //
 // * The omega_gas_ vector (gas-phase source terms) is an Eigen::VectorXd
 //   sized once during setup (n_species elements). It is NOT re-allocated
@@ -143,14 +147,49 @@ public:
         return { source_all_.data(), NEq };
     }
 
-    // Per-process source vectors.
-    // Processes not modelled by a concrete class return a zero-filled span.
-    [[nodiscard]] std::span<const double> sources_nucleation()   const noexcept { return { source_nucleation_.data(),   NEq }; }
-    [[nodiscard]] std::span<const double> sources_coagulation()  const noexcept { return { source_coagulation_.data(),  NEq }; }
-    [[nodiscard]] std::span<const double> sources_condensation() const noexcept { return { source_condensation_.data(), NEq }; }
-    [[nodiscard]] std::span<const double> sources_growth()       const noexcept { return { source_growth_.data(),       NEq }; }
-    [[nodiscard]] std::span<const double> sources_oxidation()    const noexcept { return { source_oxidation_.data(),    NEq }; }
-    [[nodiscard]] std::span<const double> sources_sintering()    const noexcept { return { source_sintering_.data(),    NEq }; }
+    // ── Per-process source span getters — CRTP dispatch with zero fallback ────
+    //
+    // If Derived implements sources_X_impl() (the opt-in extension point),
+    // the call is forwarded to Derived at compile time with zero overhead.
+    // If Derived does NOT model process X, the base returns a static constexpr
+    // zero span — no storage is allocated and no runtime branch is taken.
+    //
+    // Derived classes signal support for a process by declaring:
+    //   [[nodiscard]] std::span<const double> sources_X_impl() const noexcept;
+    // The _impl() suffix avoids name hiding and makes the extension point
+    // explicit, clearly distinguishing "process is modelled here" from the
+    // public concept-required API below.
+
+    [[nodiscard]] std::span<const double> sources_nucleation() const noexcept {
+        if constexpr (requires (const Derived& d) { d.sources_nucleation_impl(); })
+            return derived().sources_nucleation_impl();
+        else return { kZeroData, NEq };
+    }
+    [[nodiscard]] std::span<const double> sources_coagulation() const noexcept {
+        if constexpr (requires (const Derived& d) { d.sources_coagulation_impl(); })
+            return derived().sources_coagulation_impl();
+        else return { kZeroData, NEq };
+    }
+    [[nodiscard]] std::span<const double> sources_condensation() const noexcept {
+        if constexpr (requires (const Derived& d) { d.sources_condensation_impl(); })
+            return derived().sources_condensation_impl();
+        else return { kZeroData, NEq };
+    }
+    [[nodiscard]] std::span<const double> sources_growth() const noexcept {
+        if constexpr (requires (const Derived& d) { d.sources_growth_impl(); })
+            return derived().sources_growth_impl();
+        else return { kZeroData, NEq };
+    }
+    [[nodiscard]] std::span<const double> sources_oxidation() const noexcept {
+        if constexpr (requires (const Derived& d) { d.sources_oxidation_impl(); })
+            return derived().sources_oxidation_impl();
+        else return { kZeroData, NEq };
+    }
+    [[nodiscard]] std::span<const double> sources_sintering() const noexcept {
+        if constexpr (requires (const Derived& d) { d.sources_sintering_impl(); })
+            return derived().sources_sintering_impl();
+        else return { kZeroData, NEq };
+    }
 
     /// Gas-phase consumption source terms [kg/m3/s].
     /// Size = n_species; allocated once during setup.
@@ -206,16 +245,18 @@ protected:
 
     // ── Fixed-size source storage (stack-allocated) ────────────────────────
     //
-    // All vectors initialised to zero. Concrete classes fill only the
-    // processes they implement; unused entries remain zero (physically correct).
+    // Only the total source vector is stored here; per-process vectors are
+    // owned by the Derived class (see class comment above).
 
-    MomentVector source_all_          = MomentVector::Zero();
-    MomentVector source_nucleation_   = MomentVector::Zero();
-    MomentVector source_coagulation_  = MomentVector::Zero();
-    MomentVector source_condensation_ = MomentVector::Zero();
-    MomentVector source_growth_       = MomentVector::Zero();
-    MomentVector source_oxidation_    = MomentVector::Zero();
-    MomentVector source_sintering_    = MomentVector::Zero();
+    MomentVector source_all_ = MomentVector::Zero();
+
+    // ── Compile-time zero span for unmodelled processes ────────────────────
+    //
+    // A static constexpr zero array of length NEq. Used by the sources_X()
+    // CRTP dispatch methods above as the fallback when Derived does not
+    // declare sources_X_impl(). Constexpr guarantees zero runtime cost —
+    // the array is placed in read-only data, not stack or heap.
+    static constexpr double kZeroData[NEq] = {};
 
     // ── Gas-phase source terms (sized at setup, not in hot loop) ──────────
     //
@@ -226,14 +267,10 @@ protected:
 
     // ── Helpers for zero-initialising source vectors between time steps ─────
 
+    // Zeroes the base-class-owned accumulators. Each Derived class must zero
+    // its own process vectors (source_X_) immediately after calling this.
     void ZeroSources() noexcept {
         source_all_.setZero();
-        source_nucleation_.setZero();
-        source_coagulation_.setZero();
-        source_condensation_.setZero();
-        source_growth_.setZero();
-        source_oxidation_.setZero();
-        source_sintering_.setZero();
         omega_gas_.setZero();
     }
 

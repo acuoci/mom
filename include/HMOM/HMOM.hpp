@@ -193,14 +193,19 @@ public:
 
     void PrintSummary() const;
 
-    // ── HMOM-specific extended source breakdown ───────────────────────────────
+    // ── CRTP extension points — process source storage owned by HMOM ─────────
     //
-    // These are not part of the MomentMethod concept; they are available to
-    // code that knows it is working with HMOM specifically (e.g. diagnostics,
-    // post-processing, and academic output).
+    // Each `sources_X_impl()` method signals to MomentMethodBase that HMOM
+    // models process X. The base class `sources_X()` getter detects these at
+    // compile time via `if constexpr (requires ...)` and forwards here with
+    // zero overhead. No `sources_sintering_impl()` is declared: HMOM does not
+    // model sintering, so `sources_sintering()` returns a zero span automatically.
 
-    [[nodiscard]] std::span<const double> sources_growth()    const noexcept { return { this->source_growth_.data(),    4u }; }
-    [[nodiscard]] std::span<const double> sources_oxidation() const noexcept { return { this->source_oxidation_.data(), 4u }; }
+    [[nodiscard]] std::span<const double> sources_nucleation_impl()   const noexcept { return { source_nucleation_.data(),   this->n_equations }; }
+    [[nodiscard]] std::span<const double> sources_coagulation_impl()  const noexcept { return { source_coagulation_.data(),  this->n_equations }; }
+    [[nodiscard]] std::span<const double> sources_condensation_impl() const noexcept { return { source_condensation_.data(), this->n_equations }; }
+    [[nodiscard]] std::span<const double> sources_growth_impl()       const noexcept { return { source_growth_.data(),       this->n_equations }; }
+    [[nodiscard]] std::span<const double> sources_oxidation_impl()    const noexcept { return { source_oxidation_.data(),    this->n_equations }; }
 
     /// Discrete coagulation breakdown (small+small, small+large, large+large)
     [[nodiscard]] std::span<const double> sources_coagulation_discrete()    const noexcept;
@@ -441,10 +446,26 @@ private:
 	bool is_debug_mode_              = false;  //!< enable verbose diagnostic output
     bool is_simplified_pah_mass_     = false;  //!< use Nc*WC instead of full PAH MW
 
-    // ── Per-process coagulation source breakdown ───────────────────────────────
+    // ── Per-process source storage (owned by HMOM, not inherited from base) ───
     //
-    // These are HMOM-specific (coagulation has discrete and continuous parts).
-    // Not in the base class because they are 4-element vectors unique to HMOM.
+    // Only processes HMOM actually models are declared here.  The compile-time
+    // CRTP dispatch in MomentMethodBase::sources_X() detects which _impl()
+    // methods exist via `if constexpr (requires ...)` and selects the right
+    // implementation (or a zero-span fallback) with no runtime overhead.
+    //
+    // HMOM models: nucleation, coagulation, condensation, growth, oxidation.
+    // HMOM does NOT model: sintering → base class returns zero span automatically.
+
+    MomentVector source_nucleation_   = MomentVector::Zero();
+    MomentVector source_coagulation_  = MomentVector::Zero();
+    MomentVector source_condensation_ = MomentVector::Zero();
+    MomentVector source_growth_       = MomentVector::Zero();
+    MomentVector source_oxidation_    = MomentVector::Zero();
+
+    // ── HMOM-specific coagulation source breakdown ─────────────────────────────
+    //
+    // Coagulation in HMOM has discrete and continuous parts.
+    // These are HMOM-specific vectors not present in other variants.
 
     MomentVector source_coagulation_discrete_    = MomentVector::Zero();
     MomentVector source_coagulation_ss_          = MomentVector::Zero();

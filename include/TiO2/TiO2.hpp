@@ -254,6 +254,16 @@ public:
     [[nodiscard]] int    sintering_model()    const noexcept { return sintering_model_; }
     [[nodiscard]] bool   is_sintering_deferred() const noexcept { return is_sintering_deferred_; }
 
+    // ── CRTP extension points — process source storage owned by TiO2 ─────────
+    //
+    // TiO2 models: nucleation, coagulation, condensation, sintering.
+    // NOT modelled: growth, oxidation → base class returns zero span for both.
+
+    [[nodiscard]] std::span<const double> sources_nucleation_impl()   const noexcept { return { source_nucleation_.data(),   this->n_equations }; }
+    [[nodiscard]] std::span<const double> sources_coagulation_impl()  const noexcept { return { source_coagulation_.data(),  this->n_equations }; }
+    [[nodiscard]] std::span<const double> sources_condensation_impl() const noexcept { return { source_condensation_.data(), this->n_equations }; }
+    [[nodiscard]] std::span<const double> sources_sintering_impl()    const noexcept { return { source_sintering_.data(),    this->n_equations }; }
+
 	void WriteHeaderLine(MOM::OutputFileColumns& fOutput, const unsigned int precision);
 
 	void WriteOutputLine( MOM::OutputFileColumns& fOutput,
@@ -361,6 +371,16 @@ private:
     double fv_min_  = 1.e-15;   //!< [-]
     double v_min_   = 0.;       //!< [m3] set in Precalculations from nTiO2_min_
     double S_min_   = 0.;       //!< [m2/m3]
+
+    // ── Per-process source storage (owned by TiO2, not by base) ──────────────
+    //
+    // TiO2 models: nucleation, coagulation, condensation, sintering.
+    // growth and oxidation are absent; base class returns zero span for both.
+
+    MomentVector source_nucleation_   = MomentVector::Zero();
+    MomentVector source_coagulation_  = MomentVector::Zero();
+    MomentVector source_condensation_ = MomentVector::Zero();
+    MomentVector source_sintering_    = MomentVector::Zero();
 
     // ── Initial moments cache ──────────────────────────────────────────────────
     MomentVector initial_moments_cache_ = MomentVector::Zero();

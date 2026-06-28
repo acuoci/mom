@@ -135,7 +135,12 @@ TiO2<Thermo>::TiO2(const Thermo& thermo)
 template <ThermoMap Thermo>
 void TiO2<Thermo>::MemoryAllocation()
 {
-    this->ZeroSources();
+    this->ZeroSources();               // zeros source_all_, omega_gas_ (base class)
+    source_nucleation_.setZero();     // owned by TiO2 — zeroed explicitly
+    source_coagulation_.setZero();
+    source_condensation_.setZero();
+    source_sintering_.setZero();
+
     this->omega_gas_ = Eigen::VectorXd::Zero(
         static_cast<Eigen::Index>(thermo_.NumberOfSpecies()));
 
@@ -776,7 +781,11 @@ double TiO2<Thermo>::SinteringDeferredUpdate(double dt_ode)
 template <ThermoMap Thermo>
 void TiO2<Thermo>::CalculateSourceMoments() noexcept
 {
-    this->ZeroSources();
+    this->ZeroSources();               // zeros source_all_, omega_gas_ (base class)
+    source_nucleation_.setZero();     // owned by TiO2 — must be zeroed before early return
+    source_coagulation_.setZero();
+    source_condensation_.setZero();
+    source_sintering_.setZero();
 
     if (!this->is_active_) return;
 

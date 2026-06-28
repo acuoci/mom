@@ -152,9 +152,12 @@ ThreeEquations<Thermo>::ThreeEquations(const Thermo& thermo)
 template <ThermoMap Thermo>
 void ThreeEquations<Thermo>::MemoryAllocation()
 {
-    // Fixed-size source vectors (MomentVector = Eigen::Matrix<double,3,1>)
-    // are zero-initialised by the base CRTP constructor via ZeroSources().
-    this->ZeroSources();
+    this->ZeroSources();               // zeros source_all_, omega_gas_ (base class)
+    source_nucleation_.setZero();     // owned by ThreeEquations — zeroed explicitly
+    source_coagulation_.setZero();
+    source_condensation_.setZero();
+    source_growth_.setZero();
+    source_oxidation_.setZero();
 
     // Gas source vector — dynamic size (depends on mechanism).
     this->omega_gas_ = Eigen::VectorXd::Zero(
@@ -951,9 +954,12 @@ void ThreeEquations<Thermo>::OxidationSourceTerms()
 template <ThermoMap Thermo>
 void ThreeEquations<Thermo>::CalculateSourceMoments() noexcept
 {
-    // Zero all source vectors (base helper) and gas sources
-    this->ZeroSources();
-    this->omega_gas_.setZero();
+    this->ZeroSources();               // zeros source_all_, omega_gas_ (base class)
+    source_nucleation_.setZero();     // owned by ThreeEquations — zeroed explicitly
+    source_coagulation_.setZero();
+    source_condensation_.setZero();
+    source_growth_.setZero();
+    source_oxidation_.setZero();
 
     DimerConcentration();
 
