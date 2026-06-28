@@ -210,7 +210,8 @@ void HMOM<Thermo>::MemoryAllocation()
     source_coagulation_cont_ll_    = MomentVector::Zero();
     source_coagulation_all_        = MomentVector::Zero();
 
-    this->omega_gas_.assign(thermo_.NumberOfSpecies(), 0.0);
+    this->omega_gas_ = Eigen::VectorXd::Zero(
+        static_cast<Eigen::Index>(thermo_.NumberOfSpecies()));
 
     NL_   = 0.; NLVL_ = 0.; NLSL_ = 0.;
 
@@ -987,7 +988,7 @@ void HMOM<Thermo>::CalculateSourceMoments() noexcept
 template <ThermoMap Thermo>
 void HMOM<Thermo>::CalculateOmegaGas() noexcept
 {
-    std::fill(this->omega_gas_.begin(), this->omega_gas_.end(), 0.);
+    this->omega_gas_.setZero();
     if (!this->gas_consumption_) return;
 
     if (nucleation_model_ > 0 && pah_index_ >= 0) {
@@ -1027,10 +1028,10 @@ void HMOM<Thermo>::CalculateOmegaGas() noexcept
 
     if (this->dummy_species_closure_ && this->dummy_index_ >= 0) {
         double sum = 0.;
-        for (unsigned i = 0; i < this->omega_gas_.size(); ++i)
-            if (static_cast<int>(i) != this->dummy_index_)
+        for (Eigen::Index i = 0; i < this->omega_gas_.size(); ++i)
+            if (i != static_cast<Eigen::Index>(this->dummy_index_))
                 sum += this->omega_gas_[i];
-        this->omega_gas_[static_cast<unsigned>(this->dummy_index_)] = -sum;
+        this->omega_gas_[this->dummy_index_] = -sum;
     }
 }
 
@@ -1307,7 +1308,7 @@ void HMOM<Thermo>::WriteOutputLine( MOM::OutputFileColumns& fOutput,
 	fOutput << NumberOfPrimaryParticles();
 
 	// Gas consumption (formation rates)
-	fOutput << std::accumulate(this->omega_gas_.begin(), this->omega_gas_.end(), 0.);
+	fOutput << this->omega_gas_.sum();
 	fOutput << this->omega_gas_[pah_index_];
 	fOutput << this->omega_gas_[index_C2H2_];
 	fOutput << this->omega_gas_[index_H2_];

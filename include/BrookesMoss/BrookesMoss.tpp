@@ -150,7 +150,8 @@ template <ThermoMap Thermo>
 void BrookesMoss<Thermo>::MemoryAllocation()
 {
     this->ZeroSources();
-    this->omega_gas_.assign(static_cast<std::size_t>(thermo_.NumberOfSpecies()), 0.0);
+    this->omega_gas_ = Eigen::VectorXd::Zero(
+        static_cast<Eigen::Index>(thermo_.NumberOfSpecies()));
 
     // Default initial moment values
     initial_moments_cache_(0) = 1.e-21;   // Ys_init [-]
@@ -664,7 +665,7 @@ void BrookesMoss<Thermo>::OxidationSourceTerms_BMH()
 template <ThermoMap Thermo>
 void BrookesMoss<Thermo>::CalculateOmegaGas() noexcept
 {
-    std::fill(this->omega_gas_.begin(), this->omega_gas_.end(), 0.);
+    this->omega_gas_.setZero();
     if (!this->gas_consumption_) return;
 
     const int nsp = static_cast<int>(thermo_.NumberOfSpecies());
@@ -1005,7 +1006,7 @@ void BrookesMoss<Thermo>::WriteOutputLine( 	MOM::OutputFileColumns& fOutput,
 	fOutput << 0.; // np;		TODO
 
 	// Gas consumption (formation rates)
-	fOutput << std::accumulate(this->omega_gas_.begin(), this->omega_gas_.end(), 0.);
+	fOutput << this->omega_gas_.sum();
 	fOutput << this->omega_gas_[prec_index_];
 	fOutput << this->omega_gas_[sg_index_];
 	fOutput << this->omega_gas_[index_H2_];

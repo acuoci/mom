@@ -66,9 +66,10 @@ namespace MOM {
 //   zero). Each concrete derived class fills only the processes it models;
 //   the rest remain zero, which is physically correct.
 //
-// * The omega_gas_ vector (gas-phase source terms) is a std::vector<double>
+// * The omega_gas_ vector (gas-phase source terms) is an Eigen::VectorXd
 //   sized once during setup (n_species elements). It is NOT re-allocated
-//   in the hot loop.
+//   in the hot loop. Eigen provides cache-line alignment and the same
+//   setZero() / .data() API as the fixed-size source vectors.
 //
 // * The Planck absorption coefficient implementation is shared here; TiO2
 //   uses PlanckCoeffModel::None and gets 0.0 from planck_coefficient().
@@ -154,7 +155,7 @@ public:
     /// Gas-phase consumption source terms [kg/m3/s].
     /// Size = n_species; allocated once during setup.
     [[nodiscard]] std::span<const double> omega_gas() const noexcept {
-        return { omega_gas_.data(), omega_gas_.size() };
+        return { omega_gas_.data(), static_cast<std::size_t>(omega_gas_.size()) };
     }
 
     // ── Radiative properties ───────────────────────────────────────────────
@@ -218,9 +219,10 @@ protected:
 
     // ── Gas-phase source terms (sized at setup, not in hot loop) ──────────
     //
-    // Size = n_species. Pre-allocated in MemoryAllocation().
-    // NOT Eigen::VectorXd to avoid Eigen overhead on large species vectors.
-    std::vector<double> omega_gas_;
+    // Size = n_species. Allocated once in each variant's MemoryAllocation().
+    // Eigen::VectorXd gives aligned storage and a uniform API (setZero, .data,
+    // .sum) consistent with the fixed-size MomentVector members above.
+    Eigen::VectorXd omega_gas_;
 
     // ── Helpers for zero-initialising source vectors between time steps ─────
 
@@ -232,7 +234,7 @@ protected:
         source_growth_.setZero();
         source_oxidation_.setZero();
         source_sintering_.setZero();
-        std::fill(omega_gas_.begin(), omega_gas_.end(), 0.);
+        omega_gas_.setZero();
     }
 
     // ── CRTP down-cast helpers ─────────────────────────────────────────────

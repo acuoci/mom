@@ -136,7 +136,8 @@ template <ThermoMap Thermo>
 void TiO2<Thermo>::MemoryAllocation()
 {
     this->ZeroSources();
-    this->omega_gas_.assign(static_cast<std::size_t>(thermo_.NumberOfSpecies()), 0.0);
+    this->omega_gas_ = Eigen::VectorXd::Zero(
+        static_cast<Eigen::Index>(thermo_.NumberOfSpecies()));
 
     // Initial moments (IC at numerical floor values)
     const double N0  = std::max(N_min_, 0.0);
@@ -831,7 +832,7 @@ void TiO2<Thermo>::CalculateOmegaGas() noexcept
 template <ThermoMap Thermo>
 void TiO2<Thermo>::CalculateOmegaGas_internal() noexcept
 {
-    std::fill(this->omega_gas_.begin(), this->omega_gas_.end(), 0.);
+    this->omega_gas_.setZero();
 
     if (!this->gas_consumption_) return;
     if (precursor_index_ < 0)   return;
@@ -1030,7 +1031,7 @@ void TiO2<Thermo>::WriteOutputLine( 	MOM::OutputFileColumns& fOutput,
 	fOutput << np;
 
 	// Gas consumption (formation rates)
-	fOutput << std::accumulate(this->omega_gas_.begin(), this->omega_gas_.end(), 0.);
+	fOutput << this->omega_gas_.sum();
 	if (precursor_index_ >= 0)	fOutput << this->omega_gas_[precursor_index_];
 	else						fOutput << 0.0;
 	

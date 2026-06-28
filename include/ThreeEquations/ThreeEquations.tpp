@@ -157,7 +157,8 @@ void ThreeEquations<Thermo>::MemoryAllocation()
     this->ZeroSources();
 
     // Gas source vector — dynamic size (depends on mechanism).
-    this->omega_gas_.assign(static_cast<std::size_t>(thermo_.NumberOfSpecies()), 0.0);
+    this->omega_gas_ = Eigen::VectorXd::Zero(
+        static_cast<Eigen::Index>(thermo_.NumberOfSpecies()));
 }
 
 // ============================================================================
@@ -952,7 +953,7 @@ void ThreeEquations<Thermo>::CalculateSourceMoments() noexcept
 {
     // Zero all source vectors (base helper) and gas sources
     this->ZeroSources();
-    std::fill(this->omega_gas_.begin(), this->omega_gas_.end(), 0.);
+    this->omega_gas_.setZero();
 
     DimerConcentration();
 
@@ -987,7 +988,7 @@ void ThreeEquations<Thermo>::CalculateSourceMoments() noexcept
 template <ThermoMap Thermo>
 void ThreeEquations<Thermo>::CalculateOmegaGas() noexcept
 {
-    std::fill(this->omega_gas_.begin(), this->omega_gas_.end(), 0.);
+    this->omega_gas_.setZero();
     if (!this->gas_consumption_) return;
 
     const int nsp = thermo_.NumberOfSpecies();
@@ -1214,7 +1215,7 @@ void ThreeEquations<Thermo>::WriteOutputLine( 	MOM::OutputFileColumns& fOutput,
 	fOutput << np;
 
 	// Gas consumption (formation rates)
-	fOutput << std::accumulate(this->omega_gas_.begin(), this->omega_gas_.end(), 0.);
+	fOutput << this->omega_gas_.sum();
 	fOutput << this->omega_gas_[pah_index_];
 	fOutput << this->omega_gas_[index_C2H2_];
 	fOutput << this->omega_gas_[index_H2_];
