@@ -123,6 +123,12 @@ if(MOM_BUILD_TESTS)
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>)
     add_test(NAME LoopBenchmark COMMAND test_loop_benchmark)
 
+    add_executable(test_verify_all_variants tests/test_verify_all_variants.cpp)
+    target_link_libraries(test_verify_all_variants PRIVATE MOM)
+    target_compile_options(test_verify_all_variants PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>)
+    add_test(NAME VerifyAllVariants COMMAND test_verify_all_variants)
+
 endif()
 
 # Install rules --------------------------------------------------------------
