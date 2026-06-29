@@ -222,12 +222,6 @@ void MomentMethodReporter::WriteHeader(const Model& model, unsigned precision)
                   })
         model.variant_prefix_output(add_col);
 
-    // -- Block 2: Gas consumption (concept-mandated) ---------------------------
-    /*
-    out_.AddColumn("omega_gas[kg/m3/s]", precision);
-    for (const auto& name : species_names_)
-        out_.AddColumn("omega_" + name + "[kg/m3/s]", precision);
-    */
 
     // -- Block 3: Transport (concept-mandated) ---------------------------------
     out_.AddColumn("D[kg/m/s]", precision);
@@ -271,7 +265,6 @@ template <MomentMethod Model> void MomentMethodReporter::WriteRow(const Model& m
         out_ << value;
     };
 
-    out_.NewRow();
 
     // -- Block 1: Core particle state (concept-mandated) -----------------------
     out_ << model.mass_fraction();
@@ -287,13 +280,6 @@ template <MomentMethod Model> void MomentMethodReporter::WriteRow(const Model& m
                   })
         model.variant_prefix_output(add_val);
 
-    // -- Block 2: Gas consumption (concept-mandated) ---------------------------
-    /*
-    const auto og = model.omega_gas();
-    out_ << std::accumulate(og.begin(), og.end(), 0.0);
-    for (std::size_t k = 0; k < species_names_.size(); ++k)
-        out_ << (k < og.size() ? og[k] : 0.0);
-    */
 
     // -- Block 3: Transport (concept-mandated) ---------------------------------
     out_ << model.diffusion_coefficient();

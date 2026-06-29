@@ -321,7 +321,7 @@ template <ThermoMap Thermo>
 template <ThermoMap Thermo>
 [[nodiscard]] inline bool GetGasConsumption(const AnyMomentMethod<Thermo>& m) noexcept
 {
-    return std::visit([](const auto& mm) { return mm.GasConsumption(); }, m);
+    return std::visit([](const auto& mm) { return mm.gas_consumption(); }, m);
 }
 
 /**
@@ -345,28 +345,28 @@ template <ThermoMap Thermo>
 template <ThermoMap Thermo>
 [[nodiscard]] inline double GetVolumeFraction(const AnyMomentMethod<Thermo>& m) noexcept
 {
-    return std::visit([](const auto& mm) { return mm.VolumeFraction(); }, m);
+    return std::visit([](const auto& mm) { return mm.volume_fraction(); }, m);
 }
 
 /** @brief Returns the mean primary particle diameter [m]. */
 template <ThermoMap Thermo>
 [[nodiscard]] inline double GetParticleDiameter(const AnyMomentMethod<Thermo>& m) noexcept
 {
-    return std::visit([](const auto& mm) { return mm.ParticleDiameter(); }, m);
+    return std::visit([](const auto& mm) { return mm.particle_diameter(); }, m);
 }
 
 /** @brief Returns the total particle number density [#/m³]. */
 template <ThermoMap Thermo>
 [[nodiscard]] inline double GetParticleNumberDensity(const AnyMomentMethod<Thermo>& m) noexcept
 {
-    return std::visit([](const auto& mm) { return mm.ParticleNumberDensity(); }, m);
+    return std::visit([](const auto& mm) { return mm.particle_number_density(); }, m);
 }
 
 /** @brief Returns the particle mass fraction [-]. */
 template <ThermoMap Thermo>
 [[nodiscard]] inline double GetMassFraction(const AnyMomentMethod<Thermo>& m) noexcept
 {
-    return std::visit([](const auto& mm) { return mm.MassFraction(); }, m);
+    return std::visit([](const auto& mm) { return mm.mass_fraction(); }, m);
 }
 
 /** @brief Returns the particle Schmidt number [-]. */
@@ -380,7 +380,7 @@ template <ThermoMap Thermo>
 template <ThermoMap Thermo>
 [[nodiscard]] inline double GetDiffusionCoefficient(const AnyMomentMethod<Thermo>& m) noexcept
 {
-    return std::visit([](const auto& mm) { return mm.DiffusionCoefficient(); }, m);
+    return std::visit([](const auto& mm) { return mm.diffusion_coefficient(); }, m);
 }
 
 /** @brief Returns `true` if the Planck absorption coefficient should be included in radiation. */

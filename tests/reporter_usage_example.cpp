@@ -95,7 +95,10 @@ static void runStaticDispatch(Model& model,
 
         // --- Output step: reporter observes, never mutates ────────────────────
         if (cell % OUTPUT_FREQ == 0)
-            reporter.WriteRow(model); // ← pure read, fired infrequently
+        {
+			reporter.WriteRow(model); // ← pure read, fired infrequently
+			file.NewRow();
+		}
     }
 
     file.Close();
@@ -160,7 +163,10 @@ static void runRuntimeDispatch(const std::string& variant_name,
                              concrete.CalculateSourceMoments();
 
                              if (cell % OUTPUT_FREQ == 0)
-                                 reporter.WriteRow(concrete); // const& — never mutates
+                             {
+						     	reporter.WriteRow(concrete); // const& — never mutates
+								file.NewRow();
+							 }
                          }
                      });
 
