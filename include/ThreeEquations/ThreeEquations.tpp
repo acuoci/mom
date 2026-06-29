@@ -43,10 +43,6 @@
 #include <limits>
 #include <numeric>
 
-#if defined(MOM_USE_DICTIONARY)
-#include "ThreeEquations_Grammar.h"
-#endif
-
 namespace MOM
 {
 
@@ -1140,203 +1136,59 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::PrintSummary() const
 }
 
 // ============================================================================
-// SetupFromDictionary
+// SetupFromConfig
 // ============================================================================
 
-#if defined(MOM_USE_DICTIONARY)
-
 template <ThermoMap Thermo>
-template <typename Dictionary>
-std::expected<void, std::string> ThreeEquations<Thermo>::SetupFromDictionary(Dictionary& dict)
+void ThreeEquations<Thermo>::SetupFromConfig(const Config& cfg)
 {
-    ThreeEquations_Grammar grammar;
-    dict.SetGrammar(grammar);
+    this->is_active_ = cfg.is_active;
 
-    if (dict.CheckOption("@ThreeEquations"))
-        dict.ReadBool("@ThreeEquations", this->is_active_);
+    // -- PAH / gas setup ---------------------------------------------------
+    this->is_simplified_pah_mass_ = cfg.simplified_pah_mass;
+    SetPAH(cfg.pah_species);
+    this->SetGasConsumption(cfg.gas_consumption);
+    this->SetGasClosureDummySpecies(cfg.gas_closure_dummy_species);
 
-    if (dict.CheckOption("@NucleationModel"))
-    {
-        int f;
-        dict.ReadInt("@NucleationModel", f);
-        SetNucleation(f);
-    }
-    if (dict.CheckOption("@SurfaceGrowthModel"))
-    {
-        int f;
-        dict.ReadInt("@SurfaceGrowthModel", f);
-        SetSurfaceGrowth(f);
-    }
-    if (dict.CheckOption("@OxidationModel"))
-    {
-        int f;
-        dict.ReadInt("@OxidationModel", f);
-        SetOxidation(f);
-    }
-    if (dict.CheckOption("@CondensationModel"))
-    {
-        int f;
-        dict.ReadInt("@CondensationModel", f);
-        SetCondensation(f);
-    }
-    if (dict.CheckOption("@CoagulationModel"))
-    {
-        int f;
-        dict.ReadInt("@CoagulationModel", f);
-        SetCoagulation(f);
-    }
-    if (dict.CheckOption("@ThermophoreticModel"))
-    {
-        int f;
-        dict.ReadInt("@ThermophoreticModel", f);
-        this->SetThermophoreticModel(f);
-    }
-    if (dict.CheckOption("@SurfaceChemistryModel"))
-    {
-        std::string m;
-        dict.ReadString("@SurfaceChemistryModel", m);
-        try
-        {
-            SetSurfaceChemistryModel(m);
-        }
-        catch (const std::exception& e)
-        {
-            return std::unexpected(std::string(e.what()));
-        }
-    }
-    if (dict.CheckOption("@SimplifiedPAHMass"))
-        dict.ReadBool("@SimplifiedPAHMass", is_simplified_pah_mass_);
+    // -- Process models ----------------------------------------------------
+    SetNucleation(cfg.nucleation_model);
+    SetSurfaceGrowth(cfg.surface_growth_model);
+    SetOxidation(cfg.oxidation_model);
+    SetCondensation(cfg.condensation_model);
+    SetCoagulation(cfg.coagulation_model);
+    this->SetThermophoreticModel(cfg.thermophoretic_model);
+    SetSurfaceChemistryModel(cfg.surface_chemistry_model);
 
-    if (dict.CheckOption("@PAH"))
-    {
-        std::string name;
-        dict.ReadString("@PAH", name);
-        SetPAH(name);
-    }
-    if (dict.CheckOption("@GasClosureDummySpecies"))
-    {
-        std::string sp;
-        dict.ReadString("@GasClosureDummySpecies", sp);
-        try
-        {
-            SetGasClosureDummySpecies(sp);
-        }
-        catch (const std::exception& e)
-        {
-            return std::unexpected(std::string(e.what()));
-        }
-    }
-    if (dict.CheckOption("@GasConsumption"))
-    {
-        bool f;
-        dict.ReadBool("@GasConsumption", f);
-        this->SetGasConsumption(f);
-    }
-    if (dict.CheckOption("@SootDensity"))
-    {
-        double v;
-        std::string u;
-        dict.ReadMeasure("@SootDensity", v, u);
-        if (u == "kg/m3")
-        {
-        }
-        else if (u == "g/cm3")
-            v *= 1000.;
-        else
-            return std::unexpected("@SootDensity: allowed units: kg/m3 | g/cm3");
-        this->SetParticleDensity(v);
-    }
-    if (dict.CheckOption("@RadiativeHeatTransfer"))
-    {
-        bool f;
-        dict.ReadBool("@RadiativeHeatTransfer", f);
-        this->SetRadiativeHeatTransfer(f);
-    }
-    if (dict.CheckOption("@PlanckCoefficient"))
-    {
-        std::string f;
-        dict.ReadString("@PlanckCoefficient", f);
-        this->SetPlanckAbsorptionCoefficient(f);
-    }
-    if (dict.CheckOption("@SchmidtNumber"))
-    {
-        double v;
-        dict.ReadDouble("@SchmidtNumber", v);
-        this->SetSchmidtNumber(v);
-    }
-    if (dict.CheckOption("@MinimumNs"))
-    {
-        double v;
-        std::string u;
-        dict.ReadMeasure("@MinimumNs", v, u);
-        if (u == "#/m3")
-        {
-        }
-        else if (u == "#/cm3")
-            v *= 1.e6;
-        else
-            return std::unexpected("@MinimumNs: allowed units: #/m3 | #/cm3");
-        SetNsMinimum(v);
-    }
-    if (dict.CheckOption("@DimerModel"))
-    {
-        std::string m;
-        dict.ReadString("@DimerModel", m);
-        if (m == "qssa-rodrigues")
-            dimer_concentration_model_ = DimerModel::QSSA_Rodrigues;
-        else
-            return std::unexpected("@DimerModel: allowed: qssa-rodrigues");
-    }
-    if (dict.CheckOption("@epsNucleation"))
-    {
-        double v;
-        dict.ReadDouble("@epsNucleation", v);
-        SetNucleationCollisionEnhancementFactor(v);
-    }
-    if (dict.CheckOption("@epsCondensation"))
-    {
-        double v;
-        dict.ReadDouble("@epsCondensation", v);
-        SetCondensationCollisionEnhancementFactor(v);
-    }
-    if (dict.CheckOption("@epsCoagulation"))
-    {
-        double v;
-        dict.ReadDouble("@epsCoagulation", v);
-        SetCoagulationCollisionEnhancementFactor(v);
-    }
-    if (dict.CheckOption("@StickingCoefficientModel"))
-    {
-        std::string m;
-        dict.ReadString("@StickingCoefficientModel", m);
-        try
-        {
-            SetStickingCoefficientModel(m);
-        }
-        catch (const std::exception& e)
-        {
-            return std::unexpected(std::string(e.what()));
-        }
-    }
-    if (dict.CheckOption("@StickingCoefficientConstant"))
-    {
-        double v;
-        dict.ReadDouble("@StickingCoefficientConstant", v);
-        SetStickingCoefficientConstant(v);
-    }
-    if (dict.CheckOption("@CorrectionCoefficientPAHPAH"))
-    {
-        double v;
-        dict.ReadDouble("@CorrectionCoefficientPAHPAH", v);
-        SetCorrectionCoefficientPAHPAH(v);
-    }
-    if (dict.CheckOption("@DebugMode"))
-        dict.ReadBool("@DebugMode", is_debug_mode_);
+    // -- Collision enhancement factors -------------------------------------
+    SetNucleationCollisionEnhancementFactor(cfg.eps_nucleation);
+    SetCondensationCollisionEnhancementFactor(cfg.eps_condensation);
+    SetCoagulationCollisionEnhancementFactor(cfg.eps_coagulation);
+    SetCorrectionCoefficientPAHPAH(cfg.correction_coeff_pah_pah);
+
+    // -- Dimer model -------------------------------------------------------
+    if (cfg.dimer_model == "qssa-rodrigues")
+        dimer_concentration_model_ = DimerModel::QSSA_Rodrigues;
+
+    // -- Numerical floor ---------------------------------------------------
+    SetNsMinimum(cfg.ns_minimum_per_m3);
+
+    // -- Sticking coefficient ----------------------------------------------
+    SetStickingCoefficientModel(cfg.sticking_model);
+    SetStickingCoefficientConstant(cfg.sticking_coeff_constant);
+
+    // -- Particle properties -----------------------------------------------
+    this->SetParticleDensity(cfg.soot_density_kg_m3);
+
+    // -- Radiation / transport ---------------------------------------------
+    this->SetRadiativeHeatTransfer(cfg.radiative_heat_transfer);
+    this->SetPlanckAbsorptionCoefficient(cfg.planck_coefficient);
+    this->SetSchmidtNumber(cfg.schmidt_number);
+
+    // -- Debug mode --------------------------------------------------------
+    this->is_debug_mode_ = cfg.debug_mode;
 
     PrintSummary();
-    return {};
 }
-#endif // MOM_USE_DICTIONARY expected
 
 // ============================================================================
 // NDF reconstruction  (Franzelli et al. 2019: Pareto + log-normal)
@@ -1479,5 +1331,101 @@ void ThreeEquations<Thermo>::ReconstructedNDF(const Eigen::VectorXd& nu,
     for (int i = 0; i < nu.size(); ++i)
         n(i) = ReconstructedNDF(nu(i), use_reg);
 }
+
+#if defined(MOM_USE_DICTIONARY)
+// ============================================================================
+// ParseConfig — OpenSMOKE++ dictionary → ThreeEquations::Config
+// ============================================================================
+
+template <ThermoMap Thermo>
+template <typename DictType>
+std::expected<typename ThreeEquations<Thermo>::Config, std::string>
+ThreeEquations<Thermo>::ParseConfig(DictType& dict)
+{
+    ThreeEquations_Grammar grammar;
+    dict.SetGrammar(grammar);
+
+    Config cfg;
+
+    if (dict.CheckOption("@ThreeEquations"))
+        dict.ReadBool("@ThreeEquations", cfg.is_active);
+
+    if (dict.CheckOption("@NucleationModel"))    dict.ReadInt("@NucleationModel",    cfg.nucleation_model);
+    if (dict.CheckOption("@SurfaceGrowthModel")) dict.ReadInt("@SurfaceGrowthModel", cfg.surface_growth_model);
+    if (dict.CheckOption("@OxidationModel"))     dict.ReadInt("@OxidationModel",     cfg.oxidation_model);
+    if (dict.CheckOption("@CondensationModel"))  dict.ReadInt("@CondensationModel",  cfg.condensation_model);
+    if (dict.CheckOption("@CoagulationModel"))   dict.ReadInt("@CoagulationModel",   cfg.coagulation_model);
+    if (dict.CheckOption("@ThermophoreticModel")) dict.ReadInt("@ThermophoreticModel", cfg.thermophoretic_model);
+
+    if (dict.CheckOption("@SurfaceChemistryModel"))
+        dict.ReadString("@SurfaceChemistryModel", cfg.surface_chemistry_model);
+
+    if (dict.CheckOption("@SimplifiedPAHMass"))
+        dict.ReadBool("@SimplifiedPAHMass", cfg.simplified_pah_mass);
+
+    if (dict.CheckOption("@PAH"))
+        dict.ReadString("@PAH", cfg.pah_species);
+
+    if (dict.CheckOption("@GasClosureDummySpecies"))
+        dict.ReadString("@GasClosureDummySpecies", cfg.gas_closure_dummy_species);
+
+    if (dict.CheckOption("@GasConsumption"))
+        dict.ReadBool("@GasConsumption", cfg.gas_consumption);
+
+    if (dict.CheckOption("@SootDensity"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@SootDensity", v, u);
+        if (u == "kg/m3")      cfg.soot_density_kg_m3 = v;
+        else if (u == "g/cm3") cfg.soot_density_kg_m3 = v * 1000.;
+        else return std::unexpected(std::string{"@SootDensity: allowed units: kg/m3 | g/cm3"});
+    }
+
+    if (dict.CheckOption("@RadiativeHeatTransfer"))
+        dict.ReadBool("@RadiativeHeatTransfer", cfg.radiative_heat_transfer);
+
+    if (dict.CheckOption("@PlanckCoefficient"))
+        dict.ReadString("@PlanckCoefficient", cfg.planck_coefficient);
+
+    if (dict.CheckOption("@SchmidtNumber"))
+        dict.ReadDouble("@SchmidtNumber", cfg.schmidt_number);
+
+    if (dict.CheckOption("@MinimumNs"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@MinimumNs", v, u);
+        if (u == "#/m3")       cfg.ns_minimum_per_m3 = v;
+        else if (u == "#/cm3") cfg.ns_minimum_per_m3 = v * 1.e6;
+        else return std::unexpected(std::string{"@MinimumNs: allowed units: #/m3 | #/cm3"});
+    }
+
+    if (dict.CheckOption("@DimerModel"))
+    {
+        std::string m;
+        dict.ReadString("@DimerModel", m);
+        if (m != "qssa-rodrigues")
+            return std::unexpected(std::string{"@DimerModel: allowed: qssa-rodrigues"});
+        cfg.dimer_model = m;
+    }
+
+    if (dict.CheckOption("@epsNucleation"))   dict.ReadDouble("@epsNucleation",   cfg.eps_nucleation);
+    if (dict.CheckOption("@epsCondensation")) dict.ReadDouble("@epsCondensation", cfg.eps_condensation);
+    if (dict.CheckOption("@epsCoagulation"))  dict.ReadDouble("@epsCoagulation",  cfg.eps_coagulation);
+
+    if (dict.CheckOption("@StickingCoefficientModel"))
+        dict.ReadString("@StickingCoefficientModel", cfg.sticking_model);
+
+    if (dict.CheckOption("@StickingCoefficientConstant"))
+        dict.ReadDouble("@StickingCoefficientConstant", cfg.sticking_coeff_constant);
+
+    if (dict.CheckOption("@CorrectionCoefficientPAHPAH"))
+        dict.ReadDouble("@CorrectionCoefficientPAHPAH", cfg.correction_coeff_pah_pah);
+
+    if (dict.CheckOption("@DebugMode"))
+        dict.ReadBool("@DebugMode", cfg.debug_mode);
+
+    return cfg;
+}
+#endif // MOM_USE_DICTIONARY
 
 } // namespace MOM

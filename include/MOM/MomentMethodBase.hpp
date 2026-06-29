@@ -405,7 +405,7 @@ protected:
 
     // -- Common control flags -----------------------------------------------
 
-    bool is_active_                = false; //!< True after successful SetupFromDictionary().
+    bool is_active_                = false; //!< True after successful SetupFromConfig() or Set*() setup.
     bool gas_consumption_          = true;  //!< True if omega_gas_ is computed.
     bool radiative_heat_transfer_  = false; //!< True if planck_coefficient() > 0.
     bool is_closure_dummy_species_ = false; //!< True if a closure dummy species is set.

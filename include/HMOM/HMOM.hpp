@@ -40,14 +40,15 @@
 #include <span>
 #include <string>
 #include <string_view>
-#if defined(MOM_USE_DICTIONARY)
-#include <expected>
-#endif
 
 #include "Eigen/Dense"
 
 #include "MOM/MomentMethodBase.hpp"
 #include "MOM/ThermoProxy.hpp"
+
+#if defined(MOM_USE_DICTIONARY)
+#include <expected> // std::expected / std::unexpected — C++23, only with MOM_USE_DICTIONARY
+#endif
 
 namespace MOM
 {
@@ -147,12 +148,83 @@ public:
         double collision_diameter; //!< Aggregate collision diameter dc [m].
     };
 
+    // -- Configuration struct ------------------------------------------------
+
+    /**
+     * @struct Config
+     * @brief Plain configuration parameters for the HMOM variant.
+     *
+     * All fields carry defaults that reproduce the post-constructor state.
+     * Pass a default-constructed @c Config to `SetupFromConfig()` to apply
+     * the library defaults without any input file.
+     *
+     * @note No external dependencies: only standard C++ types.
+     */
+    struct Config
+    {
+        // ---- Activation / PAH setup ----------------------------------------
+        bool        is_active           = true;    //!< Enable this variant
+        std::string pah_species         = "C2H2";  //!< PAH growth species name
+        bool        simplified_pah_mass = false;   //!< Use Nc × WC instead of full PAH MW
+
+        // ---- Geometry models -----------------------------------------------
+        int fractal_diameter_model   = 1; //!< Fractal diameter model index   [1 = default]
+        int collision_diameter_model = 2; //!< Collision diameter model index [2 = default]
+
+        // ---- Soot/particle properties --------------------------------------
+        double soot_density_kg_m3       = 1800.;   //!< Soot density                [kg/m³]
+        double surface_density_per_m2   = 1.7e19;  //!< Active surface site density [#/m²]
+        bool   surface_density_correction = false;  //!< Temperature-dependent χ correction
+        double surf_dens_a1 = 12.65;    //!< Correction coefficient A1 [-]
+        double surf_dens_a2 =  0.00563; //!< Correction coefficient A2 [1/K]
+        double surf_dens_b1 =  1.38;    //!< Correction coefficient B1 [-]
+        double surf_dens_b2 =  0.00069; //!< Correction coefficient B2 [1/K]
+
+        // ---- Process model selection (integer codes) -----------------------
+        int nucleation_model             = 1; //!< Nucleation model
+        int condensation_model           = 1; //!< Condensation model
+        int surface_growth_model         = 1; //!< Surface growth model (HACA)
+        int oxidation_model              = 1; //!< Oxidation model
+        int coagulation_model            = 1; //!< Coagulation (free-molecular) model
+        int continuous_coagulation_model = 1; //!< Coagulation (continuum) model
+        int thermophoretic_model         = 1; //!< Thermophoretic model
+
+        // ---- Sticking coefficient ------------------------------------------
+        std::string sticking_model          = "constant"; //!< "constant" or "golaut"
+        double      sticking_coeff_constant = 2.e-3;      //!< Constant sticking coefficient [-]
+
+        // ---- Gas consumption / closure -------------------------------------
+        bool        gas_consumption           = true;   //!< Consume gas-phase species
+        std::string gas_closure_dummy_species = "none"; //!< Dummy mass-closure species
+
+        // ---- Radiation -----------------------------------------------------
+        bool        radiative_heat_transfer = true;     //!< Optically-thin radiation
+        std::string planck_coefficient      = "Smooke"; //!< Planck mean absorption coefficient
+
+        // ---- Transport -----------------------------------------------------
+        double schmidt_number = 50.; //!< Soot Schmidt number
+
+        // ---- HACA kinetics (A in cm³/mol/s, E in kJ/mol) ------------------
+        double A1f = 6.72e1;  double n1f =  3.33; double E1f =   6.09;
+        double A1b = 6.44e-1; double n1b =  3.79; double E1b =  27.96;
+        double A2f = 1.00e8;  double n2f =  1.80; double E2f =  68.42;
+        double A2b = 8.68e4;  double n2b =  2.36; double E2b =  25.46;
+        double A3f = 1.13e16; double n3f = -0.06; double E3f = 476.05;
+        double A3b = 4.17e13; double n3b =  0.15; double E3b =   0.00;
+        double A4  = 2.52e9;  double n4  =  1.10; double E4  =  17.13;
+        double A5  = 2.20e12; double n5  =  0.00; double E5  =  31.38;
+        double efficiency6 = 0.13; //!< R6 third-body efficiency [-]
+
+        // ---- Debug ---------------------------------------------------------
+        bool debug_mode = false; //!< Verbose diagnostic output
+    };
+
     // -- Construction --------------------------------------------------------
 
     /**
      * @brief Constructs HMOM bound to the given thermodynamics map.
      *
-     * Does not allocate computational memory.  Call `SetupFromDictionary()` or
+     * Does not allocate computational memory.  Call `SetupFromConfig()` or
      * the individual `Set*` methods, then call `CalculateSourceMoments()` each
      * cell iteration.
      *
@@ -165,20 +237,38 @@ public:
     HMOM(HMOM&&)                 = default; ///< Move-constructible for placement in std::variant.
     HMOM& operator=(HMOM&&)      = default;
 
+    /**
+     * @brief Configure all HMOM parameters from a plain configuration struct.
+     *
+     * Applies every field of @p cfg by calling the corresponding `Set*()`
+     * methods.  This is the primary programmatic setup path; it has no
+     * dependency on external parsing frameworks.
+     *
+     * Calling this method is equivalent to calling the individual `Set*()`
+     * methods in the same order, followed by `PrintSummary()`.
+     *
+     * @param cfg  Configuration struct.  Default-constructed @c Config
+     *             reproduces the constructor defaults exactly.
+     */
+    void SetupFromConfig(const Config& cfg);
+
 #if defined(MOM_USE_DICTIONARY)
     /**
-     * @brief Configure all HMOM parameters from a key-value dictionary.
+     * @brief Parse an OpenSMOKE++ dictionary into an HMOM Config.
      *
-     * Reads PAH species, surface chemistry model, process flags, collision
-     * enhancement factors, and soot density from the dictionary.
+     * Reads every HMOM grammar key from @p dict, performs unit conversions
+     * (kg/m³ ↔ g/cm³, kJ/mol → stored as kJ/mol, etc.) and returns the
+     * populated struct.
      *
-     * @tparam Dictionary  Any type exposing `GetValue(key)` and `GetList(key)`.
-     * @return `std::expected<void, std::string>` — the error string describes
-     *         the first missing or malformed key; never throws.
+     * @tparam DictType  OpenSMOKE++ dictionary type.  The concrete type is
+     *                   provided by the caller; this header does not include
+     *                   any OpenSMOKE++ headers.
+     * @param  dict      Mutable reference to the dictionary to parse.
+     * @return           Populated @c Config on success; error string on failure.
      */
-    template <typename Dictionary>
-    [[nodiscard]] std::expected<void, std::string> SetupFromDictionary(Dictionary& dict);
-#endif
+    template <typename DictType>
+    [[nodiscard]] static std::expected<Config, std::string> ParseConfig(DictType& dict);
+#endif // MOM_USE_DICTIONARY
 
     // -- MomentMethod concept — state injection -------------------------------
 
@@ -908,6 +998,13 @@ private:
 };
 
 } // namespace MOM
+
+#if defined(MOM_USE_DICTIONARY)
+// Grammar header — pulls in OpenSMOKE++ internals.  Included only when
+// MOM_USE_DICTIONARY is defined so that the core library stays dependency-free.
+// Must appear before HMOM.tpp, where ParseConfig<> is defined.
+#include "HMOM_Grammar.h"
+#endif
 
 #if !defined(MOM_COMPILED_LIBRARY)
 #include "HMOM.tpp"

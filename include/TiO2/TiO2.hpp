@@ -38,14 +38,15 @@
 #include <span>
 #include <string>
 #include <string_view>
-#if defined(MOM_USE_DICTIONARY)
-#include <expected>
-#endif
 
 #include "Eigen/Dense"
 
 #include "MOM/MomentMethodBase.hpp"
 #include "MOM/ThermoProxy.hpp"
+
+#if defined(MOM_USE_DICTIONARY)
+#include <expected>
+#endif
 
 namespace MOM
 {
@@ -137,6 +138,60 @@ public:
         double mu;      //!< Log-normal location parameter μ [log(m³)].
     };
 
+    // -- Configuration struct ------------------------------------------------
+
+    /**
+     * @struct Config
+     * @brief Plain configuration parameters for the TiO2 variant.
+     *
+     * The @c nucleation_model field uses strings matching the grammar convention:
+     * @c "none" | @c "binary" (default) | @c "fixed-cluster".
+     * @note No external dependencies: only standard C++ types.
+     */
+    struct Config
+    {
+        // ---- Activation / precursor ----------------------------------------
+        bool        is_active         = true;   //!< Enable this variant
+        std::string precursor_species = "none"; //!< TiO2 precursor species
+
+        // ---- Gas consumption / closure -------------------------------------
+        bool        gas_consumption           = false;  //!< Consume gas-phase species
+        std::string gas_closure_dummy_species = "none"; //!< Dummy mass-closure species
+
+        // ---- Process model selection ---------------------------------------
+        /// Nucleation model: "none" | "binary" (default) | "fixed-cluster"
+        std::string nucleation_model = "binary";
+        int sintering_model          = 1; //!< Sintering model index
+        int coagulation_model        = 1; //!< Coagulation model index
+        int condensation_model       = 1; //!< Condensation model index
+        int thermophoretic_model     = 1; //!< Thermophoretic model index
+
+        // ---- Particle cluster sizes ----------------------------------------
+        int minimum_tio2_units            = 2; //!< Minimum TiO2 units per aggregate
+        int nucleated_particle_tio2_units = 5; //!< TiO2 units per nucleated particle
+
+        // ---- Sintering kinetics: τ_s = As · d_p^ns / T^ns · exp(Ts/T) ----
+        double sintering_As_s_K_m = 7.44e16;  //!< Pre-exponential [s,K,m]
+        double sintering_Ts_K     = -31000.;  //!< Activation temperature [K] (negative = Arrhenius)
+        double sintering_ns       =  1.0;     //!< Temperature/size exponent [-]
+
+        // ---- Sintering numerical regularisation ----------------------------
+        bool   sintering_deferred    = false;  //!< Defer sintering to operator-split step
+        double sintering_dp_min_m    = 2.e-9;  //!< Diameter below which sintering inactive [m]
+        double sintering_tau_min_s   = 1.e-10; //!< Minimum sintering time-scale [s]
+        double sintering_k_max_per_s = 1.e6;   //!< Maximum sintering rate [1/s]
+
+        // ---- Numerical floors ----------------------------------------------
+        double ns_minimum_per_m3 = 1.e3;   //!< Minimum number density floor [#/m³]
+        double fv_minimum        = 1.e-16; //!< Minimum volume fraction floor [-]
+
+        // ---- Transport -----------------------------------------------------
+        double schmidt_number = 50.; //!< Schmidt number for moment transport
+
+        // ---- Debug ---------------------------------------------------------
+        bool debug_mode = false; //!< Verbose diagnostic output
+    };
+
     // -- Construction ---------------------------------------------------------
 
     explicit TiO2(const Thermo& thermo);
@@ -146,9 +201,25 @@ public:
     TiO2(TiO2&&)                 = default;
     TiO2& operator=(TiO2&&)      = default;
 
+    /**
+     * @brief Configure all TiO2 parameters from a plain configuration struct.
+     *
+     * Applies every field of @p cfg by calling the corresponding `Set*()`
+     * methods or direct member assignment where no setter exists, followed
+     * by `PrintSummary()`.  No dependency on external parsing frameworks.
+     *
+     * @param cfg  Configuration struct.  Default-constructed @c Config
+     *             reproduces the constructor defaults.
+     */
+    void SetupFromConfig(const Config& cfg);
+
 #if defined(MOM_USE_DICTIONARY)
-    template <typename Dictionary>
-    [[nodiscard]] std::expected<void, std::string> SetupFromDictionary(Dictionary& dict);
+    /**
+     * @brief Parse an OpenSMOKE++ dictionary into a TiO2 Config.
+     * @tparam DictType  OpenSMOKE++ dictionary type — no include-time dependency.
+     */
+    template <typename DictType>
+    [[nodiscard]] static std::expected<Config, std::string> ParseConfig(DictType& dict);
 #endif
 
     // -- MomentMethod concept — state injection --------------------------------
@@ -498,6 +569,10 @@ private:
 };
 
 } // namespace MOM
+
+#if defined(MOM_USE_DICTIONARY)
+#include "TiO2_Grammar.h"
+#endif
 
 #if !defined(MOM_COMPILED_LIBRARY)
 #include "TiO2.tpp"

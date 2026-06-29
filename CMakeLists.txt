@@ -32,11 +32,10 @@ else()
     endif()
 endif()
 
-# Detect std::expected (C++23) -----------------------------------------------
-include(CheckIncludeFileCXX)
-set(CMAKE_REQUIRED_FLAGS "-std=c++23")
-check_include_file_cxx("expected" HAVE_STD_EXPECTED)
-unset(CMAKE_REQUIRED_FLAGS)
+# std::expected (C++23) is used only in ParseConfig<> template bodies, which
+# live at the bottom of each variant's .tpp and are compiled only when
+# MOM_USE_DICTIONARY=ON.  The core library targets C++20; the dictionary
+# build upgrades to C++23 below.
 
 # Helper: apply common settings to a MOM target ------------------------------
 function(mom_configure_target tgt access)
@@ -44,12 +43,7 @@ function(mom_configure_target tgt access)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
     target_link_libraries(${tgt} ${access} Eigen3::Eigen)
-
-    if(HAVE_STD_EXPECTED)
-        target_compile_features(${tgt} ${access} cxx_std_23)
-    else()
-        target_compile_features(${tgt} ${access} cxx_std_20)
-    endif()
+    target_compile_features(${tgt} ${access} cxx_std_20)
 endfunction()
 
 # MOM_headers: header-only INTERFACE target ---------------------------------
@@ -58,25 +52,34 @@ add_library(MOM_headers INTERFACE)
 mom_configure_target(MOM_headers INTERFACE)
 
 # MOM: compiled library (static or shared) ----------------------------------
+#
+# Core sources — compiled unconditionally; no dependency on OpenSMOKE++.
 set(_MOM_SOURCES
     src/ThreeEquations/ThreeEquations_BasicThermoData.cpp
     src/HMOM/HMOM_BasicThermoData.cpp
     src/BrookesMoss/BrookesMoss_BasicThermoData.cpp
     src/TiO2/TiO2_BasicThermoData.cpp
-    src/ThreeEquations/ThreeEquations_Grammar.cpp
-    src/HMOM/HMOM_Grammar.cpp
-    src/BrookesMoss/BrookesMoss_Grammar.cpp
-    src/TiO2/TiO2_Grammar.cpp
-	src/Utilities/OutputFileColumns.cpp
+    src/Utilities/OutputFileColumns.cpp
 )
 
 # Dictionary support ---------------------------------------------------------
+#
+# Grammar sources define DefineRules() for each variant's OpenSMOKE++ grammar.
+# They include Grammar headers which pull in OpenSMOKE++ headers, so they must
+# only be compiled when MOM_USE_DICTIONARY=ON and DICTIONARY_DIR is available.
 if(MOM_USE_DICTIONARY)
     if(NOT DEFINED DICTIONARY_DIR)
         message(FATAL_ERROR
             "MOM_USE_DICTIONARY=ON requires DICTIONARY_DIR to be set.\n"
             "Example: -DDICTIONARY_DIR=/path/to/dictionary")
     endif()
+
+    list(APPEND _MOM_SOURCES
+        src/ThreeEquations/ThreeEquations_Grammar.cpp
+        src/HMOM/HMOM_Grammar.cpp
+        src/BrookesMoss/BrookesMoss_Grammar.cpp
+        src/TiO2/TiO2_Grammar.cpp
+    )
 
     message(STATUS "MOM: Dictionary support enabled")
     message(STATUS "     Dictionary path : ${DICTIONARY_DIR}")
@@ -98,9 +101,12 @@ target_compile_definitions(MOM INTERFACE MOM_COMPILED_LIBRARY)
 if(MOM_USE_DICTIONARY)
     target_include_directories(MOM PUBLIC ${DICTIONARY_DIR}/include)
     target_link_libraries(MOM PUBLIC "${DICTIONARY_DIR}/build/libdictionary_parser.a")
-    
-    # This is the important definition for your #ifdef in .cpp/.hpp files
+
+    # Expose MOM_USE_DICTIONARY so variant headers activate ParseConfig<> and Grammar includes.
     target_compile_definitions(MOM PUBLIC MOM_USE_DICTIONARY)
+
+    # ParseConfig<> uses std::expected — upgrade to C++23 for dictionary builds.
+    target_compile_features(MOM PUBLIC cxx_std_23)
 endif()
 
 # Compiler warnings (only for our own sources)
@@ -176,12 +182,10 @@ endif()
 message(STATUS "")
 message(STATUS "MOM library configuration:")
 message(STATUS "  Library type     : ${_MOM_LIB_TYPE}")
-message(STATUS "  C++ standard     : ${CMAKE_CXX_STANDARD}")
-message(STATUS "  std::expected    : ${HAVE_STD_EXPECTED}")
+message(STATUS "  C++ standard     : C++20 (C++23 when MOM_USE_DICTIONARY=ON)")
 message(STATUS "  Dictionary       : ${MOM_USE_DICTIONARY}")
 if(MOM_USE_DICTIONARY)
     message(STATUS "    Dictionary dir : ${DICTIONARY_DIR}")
-    message(STATUS "    MOM_USE_DICTIONARY : ON")
 endif()
 message(STATUS "  Build tests      : ${MOM_BUILD_TESTS}")
 message(STATUS "  Install rules    : ${MOM_INSTALL}")

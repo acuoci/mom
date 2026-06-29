@@ -44,17 +44,3 @@ namespace MOM
 template class HMOM<BasicThermoData>;
 }
 
-#if defined(MOM_USE_DICTIONARY)
-
-#include "Dictionary.h"
-#include "DictionaryManager.h"
-#include "DictionaryGrammar.h"
-#include "DictionaryKeyWord.h"
-
-namespace MOM
-{
-template std::expected<void, std::string>
-HMOM<BasicThermoData>::SetupFromDictionary<OpenSMOKEpp::Dictionary>(OpenSMOKEpp::Dictionary& dict);
-}
-
-#endif // MOM_USE_DICTIONARY expected

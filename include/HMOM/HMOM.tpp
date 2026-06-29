@@ -42,9 +42,6 @@
 #include <limits>
 #include <span>
 #include <numeric>
-#if defined(MOM_USE_DICTIONARY)
-#include "HMOM_Grammar.h"
-#endif
 
 namespace MOM
 {
@@ -1289,394 +1286,74 @@ void HMOM<Thermo>::Properties(
 }
 
 // ============================================================================
-// SetupFromDictionary
+// SetupFromConfig
 // ============================================================================
 
-#if defined(MOM_USE_DICTIONARY)
-
+/**
+ * @brief Apply a plain HMOM::Config to this model instance.
+ *
+ * All Set*() methods are called unconditionally (they take the config value,
+ * which defaults to the constructor default when not overridden by the caller).
+ * After all parameters are applied, PrintSummary() emits the configuration log.
+ */
 template <ThermoMap Thermo>
-template <typename Dictionary>
-std::expected<void, std::string> HMOM<Thermo>::SetupFromDictionary(Dictionary& dict)
+void HMOM<Thermo>::SetupFromConfig(const Config& cfg)
 {
-    HMOM_Grammar grammar;
-    dict.SetGrammar(grammar);
+    this->is_active_ = cfg.is_active;
 
-    if (dict.CheckOption("@HMOM") == true)
-        dict.ReadBool("@HMOM", this->is_active_);
+    // -- Geometry models ---------------------------------------------------
+    this->SetFractalDiameterModel(cfg.fractal_diameter_model);
+    this->SetCollisionDiameterModel(cfg.collision_diameter_model);
 
-    if (dict.CheckOption("@FractalDiameterModel") == true)
-    {
-        int flag;
-        dict.ReadInt("@FractalDiameterModel", flag);
-        this->SetFractalDiameterModel(flag);
-    }
+    // -- PAH / gas setup ---------------------------------------------------
+    this->is_simplified_pah_mass_ = cfg.simplified_pah_mass;
+    this->SetPAH(cfg.pah_species);
+    this->SetGasConsumption(cfg.gas_consumption);
+    this->SetGasClosureDummySpecies(cfg.gas_closure_dummy_species);
 
-    if (dict.CheckOption("@CollisionDiameterModel") == true)
-    {
-        int flag;
-        dict.ReadInt("@CollisionDiameterModel", flag);
-        this->SetCollisionDiameterModel(flag);
-    }
+    // -- Process models ----------------------------------------------------
+    this->SetNucleation(cfg.nucleation_model);
+    this->SetSurfaceGrowth(cfg.surface_growth_model);
+    this->SetOxidation(cfg.oxidation_model);
+    this->SetCondensation(cfg.condensation_model);
+    this->SetCoagulation(cfg.coagulation_model);
+    this->SetCoagulationContinuous(cfg.continuous_coagulation_model);
+    this->SetThermophoreticModel(cfg.thermophoretic_model);
 
-    if (dict.CheckOption("@GasClosureDummySpecies") == true)
-    {
-        std::string species;
-        dict.ReadString("@GasClosureDummySpecies", species);
-        this->SetGasClosureDummySpecies(species);
-    }
+    // -- Radiation / transport ---------------------------------------------
+    this->SetRadiativeHeatTransfer(cfg.radiative_heat_transfer);
+    this->SetPlanckAbsorptionCoefficient(cfg.planck_coefficient);
+    this->SetSchmidtNumber(cfg.schmidt_number);
 
-    if (dict.CheckOption("@GasConsumption") == true)
-    {
-        bool flag;
-        dict.ReadBool("@GasConsumption", flag);
-        this->SetGasConsumption(flag);
-    }
+    // -- Particle properties -----------------------------------------------
+    this->SetParticleDensity(cfg.soot_density_kg_m3);
+    this->SetSurfaceDensity(cfg.surface_density_per_m2);
+    this->SetSurfaceDensityCorrectionCoefficient(cfg.surface_density_correction);
+    this->SetSurfaceDensityCorrectionCoefficientA1(cfg.surf_dens_a1);
+    this->SetSurfaceDensityCorrectionCoefficientA2(cfg.surf_dens_a2);
+    this->SetSurfaceDensityCorrectionCoefficientB1(cfg.surf_dens_b1);
+    this->SetSurfaceDensityCorrectionCoefficientB2(cfg.surf_dens_b2);
 
-    if (dict.CheckOption("@SimplifiedPAHMass") == true)
-        dict.ReadBool("@SimplifiedPAHMass", this->is_simplified_pah_mass_);
+    // -- Sticking coefficient ----------------------------------------------
+    this->SetStickingCoefficientModel(cfg.sticking_model);
+    this->SetStickingCoefficientConstant(cfg.sticking_coeff_constant);
 
-    if (dict.CheckOption("@PAH") == true)
-    {
-        std::string name;
-        dict.ReadString("@PAH", name);
-        this->SetPAH(name);
-    }
+    // -- HACA kinetics (A in cm³/mol/s; SetE* converts kJ/mol → K) --------
+    this->SetA1f(cfg.A1f);  this->Setn1f(cfg.n1f);  this->SetE1f(cfg.E1f);
+    this->SetA1b(cfg.A1b);  this->Setn1b(cfg.n1b);  this->SetE1b(cfg.E1b);
+    this->SetA2f(cfg.A2f);  this->Setn2f(cfg.n2f);  this->SetE2f(cfg.E2f);
+    this->SetA2b(cfg.A2b);  this->Setn2b(cfg.n2b);  this->SetE2b(cfg.E2b);
+    this->SetA3f(cfg.A3f);  this->Setn3f(cfg.n3f);  this->SetE3f(cfg.E3f);
+    this->SetA3b(cfg.A3b);  this->Setn3b(cfg.n3b);  this->SetE3b(cfg.E3b);
+    this->SetA4(cfg.A4);    this->Setn4(cfg.n4);     this->SetE4(cfg.E4);
+    this->SetA5(cfg.A5);    this->Setn5(cfg.n5);     this->SetE5(cfg.E5);
+    this->eff6_ = cfg.efficiency6;
 
-    if (dict.CheckOption("@NucleationModel") == true)
-    {
-        int flag;
-        dict.ReadInt("@NucleationModel", flag);
-        this->SetNucleation(flag);
-    }
-
-    if (dict.CheckOption("@SurfaceGrowthModel") == true)
-    {
-        int flag;
-        dict.ReadInt("@SurfaceGrowthModel", flag);
-        this->SetSurfaceGrowth(flag);
-    }
-
-    if (dict.CheckOption("@OxidationModel") == true)
-    {
-        int flag;
-        dict.ReadInt("@OxidationModel", flag);
-        this->SetOxidation(flag);
-    }
-
-    if (dict.CheckOption("@CondensationModel") == true)
-    {
-        int flag;
-        dict.ReadInt("@CondensationModel", flag);
-        this->SetCondensation(flag);
-    }
-
-    if (dict.CheckOption("@CoagulationModel") == true)
-    {
-        int flag;
-        dict.ReadInt("@CoagulationModel", flag);
-        this->SetCoagulation(flag);
-    }
-
-    if (dict.CheckOption("@ContinuousCoagulationModel") == true)
-    {
-        int flag;
-        dict.ReadInt("@ContinuousCoagulationModel", flag);
-        this->SetCoagulationContinuous(flag);
-    }
-
-    if (dict.CheckOption("@ThermophoreticModel") == true)
-    {
-        int flag;
-        dict.ReadInt("@ThermophoreticModel", flag);
-        this->SetThermophoreticModel(flag);
-    }
-
-    if (dict.CheckOption("@RadiativeHeatTransfer") == true)
-        dict.ReadBool("@RadiativeHeatTransfer", this->radiative_heat_transfer_);
-
-    if (dict.CheckOption("@PlanckCoefficient") == true)
-    {
-        std::string flag;
-        dict.ReadString("@PlanckCoefficient", flag);
-        this->SetPlanckAbsorptionCoefficient(flag);
-    }
-
-    if (dict.CheckOption("@SchmidtNumber") == true)
-    {
-        double value;
-        dict.ReadDouble("@SchmidtNumber", value);
-        this->SetSchmidtNumber(value);
-    }
-
-    if (dict.CheckOption("@SootDensity") == true)
-    {
-        double value;
-        std::string units;
-        dict.ReadMeasure("@SootDensity", value, units);
-
-        if (units == "kg/m3")
-            value = value;
-        else if (units == "g/cm3")
-            value *= 1000.;
-        else
-            return std::unexpected("@SootDensity: allowed units kg/m3 | g/cm3");
-
-        this->SetParticleDensity(value);
-    }
-
-    if (dict.CheckOption("@SurfaceDensity") == true)
-    {
-        double value;
-        std::string units;
-        dict.ReadMeasure("@SurfaceDensity", value, units);
-
-        if (units == "#/m2")
-            value = value;
-        else if (units == "#/cm2")
-            value *= 1.e4;
-        else if (units == "#/mm2")
-            value *= 1.e6;
-        else
-            return std::unexpected("@SurfaceDensity: allowed units #/m2 | #/cm2 | #/mm2");
-
-        this->SetSurfaceDensity(value);
-    }
-
-    if (dict.CheckOption("@SurfaceDensityCorrectionCoefficient") == true)
-    {
-        bool value;
-        dict.ReadBool("@SurfaceDensityCorrectionCoefficient", value);
-        this->SetSurfaceDensityCorrectionCoefficient(value);
-    }
-
-    if (dict.CheckOption("@SurfaceDensityCorrectionCoefficientA1") == true)
-    {
-        double value;
-        dict.ReadDouble("@SurfaceDensityCorrectionCoefficientA1", value);
-        this->SetSurfaceDensityCorrectionCoefficientA1(value);
-    }
-
-    if (dict.CheckOption("@SurfaceDensityCorrectionCoefficientA2") == true)
-    {
-        double value;
-        dict.ReadDouble("@SurfaceDensityCorrectionCoefficientA2", value);
-        this->SetSurfaceDensityCorrectionCoefficientA2(value);
-    }
-
-    if (dict.CheckOption("@SurfaceDensityCorrectionCoefficientB1") == true)
-    {
-        double value;
-        dict.ReadDouble("@SurfaceDensityCorrectionCoefficientB1", value);
-        this->SetSurfaceDensityCorrectionCoefficientB1(value);
-    }
-
-    if (dict.CheckOption("@SurfaceDensityCorrectionCoefficientB2") == true)
-    {
-        double value;
-        dict.ReadDouble("@SurfaceDensityCorrectionCoefficientB2", value);
-        this->SetSurfaceDensityCorrectionCoefficientB2(value);
-    }
-
-    // Frequency factors
-    {
-        double value;
-        std::string units;
-
-        if (dict.CheckOption("@A1f") == true)
-        {
-            dict.ReadMeasure("@A1f", value, units);
-            if (units != "cm3,mol,s")
-                return std::unexpected("Allowed frequency factor units: cm3,mol,s");
-            this->A1f_ = value;
-        }
-        if (dict.CheckOption("@A1b") == true)
-        {
-            dict.ReadMeasure("@A1b", value, units);
-            if (units != "cm3,mol,s")
-                return std::unexpected("Allowed frequency factor units: cm3,mol,s");
-            this->A1b_ = value;
-        }
-        if (dict.CheckOption("@A2f") == true)
-        {
-            dict.ReadMeasure("@A2f", value, units);
-            if (units != "cm3,mol,s")
-                return std::unexpected("Allowed frequency factor units: cm3,mol,s");
-            this->A2f_ = value;
-        }
-        if (dict.CheckOption("@A2b") == true)
-        {
-            dict.ReadMeasure("@A2b", value, units);
-            if (units != "cm3,mol,s")
-                return std::unexpected("Allowed frequency factor units: cm3,mol,s");
-            this->A2b_ = value;
-        }
-        if (dict.CheckOption("@A3f") == true)
-        {
-            dict.ReadMeasure("@A3f", value, units);
-            if (units != "cm3,mol,s")
-                return std::unexpected("Allowed frequency factor units: cm3,mol,s");
-            this->A3f_ = value;
-        }
-        if (dict.CheckOption("@A3b") == true)
-        {
-            dict.ReadMeasure("@A3b", value, units);
-            if (units != "cm3,mol,s")
-                return std::unexpected("Allowed frequency factor units: cm3,mol,s");
-            this->A3b_ = value;
-        }
-        if (dict.CheckOption("@A4") == true)
-        {
-            dict.ReadMeasure("@A4", value, units);
-            if (units != "cm3,mol,s")
-                return std::unexpected("Allowed frequency factor units: cm3,mol,s");
-            this->A4_ = value;
-        }
-        if (dict.CheckOption("@A5") == true)
-        {
-            dict.ReadMeasure("@A5", value, units);
-            if (units != "cm3,mol,s")
-                return std::unexpected("Allowed frequency factor units: cm3,mol,s");
-            this->A5_ = value;
-        }
-    }
-
-    // Activation energies
-    {
-        double value;
-        std::string units;
-
-        if (dict.CheckOption("@E1f") == true)
-        {
-            dict.ReadMeasure("@E1f", value, units);
-            if (units != "kJ/mol")
-                return std::unexpected("Allowed activation energy units: kJ/mol");
-            this->E1f_ = value * 1e3 / this->Rgas_;
-        }
-        if (dict.CheckOption("@E1b") == true)
-        {
-            dict.ReadMeasure("@E1b", value, units);
-            if (units != "kJ/mol")
-                return std::unexpected("Allowed activation energy units: kJ/mol");
-            this->E1b_ = value * 1e3 / this->Rgas_;
-        }
-        if (dict.CheckOption("@E2f") == true)
-        {
-            dict.ReadMeasure("@E2f", value, units);
-            if (units != "kJ/mol")
-                return std::unexpected("Allowed activation energy units: kJ/mol");
-            this->E2f_ = value * 1e3 / this->Rgas_;
-        }
-        if (dict.CheckOption("@E2b") == true)
-        {
-            dict.ReadMeasure("@E2b", value, units);
-            if (units != "kJ/mol")
-                return std::unexpected("Allowed activation energy units: kJ/mol");
-            this->E2b_ = value * 1e3 / this->Rgas_;
-        }
-        if (dict.CheckOption("@E3f") == true)
-        {
-            dict.ReadMeasure("@E3f", value, units);
-            if (units != "kJ/mol")
-                return std::unexpected("Allowed activation energy units: kJ/mol");
-            this->E3f_ = value * 1e3 / this->Rgas_;
-        }
-        if (dict.CheckOption("@E3b") == true)
-        {
-            dict.ReadMeasure("@E3b", value, units);
-            if (units != "kJ/mol")
-                return std::unexpected("Allowed activation energy units: kJ/mol");
-            this->E3b_ = value * 1e3 / this->Rgas_;
-        }
-        if (dict.CheckOption("@E4") == true)
-        {
-            dict.ReadMeasure("@E4", value, units);
-            if (units != "kJ/mol")
-                return std::unexpected("Allowed activation energy units: kJ/mol");
-            this->E4_ = value * 1e3 / this->Rgas_;
-        }
-        if (dict.CheckOption("@E5") == true)
-        {
-            dict.ReadMeasure("@E5", value, units);
-            if (units != "kJ/mol")
-                return std::unexpected("Allowed activation energy units: kJ/mol");
-            this->E5_ = value * 1e3 / this->Rgas_;
-        }
-    }
-
-    // Temperature exponents
-    {
-        double value;
-
-        if (dict.CheckOption("@n1f") == true)
-        {
-            dict.ReadDouble("@n1f", value);
-            this->n1f_ = value;
-        }
-        if (dict.CheckOption("@n1b") == true)
-        {
-            dict.ReadDouble("@n1b", value);
-            this->n1b_ = value;
-        }
-        if (dict.CheckOption("@n2f") == true)
-        {
-            dict.ReadDouble("@n2f", value);
-            this->n2f_ = value;
-        }
-        if (dict.CheckOption("@n2b") == true)
-        {
-            dict.ReadDouble("@n2b", value);
-            this->n2b_ = value;
-        }
-        if (dict.CheckOption("@n3f") == true)
-        {
-            dict.ReadDouble("@n3f", value);
-            this->n3f_ = value;
-        }
-        if (dict.CheckOption("@n3b") == true)
-        {
-            dict.ReadDouble("@n3b", value);
-            this->n3b_ = value;
-        }
-        if (dict.CheckOption("@n4") == true)
-        {
-            dict.ReadDouble("@n4", value);
-            this->n4_ = value;
-        }
-        if (dict.CheckOption("@n5") == true)
-        {
-            dict.ReadDouble("@n5", value);
-            this->n5_ = value;
-        }
-    }
-
-    if (dict.CheckOption("@Efficiency6") == true)
-    {
-        double value;
-        dict.ReadDouble("@Efficiency6", value);
-        this->eff6_ = value;
-    }
-
-    if (dict.CheckOption("@StickingCoefficientModel") == true)
-    {
-        std::string model;
-        dict.ReadString("@StickingCoefficientModel", model);
-        this->SetStickingCoefficientModel(model);
-    }
-
-    if (dict.CheckOption("@StickingCoefficientConstant") == true)
-    {
-        double value;
-        dict.ReadDouble("@StickingCoefficientConstant", value);
-        this->SetStickingCoefficientConstant(value);
-    }
-
-    if (dict.CheckOption("@DebugMode") == true)
-        dict.ReadBool("@DebugMode", this->is_debug_mode_);
+    // -- Debug mode --------------------------------------------------------
+    this->is_debug_mode_ = cfg.debug_mode;
 
     PrintSummary();
-    return {};
 }
-#endif // MOM_USE_DICTIONARY expected
 
 // ============================================================================
 // NDF two-node reconstruction
@@ -2045,5 +1722,176 @@ template <ThermoMap Thermo> void HMOM<Thermo>::PrintSummary() const
               << " Sc=" << this->schmidt_number_ << "  sticking=" << sticking_coeff_constant_ << "\n"
               << "-------------------------------------------------------------------\n\n";
 }
+
+#if defined(MOM_USE_DICTIONARY)
+// ============================================================================
+// ParseConfig — OpenSMOKE++ dictionary → HMOM::Config
+// ============================================================================
+//
+// HMOM_Grammar.h is included at the bottom of HMOM.hpp (before this .tpp),
+// so HMOM_Grammar is visible here only when MOM_USE_DICTIONARY is defined.
+
+template <ThermoMap Thermo>
+template <typename DictType>
+std::expected<typename HMOM<Thermo>::Config, std::string>
+HMOM<Thermo>::ParseConfig(DictType& dict)
+{
+    HMOM_Grammar grammar;
+    dict.SetGrammar(grammar);
+
+    Config cfg; // start from library defaults
+
+    if (dict.CheckOption("@HMOM"))
+        dict.ReadBool("@HMOM", cfg.is_active);
+
+    if (dict.CheckOption("@FractalDiameterModel"))
+        dict.ReadInt("@FractalDiameterModel", cfg.fractal_diameter_model);
+
+    if (dict.CheckOption("@CollisionDiameterModel"))
+        dict.ReadInt("@CollisionDiameterModel", cfg.collision_diameter_model);
+
+    if (dict.CheckOption("@GasClosureDummySpecies"))
+        dict.ReadString("@GasClosureDummySpecies", cfg.gas_closure_dummy_species);
+
+    if (dict.CheckOption("@GasConsumption"))
+        dict.ReadBool("@GasConsumption", cfg.gas_consumption);
+
+    if (dict.CheckOption("@SimplifiedPAHMass"))
+        dict.ReadBool("@SimplifiedPAHMass", cfg.simplified_pah_mass);
+
+    if (dict.CheckOption("@PAH"))
+        dict.ReadString("@PAH", cfg.pah_species);
+
+    if (dict.CheckOption("@NucleationModel"))
+        dict.ReadInt("@NucleationModel", cfg.nucleation_model);
+
+    if (dict.CheckOption("@SurfaceGrowthModel"))
+        dict.ReadInt("@SurfaceGrowthModel", cfg.surface_growth_model);
+
+    if (dict.CheckOption("@OxidationModel"))
+        dict.ReadInt("@OxidationModel", cfg.oxidation_model);
+
+    if (dict.CheckOption("@CondensationModel"))
+        dict.ReadInt("@CondensationModel", cfg.condensation_model);
+
+    if (dict.CheckOption("@CoagulationModel"))
+        dict.ReadInt("@CoagulationModel", cfg.coagulation_model);
+
+    if (dict.CheckOption("@ContinuousCoagulationModel"))
+        dict.ReadInt("@ContinuousCoagulationModel", cfg.continuous_coagulation_model);
+
+    if (dict.CheckOption("@ThermophoreticModel"))
+        dict.ReadInt("@ThermophoreticModel", cfg.thermophoretic_model);
+
+    if (dict.CheckOption("@RadiativeHeatTransfer"))
+        dict.ReadBool("@RadiativeHeatTransfer", cfg.radiative_heat_transfer);
+
+    if (dict.CheckOption("@PlanckCoefficient"))
+        dict.ReadString("@PlanckCoefficient", cfg.planck_coefficient);
+
+    if (dict.CheckOption("@SchmidtNumber"))
+        dict.ReadDouble("@SchmidtNumber", cfg.schmidt_number);
+
+    if (dict.CheckOption("@SootDensity"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@SootDensity", v, u);
+        if (u == "kg/m3")      cfg.soot_density_kg_m3 = v;
+        else if (u == "g/cm3") cfg.soot_density_kg_m3 = v * 1000.;
+        else return std::unexpected(std::string{"@SootDensity: allowed units: kg/m3 | g/cm3"});
+    }
+
+    if (dict.CheckOption("@SurfaceDensity"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@SurfaceDensity", v, u);
+        if (u == "#/m2")       cfg.surface_density_per_m2 = v;
+        else if (u == "#/cm2") cfg.surface_density_per_m2 = v * 1.e4;
+        else if (u == "#/mm2") cfg.surface_density_per_m2 = v * 1.e6;
+        else return std::unexpected(std::string{"@SurfaceDensity: allowed units: #/m2 | #/cm2 | #/mm2"});
+    }
+
+    if (dict.CheckOption("@SurfaceDensityCorrectionCoefficient"))
+        dict.ReadBool("@SurfaceDensityCorrectionCoefficient", cfg.surface_density_correction);
+    if (dict.CheckOption("@SurfaceDensityCorrectionCoefficientA1"))
+        dict.ReadDouble("@SurfaceDensityCorrectionCoefficientA1", cfg.surf_dens_a1);
+    if (dict.CheckOption("@SurfaceDensityCorrectionCoefficientA2"))
+        dict.ReadDouble("@SurfaceDensityCorrectionCoefficientA2", cfg.surf_dens_a2);
+    if (dict.CheckOption("@SurfaceDensityCorrectionCoefficientB1"))
+        dict.ReadDouble("@SurfaceDensityCorrectionCoefficientB1", cfg.surf_dens_b1);
+    if (dict.CheckOption("@SurfaceDensityCorrectionCoefficientB2"))
+        dict.ReadDouble("@SurfaceDensityCorrectionCoefficientB2", cfg.surf_dens_b2);
+
+    // HACA frequency factors [cm³/mol/s]
+    {
+        double v; std::string u;
+        auto readA = [&](const char* key, double& field) -> std::expected<void, std::string>
+        {
+            if (dict.CheckOption(key)) {
+                dict.ReadMeasure(key, v, u);
+                if (u != "cm3,mol,s")
+                    return std::unexpected(std::string{key} + ": allowed units: cm3,mol,s");
+                field = v;
+            }
+            return {};
+        };
+        if (auto r = readA("@A1f", cfg.A1f); !r) return std::unexpected(r.error());
+        if (auto r = readA("@A1b", cfg.A1b); !r) return std::unexpected(r.error());
+        if (auto r = readA("@A2f", cfg.A2f); !r) return std::unexpected(r.error());
+        if (auto r = readA("@A2b", cfg.A2b); !r) return std::unexpected(r.error());
+        if (auto r = readA("@A3f", cfg.A3f); !r) return std::unexpected(r.error());
+        if (auto r = readA("@A3b", cfg.A3b); !r) return std::unexpected(r.error());
+        if (auto r = readA("@A4",  cfg.A4);  !r) return std::unexpected(r.error());
+        if (auto r = readA("@A5",  cfg.A5);  !r) return std::unexpected(r.error());
+    }
+
+    // HACA activation energies [kJ/mol] — stored as kJ/mol; SetE*() converts internally
+    {
+        double v; std::string u;
+        auto readE = [&](const char* key, double& field) -> std::expected<void, std::string>
+        {
+            if (dict.CheckOption(key)) {
+                dict.ReadMeasure(key, v, u);
+                if (u != "kJ/mol")
+                    return std::unexpected(std::string{key} + ": allowed units: kJ/mol");
+                field = v;
+            }
+            return {};
+        };
+        if (auto r = readE("@E1f", cfg.E1f); !r) return std::unexpected(r.error());
+        if (auto r = readE("@E1b", cfg.E1b); !r) return std::unexpected(r.error());
+        if (auto r = readE("@E2f", cfg.E2f); !r) return std::unexpected(r.error());
+        if (auto r = readE("@E2b", cfg.E2b); !r) return std::unexpected(r.error());
+        if (auto r = readE("@E3f", cfg.E3f); !r) return std::unexpected(r.error());
+        if (auto r = readE("@E3b", cfg.E3b); !r) return std::unexpected(r.error());
+        if (auto r = readE("@E4",  cfg.E4);  !r) return std::unexpected(r.error());
+        if (auto r = readE("@E5",  cfg.E5);  !r) return std::unexpected(r.error());
+    }
+
+    // Temperature exponents
+    if (dict.CheckOption("@n1f")) dict.ReadDouble("@n1f", cfg.n1f);
+    if (dict.CheckOption("@n1b")) dict.ReadDouble("@n1b", cfg.n1b);
+    if (dict.CheckOption("@n2f")) dict.ReadDouble("@n2f", cfg.n2f);
+    if (dict.CheckOption("@n2b")) dict.ReadDouble("@n2b", cfg.n2b);
+    if (dict.CheckOption("@n3f")) dict.ReadDouble("@n3f", cfg.n3f);
+    if (dict.CheckOption("@n3b")) dict.ReadDouble("@n3b", cfg.n3b);
+    if (dict.CheckOption("@n4"))  dict.ReadDouble("@n4",  cfg.n4);
+    if (dict.CheckOption("@n5"))  dict.ReadDouble("@n5",  cfg.n5);
+
+    if (dict.CheckOption("@Efficiency6"))
+        dict.ReadDouble("@Efficiency6", cfg.efficiency6);
+
+    if (dict.CheckOption("@StickingCoefficientModel"))
+        dict.ReadString("@StickingCoefficientModel", cfg.sticking_model);
+
+    if (dict.CheckOption("@StickingCoefficientConstant"))
+        dict.ReadDouble("@StickingCoefficientConstant", cfg.sticking_coeff_constant);
+
+    if (dict.CheckOption("@DebugMode"))
+        dict.ReadBool("@DebugMode", cfg.debug_mode);
+
+    return cfg;
+}
+#endif // MOM_USE_DICTIONARY
 
 } // namespace MOM

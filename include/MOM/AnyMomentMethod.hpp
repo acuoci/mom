@@ -41,6 +41,9 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#if defined(MOM_USE_DICTIONARY)
+#include <expected>
+#endif
 
 // -- Project headers -----------------------------------------------------------
 // MomVariantList.hpp is the single authoritative registry of all variants.

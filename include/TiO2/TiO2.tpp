@@ -43,10 +43,6 @@
 #include <limits>
 #include <span>
 #include <numeric>
-#if defined(MOM_USE_DICTIONARY)
-#include "TiO2_Grammar.h"
-#endif
-
 namespace MOM
 {
 
@@ -941,216 +937,63 @@ template <ThermoMap Thermo> void TiO2<Thermo>::PrintSummary() const
 }
 
 // ============================================================================
-// SetupFromDictionary
+// SetupFromConfig
 // ============================================================================
 
-#if defined(MOM_USE_DICTIONARY)
-
 template <ThermoMap Thermo>
-template <typename Dictionary>
-std::expected<void, std::string> TiO2<Thermo>::SetupFromDictionary(Dictionary& dict)
+void TiO2<Thermo>::SetupFromConfig(const Config& cfg)
 {
-    TiO2_Grammar grammar;
-    dict.SetGrammar(grammar);
+    this->is_active_ = cfg.is_active;
 
-    if (dict.CheckOption("@TiO2") == true)
-        dict.ReadBool("@TiO2", this->is_active_);
+    // -- Precursor / gas setup ---------------------------------------------
+    if (cfg.precursor_species != "none")
+        this->SetPrecursor(cfg.precursor_species);
+    this->SetGasClosureDummySpecies(cfg.gas_closure_dummy_species);
+    this->SetGasConsumption(cfg.gas_consumption);
 
-    if (dict.CheckOption("@Precursor") == true)
-    {
-        dict.ReadString("@Precursor", this->precursor_species_);
-        this->SetPrecursor(this->precursor_species_);
-    }
+    // -- Nucleation model (string → enum → int) ----------------------------
+    if (cfg.nucleation_model == "none" || cfg.nucleation_model == "0")
+        this->SetNucleation(static_cast<int>(NucleationVariant::Off));
+    else if (cfg.nucleation_model == "binary" || cfg.nucleation_model == "1")
+        this->SetNucleation(static_cast<int>(NucleationVariant::Binary));
+    else if (cfg.nucleation_model == "fixed-cluster" || cfg.nucleation_model == "2")
+        this->SetNucleation(static_cast<int>(NucleationVariant::FixedCluster));
 
-    if (dict.CheckOption("@GasClosureDummySpecies") == true)
-    {
-        std::string species;
-        dict.ReadString("@GasClosureDummySpecies", species);
-        this->SetGasClosureDummySpecies(species);
-    }
+    // -- Other process models ----------------------------------------------
+    this->SetSintering(cfg.sintering_model);
+    this->SetCoagulation(cfg.coagulation_model);
+    this->SetCondensation(cfg.condensation_model);
+    this->SetThermophoreticModel(cfg.thermophoretic_model);
 
-    if (dict.CheckOption("@GasConsumption") == true)
-    {
-        bool flag;
-        dict.ReadBool("@GasConsumption", flag);
-        this->SetGasConsumption(flag);
-    }
+    // -- Cluster sizes -----------------------------------------------------
+    this->SetMinimumNumberOfTiO2Units(static_cast<unsigned int>(cfg.minimum_tio2_units));
+    this->SetNumberOfTiO2UnitsPerNucleatedParticle(
+        static_cast<unsigned int>(cfg.nucleated_particle_tio2_units));
 
-    if (dict.CheckOption("@NucleationModel") == true)
-    {
-        std::string value;
-        dict.ReadString("@NucleationModel", value);
+    // -- Sintering kinetics ------------------------------------------------
+    As_  = cfg.sintering_As_s_K_m;
+    Ts_  = cfg.sintering_Ts_K;
+    ns_  = cfg.sintering_ns;
 
-        if (value == "none" || value == "0")
-            nucleation_variant_ = NucleationVariant::Off;
-        else if (value == "binary" || value == "1")
-            nucleation_variant_ = NucleationVariant::Binary;
-        else if (value == "fixed-cluster" || value == "2")
-            nucleation_variant_ = NucleationVariant::FixedCluster;
-        else
-            return std::unexpected("Unknown @NucleationModel: " + value);
+    // -- Sintering regularisation ------------------------------------------
+    is_sintering_deferred_ = cfg.sintering_deferred;
+    sintering_dp_min_      = cfg.sintering_dp_min_m;
+    sintering_tau_min_     = cfg.sintering_tau_min_s;
+    sintering_k_max_       = cfg.sintering_k_max_per_s;
 
-        this->SetNucleation(static_cast<int>(nucleation_variant_));
-    }
+    // -- Numerical floors --------------------------------------------------
+    N_min_  = cfg.ns_minimum_per_m3;
+    fv_min_ = cfg.fv_minimum;
+    Precalculations(); // recompute geometry that depends on N_min_
 
-    if (dict.CheckOption("@SinteringModel") == true)
-    {
-        int flag;
-        dict.ReadInt("@SinteringModel", flag);
-        this->SetSintering(flag);
-    }
+    // -- Transport ---------------------------------------------------------
+    this->SetSchmidtNumber(cfg.schmidt_number);
 
-    if (dict.CheckOption("@CoagulationModel") == true)
-    {
-        int flag;
-        dict.ReadInt("@CoagulationModel", flag);
-        this->SetCoagulation(flag);
-    }
-
-    if (dict.CheckOption("@CondensationModel") == true)
-    {
-        int flag;
-        dict.ReadInt("@CondensationModel", flag);
-        this->SetCondensation(flag);
-    }
-
-    if (dict.CheckOption("@ThermophoreticModel") == true)
-    {
-        int flag;
-        dict.ReadInt("@ThermophoreticModel", flag);
-        this->SetThermophoreticModel(flag);
-    }
-
-    if (dict.CheckOption("@MinimumTiO2Units") == true)
-    {
-        int n;
-        dict.ReadInt("@MinimumTiO2Units", n);
-        this->SetMinimumNumberOfTiO2Units(static_cast<unsigned int>(n));
-    }
-
-    if (dict.CheckOption("@NucleatedParticleTiO2Units") == true)
-    {
-        int n;
-        dict.ReadInt("@NucleatedParticleTiO2Units", n);
-        this->SetNumberOfTiO2UnitsPerNucleatedParticle(static_cast<unsigned int>(n));
-    }
-
-    if (dict.CheckOption("@SinteringDeferred") == true)
-        dict.ReadBool("@SinteringDeferred", this->is_sintering_deferred_);
-
-    if (dict.CheckOption("@SinteringDpMinimum") == true)
-    {
-        double value;
-        std::string units;
-        dict.ReadMeasure("@SinteringDpMinimum", value, units);
-        if (units == "m")
-            this->sintering_dp_min_ = value;
-        else if (units == "mm")
-            this->sintering_dp_min_ = value * 1.e-3;
-        else
-            return std::unexpected("Allowed units for @SinteringDpMinimum: m | mm");
-    }
-
-    if (dict.CheckOption("@SinteringTauMinimum") == true)
-    {
-        double value;
-        std::string units;
-        dict.ReadMeasure("@SinteringTauMinimum", value, units);
-        if (units == "s")
-            this->sintering_tau_min_ = value;
-        else
-            return std::unexpected("Allowed units for @SinteringTauMinimum: s");
-    }
-
-    if (dict.CheckOption("@SinteringKMaximum") == true)
-    {
-        double value;
-        std::string units;
-        dict.ReadMeasure("@SinteringKMaximum", value, units);
-        if (units == "1/s")
-            this->sintering_k_max_ = value;
-        else
-            return std::unexpected("Allowed units for @SinteringKMaximum: 1/s");
-    }
-
-    // Frequency factors
-    {
-        double value;
-        std::string units;
-
-        if (dict.CheckOption("@As") == true)
-        {
-            dict.ReadMeasure("@As", value, units);
-            if (units != "s,K,m")
-                return std::unexpected("Allowed frequency factor units: s,K");
-            this->As_ = value;
-        }
-    }
-
-    // Activation temperatures
-    {
-        double value;
-        std::string units;
-
-        if (dict.CheckOption("@Ts") == true)
-        {
-            dict.ReadMeasure("@Ts", value, units);
-            if (units != "K")
-                return std::unexpected("Allowed activation temperature units: K");
-            this->Ts_ = value;
-        }
-    }
-
-    // Temperature exponents
-    {
-        double value;
-
-        if (dict.CheckOption("@ns") == true)
-        {
-            dict.ReadDouble("@ns", value);
-            this->ns_ = value;
-        }
-    }
-
-    if (dict.CheckOption("@SchmidtNumber") == true)
-    {
-        double value;
-        dict.ReadDouble("@SchmidtNumber", value);
-        this->SetSchmidtNumber(value);
-    }
-
-    // Minimum values for properties calculation
-    if (dict.CheckOption("@MinimumNs") == true)
-    {
-        double value;
-        std::string units;
-
-        dict.ReadMeasure("@MinimumNs", value, units);
-        if (units == "#/m3")
-            this->N_min_ = value;
-        else if (units == "#/cm3")
-            this->N_min_ *= 1.e6;
-        else
-            return std::unexpected("Allowed units for @MinimumNs: #/m3 | #/cm3");
-
-        Precalculations();
-    }
-
-    // Minimum values for properties calculation
-    if (dict.CheckOption("@MinimumFv") == true)
-    {
-        double value;
-        dict.ReadDouble("@MinimumFv", value);
-        this->fv_min_ = value;
-    }
-
-    if (dict.CheckOption("@DebugMode") == true)
-        dict.ReadBool("@DebugMode", this->is_debug_mode_);
+    // -- Debug mode --------------------------------------------------------
+    this->is_debug_mode_ = cfg.debug_mode;
 
     PrintSummary();
-    return {};
 }
-#endif // MOM_USE_DICTIONARY expected
 
 // ============================================================================
 // NDF reconstruction  (Pareto + log-normal, analogous to ThreeEquations)
@@ -1296,5 +1139,121 @@ void TiO2<Thermo>::ReconstructedNDF(const Eigen::VectorXd& nu,
     for (int i = 0; i < nu.size(); ++i)
         n(i) = ReconstructedNDF(nu(i), use_regularized_moments);
 }
+
+#if defined(MOM_USE_DICTIONARY)
+// ============================================================================
+// ParseConfig — OpenSMOKE++ dictionary → TiO2::Config
+// ============================================================================
+
+template <ThermoMap Thermo>
+template <typename DictType>
+std::expected<typename TiO2<Thermo>::Config, std::string>
+TiO2<Thermo>::ParseConfig(DictType& dict)
+{
+    TiO2_Grammar grammar;
+    dict.SetGrammar(grammar);
+
+    Config cfg;
+
+    if (dict.CheckOption("@TiO2"))
+        dict.ReadBool("@TiO2", cfg.is_active);
+
+    if (dict.CheckOption("@Precursor"))
+        dict.ReadString("@Precursor", cfg.precursor_species);
+
+    if (dict.CheckOption("@GasClosureDummySpecies"))
+        dict.ReadString("@GasClosureDummySpecies", cfg.gas_closure_dummy_species);
+
+    if (dict.CheckOption("@GasConsumption"))
+        dict.ReadBool("@GasConsumption", cfg.gas_consumption);
+
+    if (dict.CheckOption("@NucleationModel"))
+        dict.ReadString("@NucleationModel", cfg.nucleation_model);
+
+    if (dict.CheckOption("@SinteringModel"))    dict.ReadInt("@SinteringModel",    cfg.sintering_model);
+    if (dict.CheckOption("@CoagulationModel"))  dict.ReadInt("@CoagulationModel",  cfg.coagulation_model);
+    if (dict.CheckOption("@CondensationModel")) dict.ReadInt("@CondensationModel", cfg.condensation_model);
+    if (dict.CheckOption("@ThermophoreticModel")) dict.ReadInt("@ThermophoreticModel", cfg.thermophoretic_model);
+
+    if (dict.CheckOption("@MinimumTiO2Units"))
+    {
+        int n; dict.ReadInt("@MinimumTiO2Units", n);
+        cfg.minimum_tio2_units = n;
+    }
+
+    if (dict.CheckOption("@NucleatedParticleTiO2Units"))
+    {
+        int n; dict.ReadInt("@NucleatedParticleTiO2Units", n);
+        cfg.nucleated_particle_tio2_units = n;
+    }
+
+    if (dict.CheckOption("@SinteringDeferred"))
+        dict.ReadBool("@SinteringDeferred", cfg.sintering_deferred);
+
+    if (dict.CheckOption("@SinteringDpMinimum"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@SinteringDpMinimum", v, u);
+        if (u == "m")       cfg.sintering_dp_min_m = v;
+        else if (u == "mm") cfg.sintering_dp_min_m = v * 1.e-3;
+        else return std::unexpected(std::string{"@SinteringDpMinimum: allowed units: m | mm"});
+    }
+
+    if (dict.CheckOption("@SinteringTauMinimum"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@SinteringTauMinimum", v, u);
+        if (u != "s") return std::unexpected(std::string{"@SinteringTauMinimum: allowed units: s"});
+        cfg.sintering_tau_min_s = v;
+    }
+
+    if (dict.CheckOption("@SinteringKMaximum"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@SinteringKMaximum", v, u);
+        if (u != "1/s") return std::unexpected(std::string{"@SinteringKMaximum: allowed units: 1/s"});
+        cfg.sintering_k_max_per_s = v;
+    }
+
+    if (dict.CheckOption("@As"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@As", v, u);
+        if (u != "s,K,m") return std::unexpected(std::string{"@As: allowed units: s,K,m"});
+        cfg.sintering_As_s_K_m = v;
+    }
+
+    if (dict.CheckOption("@Ts"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@Ts", v, u);
+        if (u != "K") return std::unexpected(std::string{"@Ts: allowed units: K"});
+        cfg.sintering_Ts_K = v;
+    }
+
+    if (dict.CheckOption("@ns"))
+        dict.ReadDouble("@ns", cfg.sintering_ns);
+
+    if (dict.CheckOption("@SchmidtNumber"))
+        dict.ReadDouble("@SchmidtNumber", cfg.schmidt_number);
+
+    if (dict.CheckOption("@MinimumNs"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@MinimumNs", v, u);
+        if (u == "#/m3")       cfg.ns_minimum_per_m3 = v;
+        else if (u == "#/cm3") cfg.ns_minimum_per_m3 = v * 1.e6;
+        else return std::unexpected(std::string{"@MinimumNs: allowed units: #/m3 | #/cm3"});
+    }
+
+    if (dict.CheckOption("@MinimumFv"))
+        dict.ReadDouble("@MinimumFv", cfg.fv_minimum);
+
+    if (dict.CheckOption("@DebugMode"))
+        dict.ReadBool("@DebugMode", cfg.debug_mode);
+
+    return cfg;
+}
+#endif // MOM_USE_DICTIONARY
 
 } // namespace MOM

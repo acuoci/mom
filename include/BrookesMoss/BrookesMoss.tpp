@@ -42,10 +42,6 @@
 #include <cmath>
 #include <limits>
 #include <numeric>
-#if defined(MOM_USE_DICTIONARY)
-#include "BrookesMoss_Grammar.h"
-#endif
-
 namespace MOM
 {
 
@@ -879,268 +875,205 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::PrintSummary() const
 }
 
 // ============================================================================
-// SetupFromDictionary
+// SetupFromConfig
 // ============================================================================
 
+template <ThermoMap Thermo>
+void BrookesMoss<Thermo>::SetupFromConfig(const Config& cfg)
+{
+    this->is_active_ = cfg.is_active;
+
+    // -- Process models ----------------------------------------------------
+    this->SetNucleation(cfg.nucleation_model);
+    this->SetSurfaceGrowth(cfg.surface_growth_model);
+    this->SetOxidation(cfg.oxidation_model);
+    SetCoagulation(cfg.coagulation_model);
+    this->SetThermophoreticModel(cfg.thermophoretic_model);
+
+    // -- Gas species -------------------------------------------------------
+    this->SetPrecursors(cfg.precursors_species);
+    this->SetSurfaceGrowthSpecies(cfg.surface_growth_species);
+    this->SetGasClosureDummySpecies(cfg.gas_closure_dummy_species);
+    this->SetGasConsumption(cfg.gas_consumption);
+
+    // -- Particle properties -----------------------------------------------
+    this->SetParticleDensity(cfg.soot_density_kg_m3);
+    this->SetDp(cfg.soot_particle_diameter_m);
+    this->SetMWp(cfg.soot_particle_mw_kg_kmol);
+    this->SetNsNorm(cfg.ns_norm);
+
+    // -- Kinetic constants (direct member assignment — no setters) ----------
+    Calpha_  = cfg.calpha;
+    Talpha_  = cfg.talpha;
+    Cbeta_   = cfg.cbeta;
+    Cgamma_  = cfg.cgamma;
+    Tgamma_  = cfg.tgamma;
+    Comega_  = cfg.comega;
+    etaColl_ = cfg.eta_coll;
+    Coxid_   = cfg.coxid;
+    exp_l_   = cfg.nucleation_exponent;
+    exp_m_   = cfg.sg_exponent1;
+    exp_n_   = cfg.sg_exponent2;
+
+    // -- Radiation / transport ---------------------------------------------
+    this->SetRadiativeHeatTransfer(cfg.radiative_heat_transfer);
+    this->SetPlanckAbsorptionCoefficient(cfg.planck_coefficient);
+    this->SetSchmidtNumber(cfg.schmidt_number);
+
+    PrintSummary();
+}
+
 #if defined(MOM_USE_DICTIONARY)
+// ============================================================================
+// ParseConfig — OpenSMOKE++ dictionary → BrookesMoss::Config
+// ============================================================================
 
 template <ThermoMap Thermo>
-template <typename Dictionary>
-std::expected<void, std::string> BrookesMoss<Thermo>::SetupFromDictionary(Dictionary& dict)
+template <typename DictType>
+std::expected<typename BrookesMoss<Thermo>::Config, std::string>
+BrookesMoss<Thermo>::ParseConfig(DictType& dict)
 {
     BrookesMoss_Grammar grammar;
     dict.SetGrammar(grammar);
 
-    if (dict.CheckOption("@BrookesMoss") == true)
-        dict.ReadBool("@BrookesMoss", this->is_active_);
+    Config cfg;
 
-    if (dict.CheckOption("@NucleationModel") == true)
+    if (dict.CheckOption("@BrookesMoss"))
+        dict.ReadBool("@BrookesMoss", cfg.is_active);
+
+    if (dict.CheckOption("@NucleationModel"))
     {
         std::string name;
         dict.ReadString("@NucleationModel", name);
-        if (name == "0" || name == "none")
-            this->SetNucleation(0);
-        else if (name == "1" || name == "BrookesMoss")
-            this->SetNucleation(1);
-        else if (name == "2" || name == "BrookesMossHall")
-            this->SetNucleation(2);
-        else
-            return std::unexpected(
-                "@NucleationModel: allowed options: 0=none, 1=BrookesMoss, 2=BrookesMossHall");
+        if      (name == "0" || name == "none")           cfg.nucleation_model = 0;
+        else if (name == "1" || name == "BrookesMoss")    cfg.nucleation_model = 1;
+        else if (name == "2" || name == "BrookesMossHall") cfg.nucleation_model = 2;
+        else return std::unexpected(std::string{
+            "@NucleationModel: allowed: 0=none, 1=BrookesMoss, 2=BrookesMossHall"});
     }
 
-    if (dict.CheckOption("@SurfaceGrowthModel") == true)
-    {
-        int flag;
-        dict.ReadInt("@SurfaceGrowthModel", flag);
-        this->SetSurfaceGrowth(flag);
-    }
+    if (dict.CheckOption("@SurfaceGrowthModel"))
+        dict.ReadInt("@SurfaceGrowthModel", cfg.surface_growth_model);
 
-    if (dict.CheckOption("@OxidationModel") == true)
+    if (dict.CheckOption("@OxidationModel"))
     {
         std::string name;
         dict.ReadString("@OxidationModel", name);
-        if (name == "0" || name == "none")
-            this->SetOxidation(0);
-        else if (name == "1" || name == "BrookesMoss")
-            this->SetOxidation(1);
-        else if (name == "2" || name == "BrookesMossHall")
-            this->SetOxidation(2);
-        else
-            return std::unexpected(
-                "@OxidationModel: allowed options: 0=none, 1=BrookesMoss, 2=BrookesMossHall");
+        if      (name == "0" || name == "none")           cfg.oxidation_model = 0;
+        else if (name == "1" || name == "BrookesMoss")    cfg.oxidation_model = 1;
+        else if (name == "2" || name == "BrookesMossHall") cfg.oxidation_model = 2;
+        else return std::unexpected(std::string{
+            "@OxidationModel: allowed: 0=none, 1=BrookesMoss, 2=BrookesMossHall"});
     }
 
-    if (dict.CheckOption("@CoagulationModel") == true)
+    if (dict.CheckOption("@CoagulationModel"))    dict.ReadInt("@CoagulationModel",    cfg.coagulation_model);
+    if (dict.CheckOption("@ThermophoreticModel")) dict.ReadInt("@ThermophoreticModel", cfg.thermophoretic_model);
+
+    if (dict.CheckOption("@Precursors"))            dict.ReadString("@Precursors",            cfg.precursors_species);
+    if (dict.CheckOption("@SurfaceGrowthSpecies"))  dict.ReadString("@SurfaceGrowthSpecies",  cfg.surface_growth_species);
+    if (dict.CheckOption("@GasClosureDummySpecies")) dict.ReadString("@GasClosureDummySpecies", cfg.gas_closure_dummy_species);
+
+    if (dict.CheckOption("@GasConsumption"))
+        dict.ReadBool("@GasConsumption", cfg.gas_consumption);
+
+    if (dict.CheckOption("@SootDensity"))
     {
-        int flag;
-        dict.ReadInt("@CoagulationModel", flag);
-        SetCoagulation(flag);
+        double v; std::string u;
+        dict.ReadMeasure("@SootDensity", v, u);
+        if (u == "kg/m3")      cfg.soot_density_kg_m3 = v;
+        else if (u == "g/cm3") cfg.soot_density_kg_m3 = v * 1000.;
+        else return std::unexpected(std::string{"@SootDensity: allowed units: kg/m3 | g/cm3"});
     }
 
-    if (dict.CheckOption("@ThermophoreticModel") == true)
+    if (dict.CheckOption("@SootParticleDiameter"))
     {
-        int flag;
-        dict.ReadInt("@ThermophoreticModel", flag);
-        this->SetThermophoreticModel(flag);
+        double v; std::string u;
+        dict.ReadMeasure("@SootParticleDiameter", v, u);
+        if (u == "m")       cfg.soot_particle_diameter_m = v;
+        else if (u == "mm") cfg.soot_particle_diameter_m = v * 1.e-3;
+        else if (u == "nm") cfg.soot_particle_diameter_m = v * 1.e-9;
+        else return std::unexpected(std::string{"@SootParticleDiameter: allowed units: m | mm | nm"});
     }
 
-    if (dict.CheckOption("@Precursors") == true)
+    if (dict.CheckOption("@SootParticleMolecularWeight"))
     {
-        dict.ReadString("@Precursors", prec_species_);
-        this->SetPrecursors(prec_species_);
+        double v; std::string u;
+        dict.ReadMeasure("@SootParticleMolecularWeight", v, u);
+        if (u == "kg/kmol" || u == "g/mol") cfg.soot_particle_mw_kg_kmol = v;
+        else return std::unexpected(std::string{
+            "@SootParticleMolecularWeight: allowed units: kg/kmol | g/mol"});
     }
 
-    if (dict.CheckOption("@SurfaceGrowthSpecies") == true)
+    if (dict.CheckOption("@RadiativeHeatTransfer"))
+        dict.ReadBool("@RadiativeHeatTransfer", cfg.radiative_heat_transfer);
+
+    if (dict.CheckOption("@PlanckCoefficient"))
+        dict.ReadString("@PlanckCoefficient", cfg.planck_coefficient);
+
+    if (dict.CheckOption("@SchmidtNumber"))
+        dict.ReadDouble("@SchmidtNumber", cfg.schmidt_number);
+
+    if (dict.CheckOption("@NsNorm"))
     {
-        dict.ReadString("@SurfaceGrowthSpecies", sg_species_);
-        this->SetSurfaceGrowthSpecies(sg_species_);
+        double v; std::string u;
+        dict.ReadMeasure("@NsNorm", v, u);
+        if (u == "#/m3")       cfg.ns_norm = v;
+        else if (u == "#/cm3") cfg.ns_norm = v * 1.e6;
+        else return std::unexpected(std::string{"@NsNorm: allowed units: #/m3 | #/cm3"});
     }
 
-    if (dict.CheckOption("@GasClosureDummySpecies") == true)
+    if (dict.CheckOption("@Calpha"))
     {
-        std::string species;
-        dict.ReadString("@GasClosureDummySpecies", species);
-        this->SetGasClosureDummySpecies(species);
+        double v; std::string u;
+        dict.ReadMeasure("@Calpha", v, u);
+        if (u != "1/s") return std::unexpected(std::string{"@Calpha: allowed units: 1/s"});
+        cfg.calpha = v;
     }
 
-    if (dict.CheckOption("@GasConsumption") == true)
+    if (dict.CheckOption("@Talpha"))
     {
-        bool flag;
-        dict.ReadBool("@GasConsumption", flag);
-        this->SetGasConsumption(flag);
+        double v; std::string u;
+        dict.ReadMeasure("@Talpha", v, u);
+        if (u != "K") return std::unexpected(std::string{"@Talpha: allowed units: K"});
+        cfg.talpha = v;
     }
 
-    if (dict.CheckOption("@SootDensity") == true)
+    if (dict.CheckOption("@Cbeta")) dict.ReadDouble("@Cbeta", cfg.cbeta);
+
+    if (dict.CheckOption("@Cgamma"))
     {
-        double value;
-        std::string units;
-        dict.ReadMeasure("@SootDensity", value, units);
-
-        if (units == "kg/m3")
-            value = value;
-        else if (units == "g/cm3")
-            value *= 1000.;
-        else
-            return std::unexpected("@SootDensity: allowed units: kg/m3 | g/cm3");
-
-        this->SetParticleDensity(value);
+        double v; std::string u;
+        dict.ReadMeasure("@Cgamma", v, u);
+        if (u != "kg.m/kmol/s") return std::unexpected(std::string{"@Cgamma: allowed units: kg.m/kmol/s"});
+        cfg.cgamma = v;
     }
 
-    if (dict.CheckOption("@SootParticleDiameter") == true)
+    if (dict.CheckOption("@Tgamma"))
     {
-        double value;
-        std::string units;
-        dict.ReadMeasure("@SootParticleDiameter", value, units);
-
-        if (units == "m")
-            value = value;
-        else if (units == "mm")
-            value /= 1.e3;
-        else if (units == "nm")
-            value /= 1.e9;
-        else
-            return std::unexpected("@SootParticleDiameter: allowed units: m | mm | nm");
-
-        this->SetDp(value);
+        double v; std::string u;
+        dict.ReadMeasure("@Tgamma", v, u);
+        if (u != "K") return std::unexpected(std::string{"@Tgamma: allowed units: K"});
+        cfg.tgamma = v;
     }
 
-    if (dict.CheckOption("@SootParticleMolecularWeight") == true)
+    if (dict.CheckOption("@Comega"))
     {
-        double value;
-        std::string units;
-        dict.ReadMeasure("@SootParticleMolecularWeight", value, units);
-
-        if (units == "kg/kmol")
-            value = value;
-        else if (units == "g/mol")
-            value = value;
-        else
-            return std::unexpected("@SootParticleMolecularWeight: allowed units: kg/kmol | g/mol");
-
-        this->SetMWp(value);
+        double v; std::string u;
+        dict.ReadMeasure("@Comega", v, u);
+        if (u != "kg.m/kmol/sqrt(K)/s")
+            return std::unexpected(std::string{"@Comega: allowed units: kg.m/kmol/sqrt(K)/s"});
+        cfg.comega = v;
     }
 
-    if (dict.CheckOption("@RadiativeHeatTransfer") == true)
-        dict.ReadBool("@RadiativeHeatTransfer", this->radiative_heat_transfer_);
+    if (dict.CheckOption("@EtaColl"))  dict.ReadDouble("@EtaColl",  cfg.eta_coll);
+    if (dict.CheckOption("@Coxid"))    dict.ReadDouble("@Coxid",    cfg.coxid);
 
-    if (dict.CheckOption("@PlanckCoefficient") == true)
-    {
-        std::string flag;
-        dict.ReadString("@PlanckCoefficient", flag);
-        this->SetPlanckAbsorptionCoefficient(flag);
-    }
+    if (dict.CheckOption("@NucleationExponent"))     dict.ReadDouble("@NucleationExponent",     cfg.nucleation_exponent);
+    if (dict.CheckOption("@SurfaceGrowthExponent1")) dict.ReadDouble("@SurfaceGrowthExponent1", cfg.sg_exponent1);
+    if (dict.CheckOption("@SurfaceGrowthExponent2")) dict.ReadDouble("@SurfaceGrowthExponent2", cfg.sg_exponent2);
 
-    if (dict.CheckOption("@SchmidtNumber") == true)
-    {
-        double value;
-        dict.ReadDouble("@SchmidtNumber", value);
-        this->SetSchmidtNumber(value);
-    }
-
-    // Normalization values for properties calculation
-    if (dict.CheckOption("@NsNorm") == true)
-    {
-        double value;
-        std::string units;
-
-        dict.ReadMeasure("@NsNorm", value, units);
-        if (units == "#/m3")
-            value = value;
-        else if (units == "#/cm3")
-            value *= 1.e6;
-        else
-            return std::unexpected("Allowed units for @NsNorm: #/m3 | #/cm3");
-
-        this->SetNsNorm(value);
-    }
-
-    if (dict.CheckOption("@Calpha") == true)
-    {
-        double value;
-        std::string units;
-        dict.ReadMeasure("@Calpha", value, units);
-        if (units == "1/s")
-            value = value;
-        else
-            return std::unexpected("Allowed units for @Calpha: 1/s");
-
-        this->Calpha_ = value;
-    }
-
-    if (dict.CheckOption("@Talpha") == true)
-    {
-        double value;
-        std::string units;
-        dict.ReadMeasure("@Talpha", value, units);
-        if (units == "K")
-            value = value;
-        else
-            return std::unexpected("Allowed units for @Talpha: 1/s");
-
-        this->Talpha_ = value;
-    }
-
-    if (dict.CheckOption("@Cbeta") == true)
-        dict.ReadDouble("@Cbeta", Cbeta_);
-
-    if (dict.CheckOption("@Cgamma") == true)
-    {
-        double value;
-        std::string units;
-        dict.ReadMeasure("@Cgamma", value, units);
-        if (units == "kg.m/kmol/s")
-            value = value;
-        else
-            return std::unexpected("Allowed units for @Cgamma: kg.m/kmol/s");
-
-        this->Cgamma_ = value;
-    }
-
-    if (dict.CheckOption("@Tgamma") == true)
-    {
-        double value;
-        std::string units;
-        dict.ReadMeasure("@Tgamma", value, units);
-        if (units == "K")
-            value = value;
-        else
-            return std::unexpected("Allowed units for @Tgamma: 1/s");
-
-        this->Tgamma_ = value;
-    }
-
-    if (dict.CheckOption("@Comega") == true)
-    {
-        double value;
-        std::string units;
-        dict.ReadMeasure("@Comega", value, units);
-        if (units == "kg.m/kmol/sqrt(K)/s")
-            value = value;
-        else
-            return std::unexpected("Allowed units for @Comega: kg.m/kmol/sqrt(K)/s");
-
-        this->Comega_ = value;
-    }
-
-    if (dict.CheckOption("@EtaColl") == true)
-        dict.ReadDouble("@EtaColl", this->etaColl_);
-
-    if (dict.CheckOption("@Coxid") == true)
-        dict.ReadDouble("@Coxid", this->Coxid_);
-
-    if (dict.CheckOption("@NucleationExponent") == true)
-        dict.ReadDouble("@NucleationExponent", this->exp_l_);
-
-    if (dict.CheckOption("@SurfaceGrowthExponent1") == true)
-        dict.ReadDouble("@SurfaceGrowthExponent1", this->exp_m_);
-
-    if (dict.CheckOption("@SurfaceGrowthExponent2") == true)
-        dict.ReadDouble("@SurfaceGrowthExponent2", this->exp_n_);
-
-    PrintSummary();
-    return {};
+    return cfg;
 }
-#endif // MOM_USE_DICTIONARY expected
+#endif // MOM_USE_DICTIONARY
 
 } // namespace MOM

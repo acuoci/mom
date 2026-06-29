@@ -38,14 +38,15 @@
 #include <span>
 #include <string>
 #include <string_view>
-#if defined(MOM_USE_DICTIONARY)
-#include <expected>
-#endif
 
 #include "Eigen/Dense"
 
 #include "MOM/MomentMethodBase.hpp"
 #include "MOM/ThermoProxy.hpp"
+
+#if defined(MOM_USE_DICTIONARY)
+#include <expected>
+#endif
 
 namespace MOM
 {
@@ -113,6 +114,64 @@ public:
         BrookesMossHall = 2  //!< Hall et al. (2016) extended O2+OH oxidation.
     };
 
+    // -- Configuration struct ------------------------------------------------
+
+    /**
+     * @struct Config
+     * @brief Plain configuration parameters for the BrookesMoss variant.
+     *
+     * Nucleation and oxidation models are represented as integers:
+     * 0 = off, 1 = BrookesMoss, 2 = BrookesMossHall.
+     * @note No external dependencies: only standard C++ types.
+     */
+    struct Config
+    {
+        // ---- Activation ----------------------------------------------------
+        bool is_active = true; //!< Enable this variant
+
+        // ---- Process model selection (integer codes) -----------------------
+        int nucleation_model     = 0; //!< 0=off, 1=BrookesMoss, 2=BrookesMossHall
+        int surface_growth_model = 0; //!< Surface growth model index
+        int oxidation_model      = 0; //!< 0=off, 1=BrookesMoss, 2=BrookesMossHall
+        int coagulation_model    = 0; //!< Coagulation model index
+        int thermophoretic_model = 1; //!< Thermophoretic model
+
+        // ---- Gas species ---------------------------------------------------
+        std::string precursors_species     = "C2H2"; //!< Nucleation precursor species
+        std::string surface_growth_species = "C2H2"; //!< Surface growth species
+
+        // ---- Gas consumption / closure -------------------------------------
+        bool        gas_consumption           = false;  //!< Consume gas-phase species
+        std::string gas_closure_dummy_species = "none"; //!< Dummy mass-closure species
+
+        // ---- Soot/particle properties --------------------------------------
+        double soot_density_kg_m3       = 1800.; //!< Soot density          [kg/m³]
+        double soot_particle_diameter_m = 1.e-9; //!< Mean particle diameter [m]
+        double soot_particle_mw_kg_kmol = 144.;  //!< Particle MW            [kg/kmol]
+        double ns_norm                  = 1.e15; //!< Ns normalisation value  [#/m³]
+
+        // ---- Model kinetic constants ----------------------------------------
+        double calpha   = 54.;      //!< Nucleation pre-exponential   [1/s]
+        double talpha   = 21000.;   //!< Nucleation activation temp.  [K]
+        double cbeta    = 1.0;      //!< Condensation coefficient     [-]
+        double cgamma   = 11700.;   //!< Surface growth pre-exp.      [kg·m/kmol/s]
+        double tgamma   = 12100.;   //!< Surface growth activation T  [K]
+        double comega   = 105.8125; //!< Oxidation pre-exponential    [kg·m/kmol/√K/s]
+        double eta_coll = 0.04;     //!< Coagulation efficiency       [-]
+        double coxid    = 0.015;    //!< Oxidation efficiency         [-]
+
+        double nucleation_exponent = 1.; //!< Nucleation reaction order exponent [-]
+        double sg_exponent1        = 1.; //!< Surface growth exponent 1          [-]
+        double sg_exponent2        = 1.; //!< Surface growth exponent 2          [-]
+
+        // ---- Radiation -----------------------------------------------------
+        bool        radiative_heat_transfer = true;     //!< Optically-thin radiation
+        std::string planck_coefficient      = "Smooke"; //!< Planck mean absorption coefficient
+
+        // ---- Transport -----------------------------------------------------
+        double schmidt_number = 50.; //!< Soot Schmidt number
+    };
+
     // -- Construction ---------------------------------------------------------
 
     explicit BrookesMoss(const Thermo& thermo);
@@ -122,9 +181,25 @@ public:
     BrookesMoss(BrookesMoss&&)                 = default;
     BrookesMoss& operator=(BrookesMoss&&)      = default;
 
+    /**
+     * @brief Configure all BrookesMoss parameters from a plain configuration struct.
+     *
+     * Applies every field of @p cfg by calling the corresponding `Set*()`
+     * methods or direct member assignment where no setter exists, followed
+     * by `PrintSummary()`.  No dependency on external parsing frameworks.
+     *
+     * @param cfg  Configuration struct.  Default-constructed @c Config
+     *             reproduces the constructor defaults.
+     */
+    void SetupFromConfig(const Config& cfg);
+
 #if defined(MOM_USE_DICTIONARY)
-    template <typename Dictionary>
-    [[nodiscard]] std::expected<void, std::string> SetupFromDictionary(Dictionary& dict);
+    /**
+     * @brief Parse an OpenSMOKE++ dictionary into a BrookesMoss Config.
+     * @tparam DictType  OpenSMOKE++ dictionary type — no include-time dependency.
+     */
+    template <typename DictType>
+    [[nodiscard]] static std::expected<Config, std::string> ParseConfig(DictType& dict);
 #endif
 
     // -- MomentMethod concept — state injection --------------------------------
@@ -415,6 +490,10 @@ private:
 };
 
 } // namespace MOM
+
+#if defined(MOM_USE_DICTIONARY)
+#include "BrookesMoss_Grammar.h"
+#endif
 
 #if !defined(MOM_COMPILED_LIBRARY)
 #include "BrookesMoss.tpp"
