@@ -99,6 +99,7 @@ ThreeEquations<Thermo>::ThreeEquations(const Thermo& thermo) : thermo_(thermo)
     index_O2_   = RequireSpeciesIndexThreeEquations(thermo_, "O2",   "constructor");
     index_H2_   = RequireSpeciesIndexThreeEquations(thermo_, "H2",   "constructor");
     index_H2O_  = RequireSpeciesIndexThreeEquations(thermo_, "H2O",  "constructor");
+    index_CO_   = thermo_.IndexOfSpecies("CO");   // optional — not present in all mechanisms
     index_C2H2_ = RequireSpeciesIndexThreeEquations(thermo_, "C2H2", "constructor");
 
     // -- Apply all tunable parameter defaults from Config{} ----------------
@@ -1003,25 +1004,47 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateOmegaGas() noe
         {
             const SurfaceKineticsRates r = SurfaceKinetics();
 
-            // C2H2 net consumption by surface growth
+            // C2H2 net consumption by surface growth.
+            // Net reaction: C2H2 → 2 C_soot + H2  (one H2 released per C2H2 added).
             if (surface_growth_model_ > 0)
             {
-                const double rate_c2h2 = lambda * r.ksg * Ss;
+                const double rate_c2h2 = lambda * r.ksg * Ss; // [#/m3/s]
                 if (std::isfinite(rate_c2h2) && !(rate_c2h2 > 0. && conc_C2H2_ <= 0.))
                 {
+                    // C2H2 consumed
                     AddMolar(index_C2H2_, -rate_c2h2 / this->Nav_kmol_);
+                    // H2 produced: 1 mol H2 per mol C2H2
+                    if (index_H2_ >= 0)
+                        AddMolar(index_H2_, +rate_c2h2 / this->Nav_kmol_);
                 }
             }
 
-            // O2 and OH consumption by oxidation
+            // O2 and OH consumption by oxidation, with gaseous products.
+            // Conventions (same as BrookesMoss):
+            //   O2 channel: C + ½O2 → CO  (net per C2 pair: C2 + O2 → 2CO)
+            //   OH channel: C + OH  → CO + ½H2
             if (oxidation_model_ > 0 && Ys_ > 0.)
             {
-                const double R_O2 = lambda * std::max(r.ko2, 0.) * Ss;
-                const double R_OH = lambda * std::max(r.koh, 0.) * Ss;
+                const double R_O2 = lambda * std::max(r.ko2, 0.) * Ss; // [#/m3/s]
+                const double R_OH = lambda * std::max(r.koh, 0.) * Ss; // [#/m3/s]
+
+                // O2 channel: 1 O2 consumed per C2 pair, 2 CO produced
                 if (conc_O2_ > 0. && R_O2 > 0. && std::isfinite(R_O2))
+                {
                     AddMolar(index_O2_, -R_O2 / this->Nav_kmol_);
+                    if (index_CO_ >= 0)
+                        AddMolar(index_CO_, +2. * R_O2 / this->Nav_kmol_);
+                }
+
+                // OH channel: 1 OH consumed per C atom, 1 CO + ½ H2 produced
                 if (conc_OH_ > 0. && R_OH > 0. && std::isfinite(R_OH))
+                {
                     AddMolar(index_OH_, -R_OH / this->Nav_kmol_);
+                    if (index_CO_ >= 0)
+                        AddMolar(index_CO_, +R_OH / this->Nav_kmol_);
+                    if (index_H2_ >= 0)
+                        AddMolar(index_H2_, +0.5 * R_OH / this->Nav_kmol_);
+                }
             }
         }
     }

@@ -124,6 +124,7 @@ template <ThermoMap Thermo> HMOM<Thermo>::HMOM(const Thermo& thermo) : thermo_(t
     index_O2_   = thermo_.IndexOfSpecies("O2");
     index_H2_   = thermo_.IndexOfSpecies("H2");
     index_H2O_  = thermo_.IndexOfSpecies("H2O");
+    index_CO_   = thermo_.IndexOfSpecies("CO");
     index_C2H2_ = thermo_.IndexOfSpecies("C2H2");
 
     // -- Apply all tunable parameter defaults from Config{} ----------------
@@ -1055,18 +1056,28 @@ template <ThermoMap Thermo> void HMOM<Thermo>::CalculateOmegaGas() noexcept
 
     if (surface_growth_model_ > 0 && VC2_ > 0. && index_C2H2_ >= 0)
     {
-        const double R_C2H2 = this->source_growth_(1) * V0_ / VC2_; // [mol/m3/s]
+        // R_C2H2 [mol/m3/s] = rate of C2H2 consumed by HACA surface growth.
+        // Net reaction: C2H2 → 2 C_soot + H2  (one H2 released per C2H2 added).
+        const double R_C2H2 = this->source_growth_(1) * V0_ / VC2_;
         if (R_C2H2 > 0. && std::isfinite(R_C2H2))
         {
-            const double kg_per_mol =
-                thermo_.MolecularWeight(static_cast<unsigned>(index_C2H2_)) / 1000.;
-            this->omega_gas_[static_cast<unsigned>(index_C2H2_)] -= R_C2H2 * kg_per_mol;
+            // C2H2 consumed
+            const double MW_C2H2 = thermo_.MolecularWeight(static_cast<unsigned>(index_C2H2_));
+            this->omega_gas_[static_cast<unsigned>(index_C2H2_)] -= R_C2H2 * MW_C2H2 / 1000.;
+
+            // H2 produced: 1 mol H2 per mol C2H2
+            if (index_H2_ >= 0)
+            {
+                const double MW_H2 = thermo_.MolecularWeight(static_cast<unsigned>(index_H2_));
+                this->omega_gas_[static_cast<unsigned>(index_H2_)] += R_C2H2 * MW_H2 / 1000.;
+            }
         }
     }
 
     if (oxidation_model_ > 0 && VC2_ > 0.)
     {
-        const double R_oxid_C2 = -this->source_oxidation_(1) * V0_ / VC2_; // [mol/m3/s]
+        // R_oxid_C2 [mol C2-pairs/m3/s] = rate of soot C2 pairs removed by oxidation.
+        const double R_oxid_C2 = -this->source_oxidation_(1) * V0_ / VC2_;
         if (R_oxid_C2 > 0. && std::isfinite(R_oxid_C2))
         {
             const double kox_sum = kox_O2_ + kox_OH_;
@@ -1074,19 +1085,47 @@ template <ThermoMap Thermo> void HMOM<Thermo>::CalculateOmegaGas() noexcept
             {
                 const double fO2 = kox_O2_ / kox_sum;
                 const double fOH = kox_OH_ / kox_sum;
+
+                // -- O2 channel: C + ½O2 → CO  (same convention as BrookesMoss)
+                // Per C2 pair: C2 + O2 → 2CO  →  1 O2 consumed, 2 CO produced.
                 if (index_O2_ >= 0 && fO2 > 0.)
                 {
-                    const double kg_per_mol =
-                        thermo_.MolecularWeight(static_cast<unsigned>(index_O2_)) / 1000.;
-                    this->omega_gas_[static_cast<unsigned>(index_O2_)] -=
-                        fO2 * R_oxid_C2 * kg_per_mol;
+                    const double R_O2 = fO2 * R_oxid_C2; // [mol C2/m3/s] via O2
+                    const double MW_O2 = thermo_.MolecularWeight(static_cast<unsigned>(index_O2_));
+                    this->omega_gas_[static_cast<unsigned>(index_O2_)] -= R_O2 * MW_O2 / 1000.;
+                    if (index_CO_ >= 0)
+                    {
+                        const double MW_CO = thermo_.MolecularWeight(static_cast<unsigned>(index_CO_));
+                        this->omega_gas_[static_cast<unsigned>(index_CO_)] += R_O2 * 2. * MW_CO / 1000.;
+                    }
                 }
+
+                // -- OH channel: C + OH → CO + ½H2  (same convention as BrookesMoss)
+                // Per C2 pair: C2 + 2OH → 2CO + H2.
+                // NOTE (stoichiometry ambiguity): The current OH consumption is
+                //   omega[OH] -= fOH * R_oxid_C2 * MW_OH / 1000
+                // which removes 1 mol OH per mol C2 pair.  The reaction C + OH → CO + ½H2
+                // requires 2 mol OH per mol C2 (i.e., 1 OH per C atom).  It is unclear
+                // whether kox_OH_'s internal 0.5/(alpha*chi) prefactor already halves the
+                // per-C rate to obtain a per-C2 rate, making this 1:1 correct, or whether
+                // the consumption is genuinely underestimated by a factor of 2.  Products
+                // (CO, H2) are added here in proportion to the OH actually removed, keeping
+                // the gas-phase mass balance self-consistent pending clarification.
                 if (index_OH_ >= 0 && fOH > 0.)
                 {
-                    const double kg_per_mol =
-                        thermo_.MolecularWeight(static_cast<unsigned>(index_OH_)) / 1000.;
-                    this->omega_gas_[static_cast<unsigned>(index_OH_)] -=
-                        fOH * R_oxid_C2 * kg_per_mol;
+                    const double R_OH = fOH * R_oxid_C2; // [mol OH consumed (per C2) / m3/s]
+                    const double MW_OH = thermo_.MolecularWeight(static_cast<unsigned>(index_OH_));
+                    this->omega_gas_[static_cast<unsigned>(index_OH_)] -= R_OH * MW_OH / 1000.;
+                    if (index_CO_ >= 0)
+                    {
+                        const double MW_CO = thermo_.MolecularWeight(static_cast<unsigned>(index_CO_));
+                        this->omega_gas_[static_cast<unsigned>(index_CO_)] += R_OH * MW_CO / 1000.;
+                    }
+                    if (index_H2_ >= 0)
+                    {
+                        const double MW_H2 = thermo_.MolecularWeight(static_cast<unsigned>(index_H2_));
+                        this->omega_gas_[static_cast<unsigned>(index_H2_)] += R_OH * 0.5 * MW_H2 / 1000.;
+                    }
                 }
             }
         }

@@ -877,8 +877,9 @@ private:
     int index_H_ = -1;
     int index_OH_ = -1;
     int index_O2_ = -1;
-    int index_H2_ = -1;
-    int index_H2O_ = -1;
+    int index_H2_   = -1;
+    int index_H2O_  = -1;
+    int index_CO_   = -1; //!< CO — oxidation product (both channels)
     int index_C2H2_ = -1;
 
     // Mass fractions (needed for some surface rate expressions)
