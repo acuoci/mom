@@ -419,6 +419,34 @@ static void printOwnershipMatrix()
 }
 
 // ============================================================================
+// Runtime-wrapper accessor instantiation
+// ============================================================================
+
+static bool validateAnyMomentMethodAccessors(const MOM::BasicThermoData& th)
+{
+    bool ok = true;
+
+    auto model = MOM::MakeAnyMomentMethod<MOM::BasicThermoData>(th, "ThreeEquations");
+
+    const auto initial = MOM::GetInitialMoments(model);
+    const bool closure_active = MOM::GetClosureDummySpeciesIsActive(model);
+    const int closure_index = MOM::GetClosureDummyIndex(model);
+    const int precursor_index = MOM::GetPrecursorIndex(model);
+
+    ok = ok && (MOM::GetNEquations(model) == 3u);
+    ok = ok && (initial.size() == 3u);
+    ok = ok && (!closure_active);
+    ok = ok && (closure_index == -1);
+    ok = ok && (precursor_index == th.IndexOfSpecies("C2H2"));
+
+    std::cout << "\n=== Runtime wrapper accessor validation ===\n";
+    std::cout << (ok ? "  [PASS] AnyMomentMethod accessors instantiated and returned expected defaults\n"
+                     : "  [FAIL] AnyMomentMethod accessor defaults are inconsistent\n");
+
+    return ok;
+}
+
+// ============================================================================
 // main
 // ============================================================================
 
@@ -437,6 +465,8 @@ int main()
     const double mu     = 4.5e-5;  // [kg/m/s]
 
     bool all_ok = true;
+
+    all_ok &= validateAnyMomentMethodAccessors(thS);
 
     // ════════════════════════════════════════════════════════════════════
     // 1. HMOM  (NEq = 4)

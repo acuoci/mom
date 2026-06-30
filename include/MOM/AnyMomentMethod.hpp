@@ -434,7 +434,7 @@ template <ThermoMap Thermo>
 template <ThermoMap Thermo>
 [[nodiscard]] inline bool GetClosureDummySpeciesIsActive(const AnyMomentMethod<Thermo>& m) noexcept
 {
-    return std::visit([](const auto& mm) { return mm.ClosureDummySpeciesIsActive(); }, m);
+    return std::visit([](const auto& mm) { return mm.is_closure_dummy_species(); }, m);
 }
 
 /** @brief Returns the 0-based index of the gas-closure dummy species (−1 if inactive). */
