@@ -363,6 +363,8 @@ void ThreeEquations<Thermo>::SetStatus(double T, double P_Pa, const double* Y) n
 template <ThermoMap Thermo>
 void ThreeEquations<Thermo>::SetMoments(std::span<const double> m) noexcept
 {
+    assert(m.size() == static_cast<std::size_t>(Base::n_equations) &&
+           "[ThreeEquations::SetMoments] expected exactly 3 moment values.");
     SetMoments(m[0], m[1], m[2]);
 }
 

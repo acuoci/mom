@@ -35,6 +35,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <iostream>
 #include <stdexcept>
 #include <algorithm>
@@ -424,6 +425,8 @@ void HMOM<Thermo>::SetStatus(double T, double P_Pa, const double* Y) noexcept
 
 template <ThermoMap Thermo> void HMOM<Thermo>::SetMoments(std::span<const double> m) noexcept
 {
+    assert(m.size() == static_cast<std::size_t>(Base::n_equations) &&
+           "[HMOM::SetMoments] expected exactly 4 moment values.");
     SetNormalizedMoments(m[0], m[1], m[2], m[3]);
 }
 

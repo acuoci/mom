@@ -213,6 +213,8 @@ void TiO2<Thermo>::SetStatus(double T, double P_Pa, const double* Y) noexcept
 
 template <ThermoMap Thermo> void TiO2<Thermo>::SetMoments(std::span<const double> m) noexcept
 {
+    assert(m.size() == static_cast<std::size_t>(Base::n_equations) &&
+           "[TiO2::SetMoments] expected exactly 3 moment values.");
     SetMoments(m[0], m[1], m[2]);
 }
 

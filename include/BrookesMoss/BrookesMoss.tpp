@@ -222,6 +222,8 @@ void BrookesMoss<Thermo>::SetStatus(double T, double P_Pa, const double* Y) noex
 
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::SetMoments(std::span<const double> m) noexcept
 {
+    assert(m.size() == static_cast<std::size_t>(Base::n_equations) &&
+           "[BrookesMoss::SetMoments] expected exactly 2 moment values.");
     SetMoments(m[0], m[1]);
 }
 
