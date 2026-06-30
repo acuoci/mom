@@ -26,10 +26,12 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstddef>
 #include <iomanip>
 #include <iostream>
 #include <numeric>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -446,6 +448,37 @@ static bool validateAnyMomentMethodAccessors(const MOM::BasicThermoData& th)
     return ok;
 }
 
+static bool validateThreeEquationsSpeciesValidation()
+{
+    auto th = buildSootThermo();
+
+    constexpr std::size_t c2h2_index = 5u;
+    th.names.erase(th.names.begin() + static_cast<std::ptrdiff_t>(c2h2_index));
+    th.mw.erase(th.mw.begin() + static_cast<std::ptrdiff_t>(c2h2_index));
+    th.nc.erase(th.nc.begin() + static_cast<std::ptrdiff_t>(c2h2_index));
+    th.nh.erase(th.nh.begin() + static_cast<std::ptrdiff_t>(c2h2_index));
+    th.no.erase(th.no.begin() + static_cast<std::ptrdiff_t>(c2h2_index));
+    th.nn.erase(th.nn.begin() + static_cast<std::ptrdiff_t>(c2h2_index));
+    th.nti.erase(th.nti.begin() + static_cast<std::ptrdiff_t>(c2h2_index));
+
+    bool ok = false;
+    try
+    {
+        MOM::ThreeEquations<MOM::BasicThermoData> model(th);
+        (void)model;
+    }
+    catch (const std::runtime_error& e)
+    {
+        ok = std::string(e.what()).find("C2H2") != std::string::npos;
+    }
+
+    std::cout << "\n=== ThreeEquations species validation ===\n";
+    std::cout << (ok ? "  [PASS] Missing C2H2 is rejected during setup\n"
+                     : "  [FAIL] Missing C2H2 was not reported clearly\n");
+
+    return ok;
+}
+
 // ============================================================================
 // main
 // ============================================================================
@@ -467,6 +500,7 @@ int main()
     bool all_ok = true;
 
     all_ok &= validateAnyMomentMethodAccessors(thS);
+    all_ok &= validateThreeEquationsSpeciesValidation();
 
     // ════════════════════════════════════════════════════════════════════
     // 1. HMOM  (NEq = 4)

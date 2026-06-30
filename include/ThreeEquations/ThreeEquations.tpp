@@ -70,6 +70,18 @@ inline double Arrhenius_cgs(double A, double n, double E_J_mol, double T) noexce
     return A * std::pow(T, n) * std::exp(-E_J_mol / (R_J_mol * T));
 }
 
+template <ThermoMap Thermo>
+int RequireSpeciesIndexThreeEquations(const Thermo& thermo,
+                                      std::string_view species,
+                                      std::string_view context)
+{
+    const int index = thermo.IndexOfSpecies(species);
+    if (index < 0)
+        throw std::runtime_error("[ThreeEquations] " + std::string(context) +
+                                 ": required species not found: " + std::string(species));
+    return index;
+}
+
 } // anonymous namespace
 
 // ============================================================================
@@ -113,8 +125,9 @@ ThreeEquations<Thermo>::ThreeEquations(const Thermo& thermo) : thermo_(thermo)
 
     // -- PAH: default to C2H2 ---------------------------------------------
     pah_species_ = "C2H2";
-    pah_index_   = thermo_.IndexOfSpecies(pah_species_);
-    mwpah_       = thermo_.MolecularWeight(pah_index_);
+    pah_index_   = RequireSpeciesIndexThreeEquations(thermo_, pah_species_, "constructor");
+    const auto pah_index_u = static_cast<unsigned>(pah_index_);
+    mwpah_       = thermo_.MolecularWeight(pah_index_u);
     vpah_        = mwpah_ / this->rho_particle_ / this->Nav_kmol_;
     dpah_        = std::pow(6. / this->pi_ * vpah_, 1. / 3.);
     spah_        = this->pi_ * dpah_ * dpah_;
@@ -124,12 +137,12 @@ ThreeEquations<Thermo>::ThreeEquations(const Thermo& thermo) : thermo_(thermo)
     conc_PAH_    = 0.;
 
     // -- Gas species indices -----------------------------------------------
-    index_H_    = thermo_.IndexOfSpecies("H");
-    index_OH_   = thermo_.IndexOfSpecies("OH");
-    index_O2_   = thermo_.IndexOfSpecies("O2");
-    index_H2_   = thermo_.IndexOfSpecies("H2");
-    index_H2O_  = thermo_.IndexOfSpecies("H2O");
-    index_C2H2_ = thermo_.IndexOfSpecies("C2H2");
+    index_H_    = RequireSpeciesIndexThreeEquations(thermo_, "H", "constructor");
+    index_OH_   = RequireSpeciesIndexThreeEquations(thermo_, "OH", "constructor");
+    index_O2_   = RequireSpeciesIndexThreeEquations(thermo_, "O2", "constructor");
+    index_H2_   = RequireSpeciesIndexThreeEquations(thermo_, "H2", "constructor");
+    index_H2O_  = RequireSpeciesIndexThreeEquations(thermo_, "H2O", "constructor");
+    index_C2H2_ = RequireSpeciesIndexThreeEquations(thermo_, "C2H2", "constructor");
 
     conc_H_ = conc_OH_ = conc_O2_ = conc_H2_ = conc_H2O_ = conc_C2H2_ = 0.;
     mass_fraction_H_ = mass_fraction_OH_ = 0.;
@@ -168,12 +181,13 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::Precalculations()
     const double rho_soot = this->rho_particle_;
 
     // -- PAH identification ------------------------------------------------
-    pah_index_ = thermo_.IndexOfSpecies(pah_species_);
-    ncpah_     = static_cast<double>(thermo_.NumberOfCarbonAtoms(pah_index_));
-    nhpah_     = static_cast<double>(thermo_.NumberOfHydrogenAtoms(pah_index_));
+    pah_index_ = RequireSpeciesIndexThreeEquations(thermo_, pah_species_, "Precalculations");
+    const auto pah_index_u = static_cast<unsigned>(pah_index_);
+    ncpah_     = static_cast<double>(thermo_.NumberOfCarbonAtoms(pah_index_u));
+    nhpah_     = static_cast<double>(thermo_.NumberOfHydrogenAtoms(pah_index_u));
 
     // -- PAH mass and geometry ---------------------------------------------
-    mwpah_ = thermo_.MolecularWeight(pah_index_); // [kg/kmol]
+    mwpah_ = thermo_.MolecularWeight(pah_index_u); // [kg/kmol]
     if (is_simplified_pah_mass_)
         mwpah_ = ncpah_ * this->WC_;
 
@@ -318,14 +332,16 @@ void ThreeEquations<Thermo>::SetStatus(double T, double P_Pa, const double* Y) n
     // PAH mole fraction → concentration [kmol/m3]
     {
         const double Y_PAH = std::max(Y[pah_index_], 0.);
-        const double X_PAH = Y_PAH * this->MW_ / thermo_.MolecularWeight(pah_index_);
+        const double X_PAH =
+            Y_PAH * this->MW_ / thermo_.MolecularWeight(static_cast<unsigned>(pah_index_));
         conc_PAH_          = cTot * X_PAH;
     }
 
     // Concentrations of key species [kmol/m3]
     auto conc = [&](int idx) -> double
     {
-        return cTot * std::max(Y[idx], 0.) * this->MW_ / thermo_.MolecularWeight(idx);
+        return cTot * std::max(Y[idx], 0.) * this->MW_ /
+               thermo_.MolecularWeight(static_cast<unsigned>(idx));
     };
     conc_H_    = conc(index_H_);
     conc_OH_   = conc(index_OH_);
@@ -591,7 +607,7 @@ typename ThreeEquations<Thermo>::SurfaceKineticsRates ThreeEquations<Thermo>::Ki
 
     // OH oxidation collision rate [1/s]
     const double surface_c2_cm2 = sc2_ * 1.e4;
-    const double MW_OH_kg_mol   = thermo_.MolecularWeight(index_OH_) / 1000.;
+    const double MW_OH_kg_mol   = thermo_.MolecularWeight(static_cast<unsigned>(index_OH_)) / 1000.;
     const double R_J_mol        = 8.31446261815324;
     const double mean_OH_m_s    = std::sqrt(8. * R_J_mol * this->T_ / (this->pi_ * MW_OH_kg_mol));
     const double r07f =
@@ -1011,7 +1027,8 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateOmegaGas() noe
     {
         if (idx < 0 || idx >= nsp || !std::isfinite(omega_kmol_m3_s))
             return;
-        this->omega_gas_[idx] += omega_kmol_m3_s * thermo_.MolecularWeight(idx);
+        this->omega_gas_[idx] +=
+            omega_kmol_m3_s * thermo_.MolecularWeight(static_cast<unsigned>(idx));
     };
 
     // 1. PAH consumed by dimerization (2 PAH per event)
