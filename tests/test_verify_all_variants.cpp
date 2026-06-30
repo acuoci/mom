@@ -151,21 +151,6 @@ static CheckResult checkMassBalance(std::span<const double> total,
 // Print helpers
 // ============================================================================
 
-static void printSpan(const char* label,
-                      std::span<const double> s,
-                      bool is_zero_fallback,
-                      int col_width = 14)
-{
-    // Label + tag
-    std::string tag = is_zero_fallback ? " [ZF]" : "     ";
-    std::cout << "  " << std::left << std::setw(14) << label << tag << " |";
-    // Values
-    std::cout << std::scientific << std::setprecision(4) << std::right;
-    for (auto v : s)
-        std::cout << std::setw(col_width) << v << " ";
-    std::cout << "\n";
-}
-
 static void printHeader(const char* variant_name, unsigned n_eq)
 {
     std::cout << "\n";
