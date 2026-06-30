@@ -36,6 +36,7 @@
 #pragma once
 
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -302,23 +303,51 @@ public:
 
     // -- Model switches --------------------------------------------------------
 
-    void SetNucleation(int flag) noexcept
+    void SetNucleation(int flag)
     {
-        nucleation_variant_ = static_cast<NucleationVariant>(flag);
+        switch (flag)
+        {
+            case 0: SetNucleation("none"); break;
+            case 1: SetNucleation("BrookesMoss"); break;
+            case 2: SetNucleation("BrookesMossHall"); break;
+            default:
+                throw std::invalid_argument(
+                    "[BrookesMoss] Invalid nucleation model flag. Allowed values: 0, 1, 2.");
+        }
     }
 
     void SetNucleation(std::string_view label);
 
-    void SetSurfaceGrowth(int flag) noexcept { surface_growth_model_ = flag; }
-
-    void SetOxidation(int flag) noexcept
+    void SetSurfaceGrowth(int flag)
     {
-        oxidation_variant_ = static_cast<OxidationVariant>(flag);
+        if (flag != 0 && flag != 1)
+            throw std::invalid_argument(
+                "[BrookesMoss] Invalid surface-growth model flag. Allowed values: 0, 1.");
+        surface_growth_model_ = flag;
+    }
+
+    void SetOxidation(int flag)
+    {
+        switch (flag)
+        {
+            case 0: SetOxidation("none"); break;
+            case 1: SetOxidation("BrookesMoss"); break;
+            case 2: SetOxidation("BrookesMossHall"); break;
+            default:
+                throw std::invalid_argument(
+                    "[BrookesMoss] Invalid oxidation model flag. Allowed values: 0, 1, 2.");
+        }
     }
 
     void SetOxidation(std::string_view label);
 
-    void SetCoagulation(int flag) noexcept { coagulation_model_ = flag; }
+    void SetCoagulation(int flag)
+    {
+        if (flag != 0 && flag != 1)
+            throw std::invalid_argument(
+                "[BrookesMoss] Invalid coagulation model flag. Allowed values: 0, 1.");
+        coagulation_model_ = flag;
+    }
 
     void SetPrecursors(std::string_view name);
     void SetSurfaceGrowthSpecies(std::string_view name);

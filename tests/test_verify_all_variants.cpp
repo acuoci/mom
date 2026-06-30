@@ -633,6 +633,78 @@ static bool validateBrookesMossHallConfigDefaults()
     return ok;
 }
 
+static bool validateBrookesMossInvalidModelFlags()
+{
+    const auto th = buildSootThermo();
+
+    bool nucleation_ok = false;
+    bool surface_growth_ok = false;
+    bool oxidation_ok = false;
+    bool coagulation_ok = false;
+    bool config_ok = false;
+
+    try
+    {
+        MOM::BrookesMoss<MOM::BasicThermoData> model(th);
+        model.SetNucleation(99);
+    }
+    catch (const std::invalid_argument&)
+    {
+        nucleation_ok = true;
+    }
+
+    try
+    {
+        MOM::BrookesMoss<MOM::BasicThermoData> model(th);
+        model.SetSurfaceGrowth(99);
+    }
+    catch (const std::invalid_argument&)
+    {
+        surface_growth_ok = true;
+    }
+
+    try
+    {
+        MOM::BrookesMoss<MOM::BasicThermoData> model(th);
+        model.SetOxidation(99);
+    }
+    catch (const std::invalid_argument&)
+    {
+        oxidation_ok = true;
+    }
+
+    try
+    {
+        MOM::BrookesMoss<MOM::BasicThermoData> model(th);
+        model.SetCoagulation(99);
+    }
+    catch (const std::invalid_argument&)
+    {
+        coagulation_ok = true;
+    }
+
+    try
+    {
+        MOM::BrookesMoss<MOM::BasicThermoData>::Config cfg;
+        cfg.nucleation_model = 99;
+
+        MOM::BrookesMoss<MOM::BasicThermoData> model(th);
+        model.SetupFromConfig(cfg);
+    }
+    catch (const std::invalid_argument&)
+    {
+        config_ok = true;
+    }
+
+    const bool ok = nucleation_ok && surface_growth_ok && oxidation_ok && coagulation_ok && config_ok;
+
+    std::cout << "\n=== BrookesMoss integer model flag validation ===\n";
+    std::cout << (ok ? "  [PASS] Invalid integer model flags are rejected\n"
+                     : "  [FAIL] At least one invalid integer model flag was accepted\n");
+
+    return ok;
+}
+
 // ============================================================================
 // main
 // ============================================================================
@@ -658,6 +730,7 @@ int main()
     all_ok &= validateBrookesMossHallSpeciesValidation();
     all_ok &= validateBrookesMossReporterMissingSpecies();
     all_ok &= validateBrookesMossHallConfigDefaults();
+    all_ok &= validateBrookesMossInvalidModelFlags();
 
     // ════════════════════════════════════════════════════════════════════
     // 1. HMOM  (NEq = 4)

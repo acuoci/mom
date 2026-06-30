@@ -1025,13 +1025,6 @@ void BrookesMoss<Thermo>::ApplyConfig(const Config& cfg)
     if (is_bmh_oxidation && eta_coll == defaults.eta_coll)
         eta_coll = 0.13;
 
-    // -- Process models ----------------------------------------------------
-    this->SetNucleation(cfg.nucleation_model);
-    this->SetSurfaceGrowth(cfg.surface_growth_model);
-    this->SetOxidation(cfg.oxidation_model);
-    SetCoagulation(cfg.coagulation_model);
-    this->SetThermophoreticModel(cfg.thermophoretic_model);
-
     // -- Gas species -------------------------------------------------------
     this->SetPrecursors(cfg.precursors_species);
     this->SetSurfaceGrowthSpecies(cfg.surface_growth_species);
@@ -1044,6 +1037,13 @@ void BrookesMoss<Thermo>::ApplyConfig(const Config& cfg)
     }
     this->SetGasClosureDummySpecies(cfg.gas_closure_dummy_species);
     this->SetGasConsumption(cfg.gas_consumption);
+
+    // -- Process models ----------------------------------------------------
+    this->SetNucleation(cfg.nucleation_model);
+    this->SetSurfaceGrowth(cfg.surface_growth_model);
+    this->SetOxidation(cfg.oxidation_model);
+    SetCoagulation(cfg.coagulation_model);
+    this->SetThermophoreticModel(cfg.thermophoretic_model);
 
     // -- Particle properties -----------------------------------------------
     this->SetParticleDensity(cfg.soot_density_kg_m3);
