@@ -884,6 +884,7 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::PrintSummary() const
         << " * Nucleation constants\n"
         << "    + Calpha  = " << Calpha_ << " [1/s]\n"
         << "    + Talpha  = " << Talpha_ << " [K]\n"
+        << "    + exp_l   = " << exp_l_ << "\n"
         << "\n"
         << " * Surface growth constants\n"
         << "    + Cgamma  = " << Cgamma_ << " [kg*m/kmol]\n"
@@ -935,8 +936,13 @@ void BrookesMoss<Thermo>::SetupFromConfig(const Config& cfg)
     // -- Gas species -------------------------------------------------------
     this->SetPrecursors(cfg.precursors_species);
     this->SetSurfaceGrowthSpecies(cfg.surface_growth_species);
-    this->SetBenzeneSpecies(cfg.benzene_species);
-    this->SetPhenylRadicalSpecies(cfg.phenylradical_species);
+    // BM-Hall species are only needed when the BM-Hall variant is active;
+    // avoid spurious "species not found" warnings for basic BrookesMoss runs.
+    if (cfg.nucleation_model == 2 || cfg.oxidation_model == 2)
+    {
+        this->SetBenzeneSpecies(cfg.benzene_species);
+        this->SetPhenylRadicalSpecies(cfg.phenylradical_species);
+    }
     this->SetGasClosureDummySpecies(cfg.gas_closure_dummy_species);
     this->SetGasConsumption(cfg.gas_consumption);
 
@@ -970,6 +976,9 @@ void BrookesMoss<Thermo>::SetupFromConfig(const Config& cfg)
     this->SetRadiativeHeatTransfer(cfg.radiative_heat_transfer);
     this->SetPlanckAbsorptionCoefficient(cfg.planck_coefficient);
     this->SetSchmidtNumber(cfg.schmidt_number);
+
+    // -- Debug -------------------------------------------------------------
+    is_debug_mode_ = cfg.debug_mode;
 
     PrintSummary();
 }
@@ -1163,8 +1172,8 @@ BrookesMoss<Thermo>::ParseConfig(DictType& dict)
     {
         double v; std::string u;
         dict.ReadMeasure("@Comega2", v, u);
-        if (u != "1/s")
-            return std::unexpected(std::string{"@Comega2: allowed units: 1/s"});
+        if (u != "kg*m/kmol/s/sqrt(K)")
+            return std::unexpected(std::string{"@Comega2: allowed units: kg*m/kmol/s/sqrt(K)"});
         cfg.comega2_bmh = v;
     }        
     
@@ -1174,7 +1183,21 @@ BrookesMoss<Thermo>::ParseConfig(DictType& dict)
         dict.ReadMeasure("@Tomega2", v, u);
         if (u != "K") return std::unexpected(std::string{"@Tomega2: allowed units: K"});
         cfg.tomega2_bmh = v;
-    }    
+    }
+
+    if (dict.CheckOption("@DebugMode"))
+        dict.ReadBool("@DebugMode", cfg.debug_mode);
+
+    // Cross-field validation: BM-Hall requires benzene and phenyl radical species.
+    if (cfg.nucleation_model == 2 || cfg.oxidation_model == 2)
+    {
+        if (!dict.CheckOption("@Benzene"))
+            return std::unexpected(std::string{
+                "@Benzene is required when @NucleationModel or @OxidationModel is BrookesMossHall"});
+        if (!dict.CheckOption("@PhenylRadical"))
+            return std::unexpected(std::string{
+                "@PhenylRadical is required when @NucleationModel or @OxidationModel is BrookesMossHall"});
+    }
 
     return cfg;
 }

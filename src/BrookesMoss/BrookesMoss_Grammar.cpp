@@ -45,6 +45,12 @@ void BrookesMoss_Grammar::DefineRules()
         "Thermophoretic model: 0=off, 1=on (default: 0)",
         true));
 
+    AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
+        "@DebugMode",
+        OpenSMOKEpp::SINGLE_BOOL,
+        "Enable verbose diagnostic output (default: false)",
+        false));
+
     // ----------------------------------------------------------------------------------------------------------- //
     // PAHs
     // ----------------------------------------------------------------------------------------------------------- //

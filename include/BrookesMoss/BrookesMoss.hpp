@@ -167,9 +167,9 @@ public:
         double sg_exponent2        = 1.; //!< Surface growth exponent 2          [-]
 
         // ---- Model kinetic constants ----------------------------------------
-        double calpha1_bmh   = 127.*std::pow(10,8.88);  //!< Nucleation pre-exponential   [kg*m3/kmol2/s]
-        double talpha1_bmh   = 4378.;                   //!< Nucleation activation temp.  [K]
-        double calpha2_bmh   = 178*std::pow(10.,9.50);  //!< Nucleation pre-exponential   [kg*m3/kmol2/s]
+        double calpha1_bmh   = 127.*std::pow(10.,8.88); //!< Nucleation pre-exponential   [kg*m3/kmol2/s]
+        double talpha1_bmh   = 4378.;                  //!< Nucleation activation temp.  [K]
+        double calpha2_bmh   = 178.*std::pow(10.,9.50);//!< Nucleation pre-exponential   [kg*m3/kmol2/s]
         double talpha2_bmh   = 6390.;                   //!< Nucleation activation temp.  [K]
         double comega2_bmh   = 8903.51;                 //!< Oxidation pre-exponential    [kg*m/kmol/s/sqrt(K)]
         double tomega2_bmh   = 19778;                   //!< Oxidation activation temp.   [K]
@@ -180,6 +180,9 @@ public:
 
         // ---- Transport -----------------------------------------------------
         double schmidt_number = 50.; //!< Soot Schmidt number
+
+        // ---- Debug ---------------------------------------------------------
+        bool debug_mode = false; //!< Verbose diagnostic output
     };
 
     // -- Construction ---------------------------------------------------------
@@ -456,9 +459,12 @@ private:
     double Comega_  = 0.; //!< oxidation pre-exponential
     double etaColl_ = 0.; //!< collision efficiency
     double Coxid_   = 0.; //!< oxidation rate constant
-    double exp_l_   = 0.; //!< exponent for Ys in surface growth
-    double exp_m_   = 0.; //!< exponent for Ys in coagulation
-    double exp_n_   = 0.; //!< exponent for Ys in oxidation
+    double exp_l_   = 0.; //!< concentration exponent for nucleation rate
+    double exp_m_   = 0.; //!< concentration exponent for surface growth rate
+    double exp_n_   = 0.; //!< area exponent for surface growth rate
+
+    // -- Debug flag -------------------------------------------------------------
+    bool is_debug_mode_ = false; //!< enable verbose diagnostic output
 
     // -- BM-Hall extended constants ---------------------------------------------
     double Calpha1_BMH_ = 0.;
