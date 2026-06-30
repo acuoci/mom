@@ -134,8 +134,11 @@ void BrookesMoss<Thermo>::SetStatus(double T, double P_Pa, const double* Y) noex
                                 : 0.;
 
     // Key species concentrations [kmol/m3]
+    // NOTE: conc_H2_ is required by the BM-Hall nucleation rate (denominator);
+    //       index_H2_ is always set in the constructor (soft lookup, −1 if absent).
     conc_OH_   = conc(index_OH_);
     conc_O2_   = conc(index_O2_);
+    conc_H2_   = conc(index_H2_);
     conc_C2H2_ = conc(index_C2H2_);
     conc_C6H5_ = conc(index_C6H5_);
     conc_C6H6_ = conc(index_C6H6_);

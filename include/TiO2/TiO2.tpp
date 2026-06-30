@@ -904,8 +904,10 @@ void TiO2<Thermo>::ApplyConfig(const Config& cfg)
     this->is_active_ = cfg.is_active;
 
     // -- Precursor / gas setup ---------------------------------------------
-    if (cfg.precursor_species != "none")
-        this->SetPrecursor(cfg.precursor_species);
+    // Always call SetPrecursor — including when cfg.precursor_species == "none",
+    // which resets all precursor-derived geometry (vprec_, dprec_, etc.) to 0.
+    // This ensures a subsequent SetupFromConfig("none") can clear a prior precursor.
+    this->SetPrecursor(cfg.precursor_species);
     this->SetGasClosureDummySpecies(cfg.gas_closure_dummy_species);
     this->SetGasConsumption(cfg.gas_consumption);
 

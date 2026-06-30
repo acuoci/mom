@@ -139,8 +139,8 @@ public:
         // ---- Gas species ---------------------------------------------------
         std::string precursors_species     = "C2H2"; //!< Nucleation precursor species
         std::string surface_growth_species = "C2H2"; //!< Surface growth species
-        std::string benzene_species = "C6H6";
-        std::string phenylradical_species = "C6H5";
+        std::string benzene_species        = "C6H6";
+        std::string phenylradical_species  = "C6H5";
 
         // ---- Gas consumption / closure -------------------------------------
         bool        gas_consumption           = false;  //!< Consume gas-phase species

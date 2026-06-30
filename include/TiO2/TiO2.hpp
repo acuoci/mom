@@ -481,7 +481,7 @@ private:
     double d0_ = 0.; //!< monomer diameter [m]
 
     // -- Precursor properties ---------------------------------------------------
-    std::string precursor_species_;
+    std::string precursor_species_ = "none";
     int precursor_index_  = -1;
     double nti_precursor_ = 0.; //!< Ti atoms per precursor molecule
     double nh_precursor_  = 0.; //!< H atoms
