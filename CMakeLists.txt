@@ -147,9 +147,12 @@ if(MOM_INSTALL)
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
 
-    install(DIRECTORY include/MOM
+    install(DIRECTORY include/
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-        FILES_MATCHING PATTERN "*.hpp"
+        FILES_MATCHING
+            PATTERN "*.hpp"
+            PATTERN "*.tpp"
+            PATTERN "*.h"
     )
 
     install(EXPORT MOMTargets
