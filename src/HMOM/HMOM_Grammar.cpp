@@ -133,7 +133,7 @@ void HMOM_Grammar::DefineRules()
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord("@SurfaceDensity",
                                               OpenSMOKEpp::SINGLE_MEASURE,
-                                              "Surface density (default: 1.7 #/m2)",
+                                              "Surface density (default: 1.7e19 #/m2)",
                                               false));
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord("@SurfaceDensityCorrectionCoefficient",
@@ -149,18 +149,18 @@ void HMOM_Grammar::DefineRules()
     AddKeyWord(
         OpenSMOKEpp::DictionaryKeyWord("@SurfaceDensityCorrectionCoefficientA2",
                                        OpenSMOKEpp::SINGLE_DOUBLE,
-                                       "SurfaceDensityCorrectionCoefficientA2 (default: -0.00563)",
+                                       "SurfaceDensityCorrectionCoefficientA2 (default: -0.00563 1/K)",
                                        false));
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord("@SurfaceDensityCorrectionCoefficientB1",
                                               OpenSMOKEpp::SINGLE_DOUBLE,
-                                              "SurfaceDensityCorrectionCoefficientB1 (default: -1.38)",
+                                              "SurfaceDensityCorrectionCoefficientB1 (default: -1.38 [-])",
                                               false));
 
     AddKeyWord(
         OpenSMOKEpp::DictionaryKeyWord("@SurfaceDensityCorrectionCoefficientB2",
                                        OpenSMOKEpp::SINGLE_DOUBLE,
-                                       "SurfaceDensityCorrectionCoefficientB2 (default: 0.00069)",
+                                       "SurfaceDensityCorrectionCoefficientB2 (default: 0.00068)",
                                        false));
 
     // ----------------------------------------------------------------------------------------------------------- //
@@ -310,6 +310,22 @@ void HMOM_Grammar::DefineRules()
         "@Efficiency6",
         OpenSMOKEpp::SINGLE_DOUBLE,
         "Efficiency reaction 6: Soot-H + OH => Soot-H + CO (default: 0.13)",
+        false));
+
+    // ----------------------------------------------------------------------------------------------------------- //
+    // Sticking coefficient
+    // ----------------------------------------------------------------------------------------------------------- //
+
+    AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
+        "@StickingCoefficientModel",
+        OpenSMOKEpp::SINGLE_STRING,
+        "Sticking coefficient model: constant (default) | pah-dependent",
+        false));
+
+    AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
+        "@StickingCoefficientConstant",
+        OpenSMOKEpp::SINGLE_DOUBLE,
+        "Sticking coefficient constant [-] (default: 2e-3 for constant model)",
         false));
 
     // ----------------------------------------------------------------------------------------------------------- //

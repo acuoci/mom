@@ -1187,6 +1187,10 @@ void ThreeEquations<Thermo>::SetupFromConfig(const Config& cfg)
     // -- Dimer model -------------------------------------------------------
     if (cfg.dimer_model == "qssa-rodrigues")
         dimer_concentration_model_ = DimerModel::QSSA_Rodrigues;
+    else
+        throw std::invalid_argument(
+            "ThreeEquations::SetupFromConfig: unknown dimer_model \"" + cfg.dimer_model +
+            "\" — allowed: qssa-rodrigues");
 
     // -- Numerical floor ---------------------------------------------------
     SetNsMinimum(cfg.ns_minimum_per_m3);
@@ -1377,7 +1381,14 @@ ThreeEquations<Thermo>::ParseConfig(DictType& dict)
     if (dict.CheckOption("@ThermophoreticModel")) dict.ReadInt("@ThermophoreticModel", cfg.thermophoretic_model);
 
     if (dict.CheckOption("@SurfaceChemistryModel"))
-        dict.ReadString("@SurfaceChemistryModel", cfg.surface_chemistry_model);
+    {
+        std::string m;
+        dict.ReadString("@SurfaceChemistryModel", m);
+        if (m != "rcpah" && m != "hmom")
+            return std::unexpected(std::string{
+                "@SurfaceChemistryModel: allowed: rcpah | hmom"});
+        cfg.surface_chemistry_model = m;
+    }
 
     if (dict.CheckOption("@SimplifiedPAHMass"))
         dict.ReadBool("@SimplifiedPAHMass", cfg.simplified_pah_mass);

@@ -186,8 +186,8 @@ template <ThermoMap Thermo> HMOM<Thermo>::HMOM(const Thermo& thermo) : thermo_(t
     surface_density_correction_ = false;
     surface_density_            = 1.7e19; // [#/m2]
     surf_dens_a1_               = 12.65;
-    surf_dens_a2_               = 0.00563;
-    surf_dens_b1_               = 1.38;
+    surf_dens_a2_               = -0.00563;
+    surf_dens_b1_               = -1.38;
     surf_dens_b2_               = 0.00069;
     alpha_                      = 1.;
 
@@ -685,6 +685,9 @@ template <ThermoMap Thermo> void HMOM<Thermo>::CalculateAlphaCoefficient()
     if (!std::isfinite(logMu1) || std::fabs(logMu1) < 1.e-12)
         return;
 
+    // Calculated from Appel et al., Comb. Flame 121(1), p. 122-136 (2000)
+    // This dependence expresses the fact that mature particles feature
+    // a lower proportion of active sites per unit of surface
     alpha_ = std::tanh(a / logMu1 + b);
     if (!std::isfinite(alpha_))
         alpha_ = 1.;

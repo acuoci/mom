@@ -190,13 +190,13 @@ void ThreeEquations_Grammar::DefineRules()
         OpenSMOKEpp::DictionaryKeyWord("@StickingCoefficientModel",
                                        OpenSMOKEpp::SINGLE_STRING,
                                        "Sticking coefficient model (constant (default) | pah-dependent)",
-                                       true));
+                                       false));
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@StickingCoefficientConstant",
         OpenSMOKEpp::SINGLE_DOUBLE,
         "Sticking coefficient constant, dimensionless in case of constant (default 2e-3), in kmol4/kg4 in case of pah-dependent (default 1.5e-11)",
-        true));
+        false));
 
     // ----------------------------------------------------------------------------------------------------------- //
     // Debug mode

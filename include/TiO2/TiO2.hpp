@@ -170,10 +170,10 @@ public:
         int minimum_tio2_units            = 2; //!< Minimum TiO2 units per aggregate
         int nucleated_particle_tio2_units = 5; //!< TiO2 units per nucleated particle
 
-        // ---- Sintering kinetics: τ_s = As · d_p^ns / T^ns · exp(Ts/T) ----
-        double sintering_As_s_K_m = 7.44e16;  //!< Pre-exponential [s,K,m]
-        double sintering_Ts_K     = -31000.;  //!< Activation temperature [K] (negative = Arrhenius)
-        double sintering_ns       =  1.0;     //!< Temperature/size exponent [-]
+        // ---- Sintering kinetics: τ_s = As · T^ns · d_p^4 · exp(Ts/T) -----
+        double sintering_As_s_K_m = 7.44e16; //!< Pre-exponential [s,K,m]
+        double sintering_Ts_K     = 31000.;  //!< Activation temperature [K] (positive; used as exp(Ts/T))
+        double sintering_ns       =  1.0;    //!< Temperature/size exponent [-]
 
         // ---- Sintering numerical regularisation ----------------------------
         bool   sintering_deferred    = false;  //!< Defer sintering to operator-split step
@@ -347,7 +347,7 @@ public:
 
     // -- Material / geometry accessors -----------------------------------------
 
-    [[nodiscard]] double rhoTiO2() const noexcept { return rhoTiO2_; }
+    [[nodiscard]] double rhoTiO2() const noexcept { return rho_TiO2_; }
 
     [[nodiscard]] double NucleationParticleVolume() const noexcept;
 
@@ -471,7 +471,7 @@ private:
 
     // -- Material properties ----------------------------------------------------
     static constexpr double W_TiO2_  = 79.866; //!< TiO2 molecular weight [kg/kmol]
-    static constexpr double rhoTiO2_ = 3900.;  //!< solid anatase density [kg/m3]
+    static constexpr double rho_TiO2_ = 3900.;  //!< solid anatase density [kg/m3]
     static constexpr double m_TiO2_  = W_TiO2_ / (6.02214076e26); //!< [kg/molecule]
 
     // -- Monomer/nucleus geometry -----------------------------------------------
@@ -520,7 +520,7 @@ private:
     // -- Sintering parameters ---------------------------------------------------
     double As_ = 7.44e16; //!< sintering frequency factor [1/s/K]
     double ns_ = 1.0;     //!< temperature exponent [-]
-    double Ts_ = -31000.; //!< activation temperature [K] (negative = Arrhenius)
+    double Ts_ = 31000.;  //!< activation temperature [K]
 
     // Sintering regularisation parameters (set in Precalculations)
     double sintering_dp_min_              = 0.;

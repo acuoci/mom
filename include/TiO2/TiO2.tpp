@@ -55,7 +55,7 @@ template <ThermoMap Thermo> TiO2<Thermo>::TiO2(const Thermo& thermo) : thermo_(t
     // -- CRTP base state ---------------------------------------------------
     this->is_active_       = true;
     this->gas_consumption_ = false;
-    this->rho_particle_    = rhoTiO2_;
+    this->rho_particle_    = rho_TiO2_;
     this->planck_model_    = PlanckCoeffModel::None; // TiO2 is dielectric
     this->SetThermophoreticModel(1);
     this->schmidt_number_        = 50.;
@@ -79,9 +79,16 @@ template <ThermoMap Thermo> TiO2<Thermo>::TiO2(const Thermo& thermo) : thermo_(t
     sintering_model_    = 1;
 
     // -- Sintering kinetics ------------------------------------------------
+    // Kobata et al. AiChe 37:347-358 (1991)
     As_ = 7.44e16;
     ns_ = 1.0;
-    // Ts_ is already initialised to -31000. by the class default; do NOT override.
+    Ts_ = 31000.;
+
+    // Alternative kinetics
+    // Seto et al., Aerosol Science and Technology 23:183-200 (1995)
+    // As_ = 9.75e15;
+    // ns_ = 1.0;
+    // Ts_ = 31000.;
 
     // -- Numerical floors --------------------------------------------------
     N_min_  = 1.e3;
@@ -140,7 +147,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::MemoryAllocation()
     // Initial moments (IC at numerical floor values)
     const double N0  = std::max(N_min_, 0.0);
     const double fv0 = N0 * v0_;
-    const double Y0  = rhoTiO2_ / 1.0 * fv0; // reference gas density 1 kg/m3
+    const double Y0  = rho_TiO2_ / 1.0 * fv0; // reference gas density 1 kg/m3
     const double S0  = N0 * s0_;
 
     initial_moments_cache_(0) = Y0;
@@ -154,7 +161,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::MemoryAllocation()
 
 template <ThermoMap Thermo> void TiO2<Thermo>::Precalculations()
 {
-    const double v_TiO2 = m_TiO2_ / rhoTiO2_;
+    const double v_TiO2 = m_TiO2_ / rho_TiO2_;
 
     v0_ = static_cast<double>(nTiO2_min_) * v_TiO2;
     d0_ = std::pow(6. * v0_ / this->pi_, 1. / 3.);
@@ -165,14 +172,14 @@ template <ThermoMap Thermo> void TiO2<Thermo>::Precalculations()
 
     // Kernel prefactor for nucleation (temperature-independent part)
     if (vprec_ > 0. && dprec_ > 0.)
-        alpha_nuc_ = epsilon_nuc_ * std::sqrt(this->pi_ * this->kB_ / (2. * rhoTiO2_)) *
+        alpha_nuc_ = epsilon_nuc_ * std::sqrt(this->pi_ * this->kB_ / (2. * rho_TiO2_)) *
                      std::sqrt(2. / vprec_) * std::pow(2. * dprec_, 2.);
     else
         alpha_nuc_ = 0.;
 
-    alpha_coag_ = epsilon_coag_ * std::sqrt(this->pi_ * this->kB_ / (2. * rhoTiO2_));
+    alpha_coag_ = epsilon_coag_ * std::sqrt(this->pi_ * this->kB_ / (2. * rho_TiO2_));
 
-    alpha_cond_ = epsilon_cond_ * std::sqrt(this->pi_ * this->kB_ / (2. * rhoTiO2_));
+    alpha_cond_ = epsilon_cond_ * std::sqrt(this->pi_ * this->kB_ / (2. * rho_TiO2_));
 }
 
 // ============================================================================
@@ -270,12 +277,12 @@ template <ThermoMap Thermo> void TiO2<Thermo>::SetPrecursor(std::string_view nam
     if (nti_precursor_ <= 0.)
         throw std::runtime_error("[TiO2] Precursor species has no Ti atoms: " + precursor_species_);
 
-    v_precursor_ = m_precursor_ / rhoTiO2_;
+    v_precursor_ = m_precursor_ / rho_TiO2_;
     d_precursor_ = std::pow(6. * v_precursor_ / this->pi_, 1. / 3.);
 
     // Effective collision geometry used by nucleation/condensation kernels:
     // volume contribution = one TiO2 unit per Ti atom in the precursor molecule
-    const double v_TiO2_local = m_TiO2_ / rhoTiO2_;
+    const double v_TiO2_local = m_TiO2_ / rho_TiO2_;
     vprec_                    = nti_precursor_ * v_TiO2_local;
     dprec_                    = d_precursor_;
 
@@ -382,7 +389,7 @@ void TiO2<Thermo>::Properties(double& fv,
     const double S = std::max(STiO2_, 0.);
 
     // Volume fraction [-]
-    fv = this->rho_ / rhoTiO2_ * Y;
+    fv = this->rho_ / rho_TiO2_ * Y;
 
     // Number density used for property calculation (regularized)
     const double NStar  = std::max(N, N_min_);
@@ -411,8 +418,8 @@ void TiO2<Thermo>::Properties(double& fv,
     // Mobility/aggregate diameter [m]
     da = dc;
 
-    // Sintering time scale [s] — uses new sign convention: exp(-Ts_/T) = exp(31000/T)
-    tauS = As_ * std::pow(this->T_, ns_) * std::pow(dp, 4.) * std::exp(-Ts_ / this->T_);
+    // Sintering time scale [s]:  τ_s = As · T^ns · dp^4 · exp(Ts/T)
+    tauS = As_ * std::pow(this->T_, ns_) * std::pow(dp, 4.) * std::exp(Ts_ / this->T_);
 }
 
 // ============================================================================
@@ -421,7 +428,7 @@ void TiO2<Thermo>::Properties(double& fv,
 
 template <ThermoMap Thermo> double TiO2<Thermo>::volume_fraction() const noexcept
 {
-    return this->rho_ / rhoTiO2_ * std::max(YTiO2_, 0.);
+    return this->rho_ / rho_TiO2_ * std::max(YTiO2_, 0.);
 }
 
 template <ThermoMap Thermo> double TiO2<Thermo>::mass_fraction() const noexcept
@@ -498,7 +505,7 @@ template <ThermoMap Thermo> double TiO2<Thermo>::diffusion_coefficient() const n
 
 template <ThermoMap Thermo> double TiO2<Thermo>::NucleationParticleVolume() const noexcept
 {
-    const double v_TiO2_local = m_TiO2_ / rhoTiO2_;
+    const double v_TiO2_local = m_TiO2_ / rho_TiO2_;
 
     if (nucleation_variant_ == NucleationVariant::Binary)
     {
@@ -538,7 +545,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::NucleationSourceTerms_Binary()
 
     // Free-molecular binary collision kernel [m3/s]
     const double beta_nuc = epsilon_nuc_ *
-                            std::sqrt(this->pi_ * this->kB_ * this->T_ / (2. * rhoTiO2_)) *
+                            std::sqrt(this->pi_ * this->kB_ * this->T_ / (2. * rho_TiO2_)) *
                             std::sqrt(1. / vprec_ + 1. / vprec_) * std::pow(2. * dprec_, 2.);
 
     // Rate of nucleation events [#/m3/s]
@@ -553,7 +560,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::NucleationSourceTerms_Binary()
     const double source_S =
         std::pow(18. * this->pi_, 1. / 3.) * std::pow(vprec_, 2. / 3.) * beta_nuc * Nprec * Nprec;
 
-    this->source_nucleation_(0) = rhoTiO2_ / this->rho_ * source_fv;
+    this->source_nucleation_(0) = rho_TiO2_ / this->rho_ * source_fv;
     this->source_nucleation_(1) = source_N / N0_scaling_;
     this->source_nucleation_(2) = source_S;
 }
@@ -567,7 +574,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::NucleationSourceTerms_FixedCluste
     if (c_precursor_ <= 0.)
         return;
 
-    const double v_TiO2_local = m_TiO2_ / rhoTiO2_;
+    const double v_TiO2_local = m_TiO2_ / rho_TiO2_;
     const double v_cluster    = static_cast<double>(n0_) * v_TiO2_local;
     const double d_cluster    = std::pow(6. * v_cluster / this->pi_, 1. / 3.);
 
@@ -576,7 +583,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::NucleationSourceTerms_FixedCluste
 
     // Free-molecular collision kernel for a cluster colliding with itself
     const double beta_nuc = epsilon_nuc_ *
-                            std::sqrt(this->pi_ * this->kB_ * this->T_ / (2. * rhoTiO2_)) *
+                            std::sqrt(this->pi_ * this->kB_ * this->T_ / (2. * rho_TiO2_)) *
                             std::sqrt(2. / v_cluster) * std::pow(2. * d_cluster, 2.);
 
     const double eventRate = 0.5 * beta_nuc * Nprec * Nprec;
@@ -586,7 +593,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::NucleationSourceTerms_FixedCluste
     const double source_S =
         std::pow(18. * this->pi_, 1. / 3.) * std::pow(v_cluster, 2. / 3.) * beta_nuc * Nprec * Nprec;
 
-    this->source_nucleation_(0) = rhoTiO2_ / this->rho_ * source_fv;
+    this->source_nucleation_(0) = rho_TiO2_ / this->rho_ * source_fv;
     this->source_nucleation_(1) = source_N / N0_scaling_;
     this->source_nucleation_(2) = source_S;
 }
@@ -611,7 +618,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::CoagulationSourceTerms()
 
     // Free-molecular kernel [m3/s]
     const double beta_fm = epsilon_coag_ *
-                           std::sqrt(this->pi_ * this->kB_ * this->T_ / (2. * rhoTiO2_)) *
+                           std::sqrt(this->pi_ * this->kB_ * this->T_ / (2. * rho_TiO2_)) *
                            std::sqrt(2. / vs) * std::pow(2. * dcSafe, 2.);
 
     // Continuum kernel with Cunningham slip correction [m3/s]
@@ -657,7 +664,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::CondensationSourceTerms()
 
     // Free-molecular condensation kernel [m3/s]: precursor + particle
     const double beta_cond = epsilon_cond_ *
-                             std::sqrt(this->pi_ * this->kB_ * this->T_ / (2. * rhoTiO2_)) *
+                             std::sqrt(this->pi_ * this->kB_ * this->T_ / (2. * rho_TiO2_)) *
                              std::sqrt(1. / vprec_ + 1. / vs) * std::pow(dprec_ + dc, 2.);
 
     const double BetaNprecN = beta_cond * Nprec * N;
@@ -666,7 +673,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::CondensationSourceTerms()
     // (precursor adds vprec_ volume; surface treated as spherical increment)
     const double deltas = (2. / 3.) * (vprec_ / vs) * ss;
 
-    this->source_condensation_(0) = rhoTiO2_ / this->rho_ * vprec_ * BetaNprecN;
+    this->source_condensation_(0) = rho_TiO2_ / this->rho_ * vprec_ * BetaNprecN;
     this->source_condensation_(1) = 0.;
     this->source_condensation_(2) = deltas * BetaNprecN;
 }
@@ -708,7 +715,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::SinteringSourceTerms()
     if (activation <= 0.)
         return;
 
-    // Physical sintering time scale [s]  (exp(-Ts_/T) = exp(31000/T))
+    // Physical sintering time scale [s]  
     const double tauPhysical = std::max(tauS, sintering_tau_min_);
 
     // Rate of surface area decrease toward spherical limit [m2/m3/s]
@@ -754,7 +761,6 @@ template <ThermoMap Thermo> double TiO2<Thermo>::SinteringDeferredUpdate(double 
     if (activation <= 0.)
         return S;
 
-    // exp(-Ts_/T) = exp(31000/T) because Ts_ = -31000
     const double tauS_phys = std::max(tauS, sintering_tau_min_);
     const double tauSeff   = tauS_phys / activation;
 
@@ -889,7 +895,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::PrintSummary() const
               << "------------------------------------------------------------------------------------------\n"
               << "                         TiO2 Nanoparticle Model Summary\n"
               << "------------------------------------------------------------------------------------------\n"
-              << " * TiO2 density (kg/m3):         " << rhoTiO2_ << "\n"
+              << " * TiO2 density (kg/m3):         " << rho_TiO2_ << "\n"
               << " * TiO2 mol. weight (kg/kmol):   " << W_TiO2_ << "\n"
               << "\n"
               << " * Monomer geometry\n"
@@ -1014,16 +1020,16 @@ typename TiO2<Thermo>::NDFReconstructionData TiO2<Thermo>::ReconstructedNDFData(
     double N = N_raw;
     if (use_regularized_moments)
     {
-        const double fv_raw = this->rho_ / rhoTiO2_ * Y_raw;
+        const double fv_raw = this->rho_ / rho_TiO2_ * Y_raw;
         if (fv_raw < fv_min_)
-            Y = rhoTiO2_ / this->rho_ * fv_min_;
+            Y = rho_TiO2_ / this->rho_ * fv_min_;
         N = std::max(N, N_min_);
     }
 
     if (Y <= 0. || N <= 0.)
         return d;
 
-    const double fv = this->rho_ / rhoTiO2_ * Y;
+    const double fv = this->rho_ / rho_TiO2_ * Y;
     if (!std::isfinite(fv) || fv <= 0.)
         return d;
 
@@ -1196,9 +1202,10 @@ TiO2<Thermo>::ParseConfig(DictType& dict)
     {
         double v; std::string u;
         dict.ReadMeasure("@SinteringDpMinimum", v, u);
-        if (u == "m")       cfg.sintering_dp_min_m = v;
-        else if (u == "mm") cfg.sintering_dp_min_m = v * 1.e-3;
-        else return std::unexpected(std::string{"@SinteringDpMinimum: allowed units: m | mm"});
+        if (u == "m")        cfg.sintering_dp_min_m = v;
+        else if (u == "mm")  cfg.sintering_dp_min_m = v * 1.e-3;
+        else if (u == "nm")  cfg.sintering_dp_min_m = v * 1.e-9;
+        else return std::unexpected(std::string{"@SinteringDpMinimum: allowed units: m | mm | nm"});
     }
 
     if (dict.CheckOption("@SinteringTauMinimum"))

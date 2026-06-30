@@ -176,8 +176,8 @@ public:
         double surface_density_per_m2   = 1.7e19;  //!< Active surface site density [#/m²]
         bool   surface_density_correction = false;  //!< Temperature-dependent χ correction
         double surf_dens_a1 = 12.65;    //!< Correction coefficient A1 [-]
-        double surf_dens_a2 =  0.00563; //!< Correction coefficient A2 [1/K]
-        double surf_dens_b1 =  1.38;    //!< Correction coefficient B1 [-]
+        double surf_dens_a2 = -0.00563; //!< Correction coefficient A2 [1/K]
+        double surf_dens_b1 = -1.38;   //!< Correction coefficient B1 [-]
         double surf_dens_b2 =  0.00069; //!< Correction coefficient B2 [1/K]
 
         // ---- Process model selection (integer codes) -----------------------
