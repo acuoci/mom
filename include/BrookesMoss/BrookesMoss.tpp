@@ -56,9 +56,10 @@ template <ThermoMap Thermo> BrookesMoss<Thermo>::BrookesMoss(const Thermo& therm
     // index_C6H5_ and index_C6H6_ stay at their in-class default of -1
     // until SetBenzeneSpecies / SetPhenylRadicalSpecies are called.
     index_H_    = thermo_.IndexOfSpecies("H");
+    index_H2_   = thermo_.IndexOfSpecies("H2");
+    index_CO_   = thermo_.IndexOfSpecies("CO");
     index_OH_   = thermo_.IndexOfSpecies("OH");
     index_O2_   = thermo_.IndexOfSpecies("O2");
-    index_H2_   = thermo_.IndexOfSpecies("H2");
     index_C2H2_ = thermo_.IndexOfSpecies("C2H2");
 
     // -- Internal numerical floors (not user-configurable via Config) ------
@@ -366,6 +367,8 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::CalculateSourceMoments() n
     dMdt_nucleation_BMH_2_ = 0.;
     dMdt_surface_growth_   = 0.;
     dMdt_oxidation_        = 0.;
+    dMdt_oxidation_OH_     = 0.;
+    dMdt_oxidation_O2_     = 0.;
 
     // Sub-process source terms
     if (nucleation_variant_ != NucleationVariant::Off)
@@ -567,7 +570,9 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::OxidationSourceTerms_BM()
     //   dMdt = Coxid * Comega * etaColl * [OH] * sqrt(T) * A
     const double dMdt_oxid = Coxid_ * Comega_ * etaColl_ * conc_OH_ * std::sqrt(this->T_) * A;
 
-    dMdt_oxidation_ = dMdt_oxid;
+    dMdt_oxidation_OH_ = dMdt_oxid;  // entire rate is OH-driven
+    dMdt_oxidation_O2_ = 0.;
+    dMdt_oxidation_    = dMdt_oxid;
 
     // Source for Ys [1/s]  (negative: consumption)
     this->source_oxidation_(0) = -dMdt_oxid / this->rho_;
@@ -592,20 +597,17 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::OxidationSourceTerms_BMH()
     const double A =
         std::pow(this->pi_ * N, 1. / 3.) * std::pow(6. * M / this->rho_particle_, 2. / 3.);
 
-    double dMdt_oxid = 0.;
-
-    // Channel 1: OH oxidation (BM form with BMH collision efficiency etaColl_=0.13)
+    // Channel 1: OH oxidation  →  C + OH → CO + ½H₂
+    dMdt_oxidation_OH_ = 0.;
     if (conc_OH_ > 0.)
-    {
-        dMdt_oxid += Coxid_ * Comega_ * etaColl_ * conc_OH_ * std::sqrt(this->T_) * A;
-    }
+        dMdt_oxidation_OH_ = Coxid_ * Comega_ * etaColl_ * conc_OH_ * std::sqrt(this->T_) * A;
 
-    // Channel 2: O2 oxidation (Arrhenius-type with BMH constants)
+    // Channel 2: O2 oxidation  →  C + O₂ → CO + ½O₂  (net: C + ½O₂ → CO)
+    dMdt_oxidation_O2_ = 0.;
     if (conc_O2_ > 0.)
-    {
-        dMdt_oxid += Comega2_BMH_ * conc_O2_ * std::exp(-Tomega2_BMH_ / this->T_) * A;
-    }
+        dMdt_oxidation_O2_ = Comega2_BMH_ * conc_O2_ * std::exp(-Tomega2_BMH_ / this->T_) * A;
 
+    const double dMdt_oxid = dMdt_oxidation_OH_ + dMdt_oxidation_O2_;
     dMdt_oxidation_ = dMdt_oxid;
 
     // Source for Ys [1/s]  (negative: consumption)
@@ -763,6 +765,58 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::CalculateOmegaGas() noexce
         }
     }
 
+    // -- Oxidation coupling ------------------------------------------------
+    //
+    // OH channel (both BM and BM-Hall):  C_soot + OH → CO + ½H₂
+    //   Per kg soot oxidized:
+    //     OH consumed = MW_OH / W_C            (17/12 kg/kg_soot)
+    //     CO produced = MW_CO / W_C            (28/12 kg/kg_soot)
+    //     H₂ produced = ½ × MW_H₂ / W_C       ( 1/12 kg/kg_soot)
+    //     Net gas produced = +1 kg/kg_soot  ✓  → dummy closure absorbs −dMdt_oxid
+    //
+    // O₂ channel (BM-Hall only):  C_soot + O₂ → CO + ½O₂  (net: C + ½O₂ → CO)
+    //   Per kg soot oxidized:
+    //     O₂ consumed (net) = ½ × MW_O₂ / W_C (16/12 kg/kg_soot)
+    //     CO produced       = MW_CO / W_C       (28/12 kg/kg_soot)
+    //     Net gas produced = +1 kg/kg_soot  ✓
+
+    if (dMdt_oxidation_OH_ > 0.)
+    {
+        const double inv_WC = 1. / this->WC_;
+
+        if (index_OH_ >= 0)
+        {
+            const double MW_OH = thermo_.MolecularWeight(static_cast<unsigned>(index_OH_));
+            AddMass(index_OH_, -dMdt_oxidation_OH_ * inv_WC * MW_OH);
+        }
+        if (index_CO_ >= 0)
+        {
+            const double MW_CO = thermo_.MolecularWeight(static_cast<unsigned>(index_CO_));
+            AddMass(index_CO_, dMdt_oxidation_OH_ * inv_WC * MW_CO);
+        }
+        if (index_H2_ >= 0)
+        {
+            const double MW_H2 = thermo_.MolecularWeight(static_cast<unsigned>(index_H2_));
+            AddMass(index_H2_, dMdt_oxidation_OH_ * inv_WC * 0.5 * MW_H2);
+        }
+    }
+
+    if (dMdt_oxidation_O2_ > 0.)
+    {
+        const double inv_WC = 1. / this->WC_;
+
+        if (index_O2_ >= 0)
+        {
+            const double MW_O2 = thermo_.MolecularWeight(static_cast<unsigned>(index_O2_));
+            AddMass(index_O2_, -dMdt_oxidation_O2_ * inv_WC * 0.5 * MW_O2);
+        }
+        if (index_CO_ >= 0)
+        {
+            const double MW_CO = thermo_.MolecularWeight(static_cast<unsigned>(index_CO_));
+            AddMass(index_CO_, dMdt_oxidation_O2_ * inv_WC * MW_CO);
+        }
+    }
+
     // -- Dummy species closure (enforce mass conservation) -----------------
     if (this->is_closure_dummy_species_)
     {
@@ -882,8 +936,9 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::PrintSummary() const
         << "    + Surface growth:  " << sg_species_   << "  (nC=" << sg_nc_   << ", nH=" << sg_nh_   << ")\n"
         << "    + C6H6 index (-):  " << index_C6H6_ << "  (< 0 = not found; required for BM-Hall nucleation ch.2)\n"
         << "    + C6H5 index (-):  " << index_C6H5_ << "  (< 0 = not found; required for BM-Hall nucleation)\n"
-        << "    + H2   index (-):  " << index_H2_   << "  (< 0 = not found; required for BM/BM-Hall gas coupling)\n"
+        << "    + H2   index (-):  " << index_H2_   << "  (< 0 = not found; required for nucleation/SG/oxidation coupling)\n"
         << "    + H    index (-):  " << index_H_    << "  (< 0 = not found; required for BM-Hall nucleation ch.2)\n"
+        << "    + CO   index (-):  " << index_CO_   << "  (< 0 = not found; required for oxidation gas coupling)\n"
         << "\n"
         << " [Processes]\n"
         << "    + Nucleation:      " << static_cast<int>(nucleation_variant_) << "  (" << nuc_str(nucleation_variant_) << ")\n"

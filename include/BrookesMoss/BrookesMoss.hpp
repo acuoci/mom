@@ -440,8 +440,9 @@ private:
     double conc_O2_ = 0.;    
 
     // 0-based species indices (−1 = not found in mechanism, safely ignored)
-    int index_H_    = -1; //!< H radical — needed for BM-Hall channel 2 gas coupling
-    int index_H2_   = -1;
+    int index_H_    = -1; //!< H radical  — BM-Hall nucleation ch.2 gas coupling
+    int index_H2_   = -1; //!< H₂        — nucleation/surface-growth/oxidation (OH) coupling
+    int index_CO_   = -1; //!< CO         — oxidation gas coupling (both variants)
     int index_C2H2_ = -1;
     int index_C6H5_ = -1;
     int index_C6H6_ = -1;
@@ -488,11 +489,13 @@ private:
     double Ns_norm_ = 0.;  //!< normalisation factor for Ns [#/m3]
 
     // -- Gas consumption intermediate quantities --------------------------------
-    double dMdt_nucleation_       = 0.; //!< [kg/m3/s]
-    double dMdt_nucleation_BMH_1_ = 0.; //!< [kg/m3/s]
-    double dMdt_nucleation_BMH_2_ = 0.; //!< [kg/m3/s]
-    double dMdt_surface_growth_   = 0.;
-    double dMdt_oxidation_        = 0.;
+    double dMdt_nucleation_       = 0.; //!< total nucleation soot mass rate [kg/m3/s]
+    double dMdt_nucleation_BMH_1_ = 0.; //!< BM-Hall channel 1 (C2H2-based) [kg/m3/s]
+    double dMdt_nucleation_BMH_2_ = 0.; //!< BM-Hall channel 2 (C6H6-based) [kg/m3/s]
+    double dMdt_surface_growth_   = 0.; //!< surface growth soot mass rate [kg/m3/s]
+    double dMdt_oxidation_        = 0.; //!< total oxidation soot mass rate [kg/m3/s]
+    double dMdt_oxidation_OH_     = 0.; //!< OH-channel contribution [kg/m3/s]
+    double dMdt_oxidation_O2_     = 0.; //!< O2-channel contribution (BM-Hall only) [kg/m3/s]
 
     // -- Per-process source storage (owned by BrookesMoss, not by base) --------
     //
