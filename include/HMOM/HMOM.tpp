@@ -1640,29 +1640,105 @@ template <ThermoMap Thermo> void HMOM<Thermo>::Setn5(double v) noexcept
 
 template <ThermoMap Thermo> void HMOM<Thermo>::PrintSummary() const
 {
-    std::cout << "\n-------------------------------------------------------------------\n"
-              << " HMOM — Hybrid Method of Moments\n"
-              << "-------------------------------------------------------------------\n"
-              << " PAH species   : " << pah_species_ << "\n"
-              << " V0 [m3]       : " << V0_ << "\n"
-              << " S0 [m2]       : " << S0_ << "\n"
-              << " HACA kinetics (A [cm3/mol/s], E [kJ/mol]):\n"
-              << "   R1f: " << A1f_ << " " << n1f_ << " " << E1f_ * R_J_mol_HMOM / 1000. << "\n"
-              << "   R1b: " << A1b_ << " " << n1b_ << " " << E1b_ * R_J_mol_HMOM / 1000. << "\n"
-              << "   R2f: " << A2f_ << " " << n2f_ << " " << E2f_ * R_J_mol_HMOM / 1000. << "\n"
-              << "   R2b: " << A2b_ << " " << n2b_ << " " << E2b_ * R_J_mol_HMOM / 1000. << "\n"
-              << "   R3f: " << A3f_ << " " << n3f_ << " " << E3f_ * R_J_mol_HMOM / 1000. << "\n"
-              << "   R3b: " << A3b_ << " " << n3b_ << " " << E3b_ * R_J_mol_HMOM / 1000. << "\n"
-              << "   R4 : " << A4_ << " " << n4_ << " " << E4_ * R_J_mol_HMOM / 1000. << "\n"
-              << "   R5 : " << A5_ << " " << n5_ << " " << E5_ * R_J_mol_HMOM / 1000. << "\n"
-              << "   eff6: " << eff6_ << "\n"
-              << " Surface density [#/m2]: " << surface_density_ << "\n"
-              << " Models: nuc=" << nucleation_model_ << " cond=" << condensation_model_
-              << " sg=" << surface_growth_model_ << " ox=" << oxidation_model_
-              << " coag=" << coagulation_model_ << " coag_cont=" << coagulation_continuous_model_
-              << "\n"
-              << " Sc=" << this->schmidt_number_ << "  sticking=" << sticking_coeff_constant_ << "\n"
-              << "-------------------------------------------------------------------\n\n";
+    // Helper lambdas — no heap allocation, resolved at compile time
+    const auto sticking_str = [](StickingModel m) -> const char* {
+        switch (m) {
+            case StickingModel::Constant: return "constant";
+            case StickingModel::PAH4:     return "PAH 4-ring";
+            default:                       return "unknown";
+        }
+    };
+    const auto frac_str = [](FractalDiameterModel m) -> const char* {
+        switch (m) {
+            case FractalDiameterModel::Model0: return "Mueller et al. (2009)";
+            case FractalDiameterModel::Model1: return "Attili et al. (2014)";
+            default:                            return "unknown";
+        }
+    };
+    const auto coll_str = [](CollisionDiameterModel m) -> const char* {
+        switch (m) {
+            case CollisionDiameterModel::Model1: return "N^{1/3} dp (Mueller 2009)";
+            case CollisionDiameterModel::Model2: return "fractal geometry (Attili 2014)";
+            default:                              return "unknown";
+        }
+    };
+    const auto thermo_str = [](ThermophoreticModel m) -> const char* {
+        switch (m) {
+            case ThermophoreticModel::Off:      return "off";
+            case ThermophoreticModel::Standard: return "standard";
+            default:                             return "unknown";
+        }
+    };
+    const auto planck_str = [](PlanckCoeffModel m) -> const char* {
+        switch (m) {
+            case PlanckCoeffModel::None:   return "none";
+            case PlanckCoeffModel::Smooke: return "Smooke (1989)";
+            case PlanckCoeffModel::Kent:   return "Kent & Honnery (1990)";
+            case PlanckCoeffModel::Sazhin: return "Sazhin (1994)";
+            default:                        return "unknown";
+        }
+    };
+
+    std::cout
+        << "\n"
+        << "------------------------------------------------------------------------------------------\n"
+        << "                   HMOM — Hybrid Method of Moments Summary\n"
+        << "------------------------------------------------------------------------------------------\n"
+        << " * Active: " << (this->is_active_ ? "yes" : "no") << "\n"
+        << "\n"
+        << " [Physical properties]\n"
+        << "    + Soot density (kg/m3):          " << this->rho_particle_ << "\n"
+        << "\n"
+        << " [Species — PAH precursor]\n"
+        << "    + PAH species:                   " << pah_species_ << "\n"
+        << "\n"
+        << " [Nucleated particle geometry]\n"
+        << "    + V0 (m3):                       " << V0_ << "\n"
+        << "    + S0 (m2):                       " << S0_ << "\n"
+        << "\n"
+        << " [Processes]\n"
+        << "    + Nucleation:                    " << nucleation_model_ << "\n"
+        << "    + Condensation:                  " << condensation_model_ << "\n"
+        << "    + Surface growth:                " << surface_growth_model_ << "\n"
+        << "    + Oxidation:                     " << oxidation_model_ << "\n"
+        << "    + Coagulation:                   " << coagulation_model_ << "\n"
+        << "    + Coagulation (continuous):      " << coagulation_continuous_model_ << "\n"
+        << "    + Fractal diameter model:        " << static_cast<int>(fractal_diameter_model_) << "  (" << frac_str(fractal_diameter_model_) << ")\n"
+        << "    + Collision diameter model:      " << static_cast<int>(collision_diameter_model_) << "  (" << coll_str(collision_diameter_model_) << ")\n"
+        << "    + Sticking model:                " << static_cast<int>(sticking_model_) << "  (" << sticking_str(sticking_model_) << ")\n"
+        << "    + Sticking coeff. (-):           " << sticking_coeff_constant_ << "\n"
+        << "\n"
+        << " [HACA surface kinetics]  A [cm3/mol/s or 1/s],  n [-],  E [kJ/mol]\n"
+        << "    + R1f (H-abs. fwd):  A=" << A1f_ << "  n=" << n1f_ << "  E=" << E1f_ * R_J_mol_HMOM / 1000. << "\n"
+        << "    + R1b (H-abs. rev):  A=" << A1b_ << "  n=" << n1b_ << "  E=" << E1b_ * R_J_mol_HMOM / 1000. << "\n"
+        << "    + R2f (OH-ox. fwd):  A=" << A2f_ << "  n=" << n2f_ << "  E=" << E2f_ * R_J_mol_HMOM / 1000. << "\n"
+        << "    + R2b (OH-ox. rev):  A=" << A2b_ << "  n=" << n2b_ << "  E=" << E2b_ * R_J_mol_HMOM / 1000. << "\n"
+        << "    + R3f (O2-ox. fwd):  A=" << A3f_ << "  n=" << n3f_ << "  E=" << E3f_ * R_J_mol_HMOM / 1000. << "\n"
+        << "    + R3b (O2-ox. rev):  A=" << A3b_ << "  n=" << n3b_ << "  E=" << E3b_ * R_J_mol_HMOM / 1000. << "\n"
+        << "    + R4  (C2H2 add.):   A=" << A4_  << "  n=" << n4_  << "  E=" << E4_  * R_J_mol_HMOM / 1000. << "\n"
+        << "    + R5  (O-ox.):       A=" << A5_  << "  n=" << n5_  << "  E=" << E5_  * R_J_mol_HMOM / 1000. << "\n"
+        << "    + eff6 (O-rad.):     " << eff6_ << "\n"
+        << "\n"
+        << " [Surface density]\n"
+        << "    + Chi (#/m2):                    " << surface_density_ << "\n"
+        << "    + T-dependent correction:        " << (surface_density_correction_ ? "yes" : "no") << "\n"
+        << "\n"
+        << " [Transport & radiation]\n"
+        << "    + Schmidt number (-):            " << this->schmidt_number_ << "\n"
+        << "    + Thermophoretic model:          " << this->thermophoretic_model() << "  (" << thermo_str(this->thermophoretic_model_) << ")\n"
+        << "    + Gas consumption:               " << (this->gas_consumption_ ? "yes" : "no") << "\n"
+        << "    + Radiative heat transfer:       " << (this->radiative_heat_transfer_ ? "yes" : "no") << "\n"
+        << "    + Planck coeff. model:           " << static_cast<int>(this->planck_model_) << "  (" << planck_str(this->planck_model_) << ")\n"
+        << "    + Closure dummy species:         " << (this->is_closure_dummy_species_ ? this->closure_dummy_species_ : "none") << "\n"
+        << "\n"
+        << " [Numerical floors]\n"
+        << "    + N floor (#/m3):                " << kSootNumberFloor << "\n"
+        << "    + fv floor (-):                  " << kSootVolumeFloor << "\n"
+        << "    + S floor (m2/m3):               " << kSootSurfaceFloor << "\n"
+        << "\n"
+        << " [Debug]\n"
+        << "    + Debug mode:                    " << (is_debug_mode_ ? "yes" : "no") << "\n"
+        << "------------------------------------------------------------------------------------------\n";
 }
 
 #if defined(MOM_USE_DICTIONARY)

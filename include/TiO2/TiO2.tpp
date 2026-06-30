@@ -841,57 +841,103 @@ template <ThermoMap Thermo> void TiO2<Thermo>::CalculateOmegaGas_internal() noex
 
 template <ThermoMap Thermo> void TiO2<Thermo>::PrintSummary() const
 {
-    std::cout << "\n"
-              << "------------------------------------------------------------------------------------------\n"
-              << "                         TiO2 Nanoparticle Model Summary\n"
-              << "------------------------------------------------------------------------------------------\n"
-              << " * TiO2 density (kg/m3):         " << rho_TiO2_ << "\n"
-              << " * TiO2 mol. weight (kg/kmol):   " << W_TiO2_ << "\n"
-              << "\n"
-              << " * Monomer geometry\n"
-              << "    + nTiO2_min (-):    " << nTiO2_min_ << "\n"
-              << "    + v0 (m3):          " << v0_ << "\n"
-              << "    + d0 (m):           " << d0_ << "\n"
-              << "    + s0 (m2):          " << s0_ << "\n"
-              << "\n"
-              << " * Processes\n"
-              << "    + Nucleation:   " << static_cast<int>(nucleation_variant_) << "\n"
-              << "    + Coagulation:  " << coagulation_model_ << "\n"
-              << "    + Condensation: " << condensation_model_ << "\n"
-              << "    + Sintering:    " << sintering_model_ << "\n"
-              << "\n"
-              << " * Collision enhancement factors\n"
-              << "    + Nucleation:   " << epsilon_nuc_ << "\n"
-              << "    + Coagulation:  " << epsilon_coag_ << "\n"
-              << "    + Condensation: " << epsilon_cond_ << "\n"
-              << "\n"
-              << " * Sintering kinetics (tau_s = As * T^ns * dp^4 * exp(-Ts/T))\n"
-              << "    + As (s/K/m4): " << As_ << "\n"
-              << "    + ns (-):       " << ns_ << "\n"
-              << "    + Ts (K):       " << Ts_ << "\n"
-              << "\n"
-              << " * Precursor: " << precursor_species_ << "\n";
+    // Helper lambdas — no heap allocation, resolved at compile time
+    const auto nuc_str = [](NucleationVariant v) -> const char* {
+        switch (v) {
+            case NucleationVariant::Off:          return "off";
+            case NucleationVariant::Binary:       return "binary (Ti(OH)4+Ti(OH)4)";
+            case NucleationVariant::FixedCluster: return "fixed cluster";
+            default:                               return "unknown";
+        }
+    };
+    const auto thermo_str = [](ThermophoreticModel m) -> const char* {
+        switch (m) {
+            case ThermophoreticModel::Off:      return "off";
+            case ThermophoreticModel::Standard: return "standard";
+            default:                             return "unknown";
+        }
+    };
+    const auto planck_str = [](PlanckCoeffModel m) -> const char* {
+        switch (m) {
+            case PlanckCoeffModel::None:   return "none";
+            case PlanckCoeffModel::Smooke: return "Smooke (1989)";
+            case PlanckCoeffModel::Kent:   return "Kent & Honnery (1990)";
+            case PlanckCoeffModel::Sazhin: return "Sazhin (1994)";
+            default:                        return "unknown";
+        }
+    };
+
+    std::cout
+        << "\n"
+        << "------------------------------------------------------------------------------------------\n"
+        << "                         TiO2 Nanoparticle Model Summary\n"
+        << "------------------------------------------------------------------------------------------\n"
+        << " * Active: " << (this->is_active_ ? "yes" : "no") << "\n"
+        << "\n"
+        << " [Physical properties]\n"
+        << "    + TiO2 density (kg/m3):          " << rho_TiO2_ << "\n"
+        << "    + TiO2 mol. weight (kg/kmol):    " << W_TiO2_ << "\n"
+        << "\n"
+        << " [Monomer / nucleated particle geometry]\n"
+        << "    + nTiO2 per nucleated particle:  " << n0_ << "\n"
+        << "    + nTiO2_min (-):                 " << nTiO2_min_ << "\n"
+        << "    + v0 (m3):                       " << v0_ << "\n"
+        << "    + d0 (m):                        " << d0_ << "\n"
+        << "    + s0 (m2):                       " << s0_ << "\n"
+        << "\n"
+        << " [Processes]\n"
+        << "    + Nucleation:                    " << static_cast<int>(nucleation_variant_) << "  (" << nuc_str(nucleation_variant_) << ")\n"
+        << "    + Coagulation:                   " << coagulation_model_ << "\n"
+        << "    + Condensation:                  " << condensation_model_ << "\n"
+        << "    + Sintering:                     " << sintering_model_ << "\n"
+        << "\n"
+        << " [Collision enhancement factors]\n"
+        << "    + Nucleation (-):                " << epsilon_nuc_ << "\n"
+        << "    + Coagulation (-):               " << epsilon_coag_ << "\n"
+        << "    + Condensation (-):              " << epsilon_cond_ << "\n"
+        << "\n"
+        << " [Sintering kinetics]  tau_s = As * T^ns * dp^4 * exp(Ts/T)\n"
+        << "    + As (s/K^ns/m4):               " << As_ << "\n"
+        << "    + ns (-):                        " << ns_ << "\n"
+        << "    + Ts (K):                        " << Ts_ << "\n"
+        << "    + dp_min (m):                    " << sintering_dp_min_ << "\n"
+        << "\n"
+        << " [Species — precursor]\n"
+        << "    + Name:                          " << precursor_species_ << "\n";
 
     if (precursor_index_ >= 0)
     {
-        std::cout << "    + index:  " << precursor_index_ << "\n"
-                  << "    + MW:     " << W_precursor_ << " kg/kmol\n"
-                  << "    + nTi:    " << nti_precursor_ << "\n"
-                  << "    + nH:     " << nh_precursor_ << "\n"
-                  << "    + nO:     " << no_precursor_ << "\n"
-                  << "    + nC:     " << nc_precursor_ << "\n"
-                  << "    + nu_H2O: " << nu_H2O_from_prec_ << "\n"
-                  << "    + nu_CO2: " << nu_CO2_from_prec_ << "\n"
-                  << "    + nu_O2:  " << nu_O2_from_prec_ << "\n";
+        std::cout
+            << "    + Index (-):                     " << precursor_index_ << "\n"
+            << "    + MW (kg/kmol):                  " << W_precursor_ << "\n"
+            << "    + nTi:                           " << nti_precursor_ << "\n"
+            << "    + nH:                            " << nh_precursor_ << "\n"
+            << "    + nO:                            " << no_precursor_ << "\n"
+            << "    + nC:                            " << nc_precursor_ << "\n"
+            << "    + nu_H2O:                        " << nu_H2O_from_prec_ << "\n"
+            << "    + nu_CO2:                        " << nu_CO2_from_prec_ << "\n"
+            << "    + nu_O2:                         " << nu_O2_from_prec_ << "\n";
     }
 
-    std::cout << "\n"
-              << " * Numerical floors\n"
-              << "    + N_min  (#/m3):  " << N_min_ << "\n"
-              << "    + fv_min (-):     " << fv_min_ << "\n"
-              << "    + v_min  (m3):    " << v_min_ << "\n"
-              << "    + S_min  (m2/m3): " << S_min_ << "\n"
-              << "------------------------------------------------------------------------------------------\n";
+    std::cout
+        << "\n"
+        << " [Transport & radiation]\n"
+        << "    + Schmidt number (-):            " << this->schmidt_number_ << "\n"
+        << "    + Thermophoretic model:          " << this->thermophoretic_model() << "  (" << thermo_str(this->thermophoretic_model_) << ")\n"
+        << "    + Gas consumption:               " << (this->gas_consumption_ ? "yes" : "no") << "\n"
+        << "    + Radiative heat transfer:       " << (this->radiative_heat_transfer_ ? "yes" : "no") << "\n"
+        << "    + Planck coeff. model:           " << static_cast<int>(this->planck_model_) << "  (" << planck_str(this->planck_model_) << ")\n"
+        << "    + Closure dummy species:         " << (this->is_closure_dummy_species_ ? this->closure_dummy_species_ : "none") << "\n"
+        << "\n"
+        << " [Numerical floors]\n"
+        << "    + N_min  (#/m3):                 " << N_min_ << "\n"
+        << "    + fv_min (-):                    " << fv_min_ << "\n"
+        << "    + v_min  (m3):                   " << v_min_ << "\n"
+        << "    + S_min  (m2/m3):                " << S_min_ << "\n"
+        << "\n"
+        << " [Debug]\n"
+        << "    + Debug mode:                    " << (is_debug_mode_ ? "yes" : "no") << "\n"
+        << "------------------------------------------------------------------------------------------\n";
 }
 
 // ============================================================================

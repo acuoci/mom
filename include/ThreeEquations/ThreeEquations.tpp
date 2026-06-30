@@ -1052,61 +1052,112 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateOmegaGas() noe
 // ============================================================================
 template <ThermoMap Thermo> void ThreeEquations<Thermo>::PrintSummary() const
 {
+    // Helper lambdas — no heap allocation, resolved at compile time
+    const auto surf_chem_str = [](SurfaceChemistryModel m) -> const char* {
+        switch (m) {
+            case SurfaceChemistryModel::RCPAH: return "RCPAH (Franzelli 2019)";
+            case SurfaceChemistryModel::HMOM:  return "HMOM HACA kinetics";
+            default:                            return "unknown";
+        }
+    };
+    const auto sticking_str = [](StickingModel m) -> const char* {
+        switch (m) {
+            case StickingModel::Constant: return "constant";
+            case StickingModel::PAH4:     return "PAH 4-ring";
+            default:                       return "unknown";
+        }
+    };
+    const auto dimer_str = [](DimerModel m) -> const char* {
+        switch (m) {
+            case DimerModel::QSSA_Rodrigues: return "QSSA Rodrigues";
+            default:                          return "unknown";
+        }
+    };
+    const auto thermo_str = [](ThermophoreticModel m) -> const char* {
+        switch (m) {
+            case ThermophoreticModel::Off:      return "off";
+            case ThermophoreticModel::Standard: return "standard";
+            default:                             return "unknown";
+        }
+    };
+    const auto planck_str = [](PlanckCoeffModel m) -> const char* {
+        switch (m) {
+            case PlanckCoeffModel::None:   return "none";
+            case PlanckCoeffModel::Smooke: return "Smooke (1989)";
+            case PlanckCoeffModel::Kent:   return "Kent & Honnery (1990)";
+            case PlanckCoeffModel::Sazhin: return "Sazhin (1994)";
+            default:                        return "unknown";
+        }
+    };
+
     std::cout
         << "\n"
         << "------------------------------------------------------------------------------------------\n"
         << "                        3 Equations Soot Model Summary\n"
         << "------------------------------------------------------------------------------------------\n"
-        << " * Soot density (kg/m3):  " << this->rho_particle_ << "\n"
-        << " * Fractal dimension (-): " << Df_ << "\n"
-        << " * Schmidt number (-):    " << this->schmidt_number_ << "\n"
+        << " * Active: " << (this->is_active_ ? "yes" : "no") << "\n"
         << "\n"
-        << " * Processes\n"
-        << "    + Nucleation:     " << nucleation_model_ << "\n"
-        << "    + Coagulation:    " << coagulation_model_ << "\n"
-        << "    + Condensation:   " << condensation_model_ << "\n"
-        << "    + Surface growth: " << surface_growth_model_ << "\n"
-        << "    + Oxidation:      " << oxidation_model_ << "\n"
+        << " [Physical properties]\n"
+        << "    + Soot density (kg/m3):    " << this->rho_particle_ << "\n"
+        << "    + Fractal dimension (-):   " << Df_ << "\n"
         << "\n"
-        << " * Precursor\n"
-        << "    + Name:            " << pah_species_ << "\n"
-        << "    + Index (-):       " << pah_index_ << "\n"
-        << "    + Diameter (m):    " << dpah_ << "\n"
-        << "    + Surface (m2):    " << spah_ << "\n"
-        << "    + Volume (m3):     " << vpah_ << "\n"
-        << "    + MW (kg/kmol):    " << mwpah_ << "\n"
-        << "    + MW simplified:   " << is_simplified_pah_mass_ << "\n"
-        << " * Dimer\n"
-        << "    + Diameter (m):    " << ddim_ << "\n"
-        << "    + Surface (m2):    " << sdim_ << "\n"
-        << "    + Volume (m3):     " << vdim_ << "\n"
-        << "    + MW (kg/kmol):    " << 2. * mwpah_
+        << " [Species — PAH precursor]\n"
+        << "    + Name:                    " << pah_species_ << "\n"
+        << "    + Index (-):               " << pah_index_ << "\n"
+        << "    + Diameter (m):            " << dpah_ << "\n"
+        << "    + Surface (m2):            " << spah_ << "\n"
+        << "    + Volume (m3):             " << vpah_ << "\n"
+        << "    + MW (kg/kmol):            " << mwpah_ << "\n"
+        << "    + Simplified PAH mass:     " << (is_simplified_pah_mass_ ? "yes" : "no") << "\n"
         << "\n"
-        //<< "    + Conc. Model:     " << DimerModel::QSSA_Rodrigues << "\n"
-        //<< "    + Sticking Model:  " << StickingModel::Constant << "\n"
-        << "    + Sticking coeff.: " << sticking_coeff_constant_ << "\n"
-        << " * C2 pair\n"
-        << "    + Diameter (m): " << dc2_ << "\n"
-        << "    + Surface (m2): " << sc2_ << "\n"
-        << "    + Volume (m3):  " << vc2_ << "\n"
+        << " [Particle geometry — dimer]\n"
+        << "    + Diameter (m):            " << ddim_ << "\n"
+        << "    + Surface (m2):            " << sdim_ << "\n"
+        << "    + Volume (m3):             " << vdim_ << "\n"
+        << "    + MW (kg/kmol):            " << 2. * mwpah_ << "\n"
         << "\n"
-        << " * Collision enhancement factors\n"
-        << "    + Nucleation:         " << epsilon_nucleation_ << "\n"
-        << "    + Condensation:       " << epsilon_condensation_ << "\n"
-        << "    + Coagulation:        " << epsilon_coagulation_ << "\n"
+        << " [Particle geometry — C2 pair]\n"
+        << "    + Diameter (m):            " << dc2_ << "\n"
+        << "    + Surface (m2):            " << sc2_ << "\n"
+        << "    + Volume (m3):             " << vc2_ << "\n"
         << "\n"
-        << " * Additional parameters\n"
-        << "    + PAH-PAH correction: " << correction_coeff_pah_pah_
+        << " [Processes]\n"
+        << "    + Nucleation:              " << nucleation_model_ << "\n"
+        << "    + Condensation:            " << condensation_model_ << "\n"
+        << "    + Surface growth:          " << surface_growth_model_ << "\n"
+        << "    + Oxidation:               " << oxidation_model_ << "\n"
+        << "    + Coagulation:             " << coagulation_model_ << "\n"
+        << "    + Surface chemistry model: " << static_cast<int>(surface_chem_model_) << "  (" << surf_chem_str(surface_chem_model_) << ")\n"
+        << "    + Dimer concentration:     " << static_cast<int>(dimer_concentration_model_) << "  (" << dimer_str(dimer_concentration_model_) << ")\n"
+        << "    + Sticking model:          " << static_cast<int>(sticking_model_) << "  (" << sticking_str(sticking_model_) << ")\n"
+        << "    + Sticking coeff. (-):     " << sticking_coeff_constant_ << "\n"
         << "\n"
-    //  << "    + Chemistry model:    " << SurfaceChemistryModel::RCPAH << "\n"
-        << "    + Smooth Heavised:    " << smooth_heaviside_oxidation_ << "\n"
+        << " [Collision enhancement factors]\n"
+        << "    + Nucleation (-):          " << epsilon_nucleation_ << "\n"
+        << "    + Condensation (-):        " << epsilon_condensation_ << "\n"
+        << "    + Coagulation (-):         " << epsilon_coagulation_ << "\n"
         << "\n"
-        << " * Numerical floors\n"
-        << "    + N0 scaling (#/m3): " << N0_scaling_ << "\n"
-        << "    + Ys_min (-):        " << Ys_min_ << "\n"
-        << "    + Ns_min (#/m3):     " << Ns_min_ << "\n"
-        << "    + Ss_min (1/m):      " << Ss_min_ << "\n"
-        << "    + vs_min (m3):       " << vs_min_ << "\n"
+        << " [Additional parameters]\n"
+        << "    + PAH-PAH correction (-):  " << correction_coeff_pah_pah_ << "\n"
+        << "    + Smooth Heaviside ox.:    " << (smooth_heaviside_oxidation_ ? "yes" : "no") << "\n"
+        << "\n"
+        << " [Transport & radiation]\n"
+        << "    + Schmidt number (-):      " << this->schmidt_number_ << "\n"
+        << "    + Thermophoretic model:    " << this->thermophoretic_model() << "  (" << thermo_str(this->thermophoretic_model_) << ")\n"
+        << "    + Gas consumption:         " << (this->gas_consumption_ ? "yes" : "no") << "\n"
+        << "    + Radiative heat transfer: " << (this->radiative_heat_transfer_ ? "yes" : "no") << "\n"
+        << "    + Planck coeff. model:     " << static_cast<int>(this->planck_model_) << "  (" << planck_str(this->planck_model_) << ")\n"
+        << "    + Closure dummy species:   " << (this->is_closure_dummy_species_ ? this->closure_dummy_species_ : "none") << "\n"
+        << "\n"
+        << " [Numerical floors]\n"
+        << "    + N0 scaling (#/m3):       " << N0_scaling_ << "\n"
+        << "    + Ys_min (-):              " << Ys_min_ << "\n"
+        << "    + Ns_min (#/m3):           " << Ns_min_ << "\n"
+        << "    + Ss_min (m2/m3):          " << Ss_min_ << "\n"
+        << "    + vs_min (m3):             " << vs_min_ << "\n"
+        << "\n"
+        << " [Debug]\n"
+        << "    + Debug mode:              " << (is_debug_mode_ ? "yes" : "no") << "\n"
         << "------------------------------------------------------------------------------------------\n";
 }
 

@@ -788,60 +788,115 @@ template <ThermoMap Thermo> double BrookesMoss<Thermo>::diffusion_coefficient() 
 
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::PrintSummary() const
 {
+    // Helper lambdas — no heap allocation, resolved at compile time
+    const auto nuc_str = [](NucleationVariant v) -> const char* {
+        switch (v) {
+            case NucleationVariant::Off:             return "off";
+            case NucleationVariant::BrookesMoss:     return "BrookesMoss";
+            case NucleationVariant::BrookesMossHall: return "BM-Hall (Hall 2016)";
+            default:                                  return "unknown";
+        }
+    };
+    const auto oxid_str = [](OxidationVariant v) -> const char* {
+        switch (v) {
+            case OxidationVariant::Off:             return "off";
+            case OxidationVariant::BrookesMoss:     return "BrookesMoss";
+            case OxidationVariant::BrookesMossHall: return "BM-Hall (Hall 2016)";
+            default:                                  return "unknown";
+        }
+    };
+    const auto thermo_str = [](ThermophoreticModel m) -> const char* {
+        switch (m) {
+            case ThermophoreticModel::Off:      return "off";
+            case ThermophoreticModel::Standard: return "standard";
+            default:                             return "unknown";
+        }
+    };
+    const auto planck_str = [](PlanckCoeffModel m) -> const char* {
+        switch (m) {
+            case PlanckCoeffModel::None:   return "none";
+            case PlanckCoeffModel::Smooke: return "Smooke (1989)";
+            case PlanckCoeffModel::Kent:   return "Kent & Honnery (1990)";
+            case PlanckCoeffModel::Sazhin: return "Sazhin (1994)";
+            default:                        return "unknown";
+        }
+    };
+
     std::cout
         << "\n"
         << "------------------------------------------------------------------------------------------\n"
         << "                        Brookes-Moss Soot Model Summary\n"
         << "------------------------------------------------------------------------------------------\n"
-        << " * Soot density (kg/m3):      " << this->rho_particle_ << "\n"
-        << " * Schmidt number (-):         " << this->schmidt_number_ << "\n"
-        << " * Ns normalisation (#/m3):    " << Ns_norm_ << "\n"
-        << " * Soot particle MW (kg/kmol): " << mwp_ << "\n"
+        << " * Active: " << (this->is_active_ ? "yes" : "no") << "\n"
         << "\n"
-        << " * Processes\n"
-        << "    + Nucleation:     " << static_cast<int>(nucleation_variant_) << "\n"
-        << "    + Surface growth: " << surface_growth_model_ << "\n"
-        << "    + Oxidation:      " << static_cast<int>(oxidation_variant_) << "\n"
-        << "    + Coagulation:    " << coagulation_model_ << "\n"
+        << " [Physical properties]\n"
+        << "    + Soot density (kg/m3):          " << this->rho_particle_ << "\n"
+        << "    + Soot particle MW (kg/kmol):    " << mwp_ << "\n"
+        << "    + Particle diameter (m):          " << dp_ << "\n"
+        << "    + Ns normalisation (#/m3):        " << Ns_norm_ << "\n"
         << "\n"
-        << " * Precursor species:          " << prec_species_ << "  (nC=" << prec_nc_
-        << ", nH=" << prec_nh_ << ")\n"
-        << " * Surface growth species:     " << sg_species_ << "  (nC=" << sg_nc_
-        << ", nH=" << sg_nh_ << ")\n"
+        << " [Species]\n"
+        << "    + Precursor:       " << prec_species_ << "  (nC=" << prec_nc_ << ", nH=" << prec_nh_ << ")\n"
+        << "    + Surface growth:  " << sg_species_   << "  (nC=" << sg_nc_   << ", nH=" << sg_nh_   << ")\n"
+        << "    + C6H6 index (-):  " << index_C6H6_ << "  (< 0 = not found; required for BM-Hall nucleation)\n"
+        << "    + C6H5 index (-):  " << index_C6H5_ << "  (< 0 = not found; required for BM-Hall nucleation)\n"
+        << "    + H2   index (-):  " << index_H2_   << "  (< 0 = not found; required for BM-Hall nucleation)\n"
         << "\n"
-        << " * Nucleation constants\n"
-        << "    + Calpha  = " << Calpha_ << " [1/s]\n"
-        << "    + Talpha  = " << Talpha_ << " [K]\n"
-        << "    + exp_l   = " << exp_l_ << "\n"
+        << " [Processes]\n"
+        << "    + Nucleation:      " << static_cast<int>(nucleation_variant_) << "  (" << nuc_str(nucleation_variant_) << ")\n"
+        << "    + Surface growth:  " << surface_growth_model_ << "\n"
+        << "    + Oxidation:       " << static_cast<int>(oxidation_variant_) << "  (" << oxid_str(oxidation_variant_) << ")\n"
+        << "    + Coagulation:     " << coagulation_model_ << "\n"
         << "\n"
-        << " * Surface growth constants\n"
-        << "    + Cgamma  = " << Cgamma_ << " [kg*m/kmol]\n"
-        << "    + Tgamma  = " << Tgamma_ << " [K]\n"
-        << "    + exp_m   = " << exp_m_ << "\n"
-        << "    + exp_n   = " << exp_n_ << "\n"
+        << " [Standard kinetics]\n"
+        << "    Nucleation:\n"
+        << "      Calpha  = " << Calpha_ << " [1/s]\n"
+        << "      Talpha  = " << Talpha_ << " [K]\n"
+        << "      exp_l   = " << exp_l_ << " [-]\n"
+        << "    Surface growth:\n"
+        << "      Cgamma  = " << Cgamma_ << " [kg*m/kmol]\n"
+        << "      Tgamma  = " << Tgamma_ << " [K]\n"
+        << "      exp_m   = " << exp_m_ << " [-]\n"
+        << "      exp_n   = " << exp_n_ << " [-]\n"
+        << "    Coagulation:\n"
+        << "      Cbeta   = " << Cbeta_ << " [-]\n"
+        << "    Oxidation:\n"
+        << "      Comega  = " << Comega_ << " [kg*m/kmol/s/sqrt(K)]\n"
+        << "      etaColl = " << etaColl_ << " [-]\n"
+        << "      Coxid   = " << Coxid_ << " [-]\n";
+
+    if (nucleation_variant_ == NucleationVariant::BrookesMossHall ||
+        oxidation_variant_  == OxidationVariant::BrookesMossHall)
+    {
+        std::cout
+            << "\n"
+            << " [BM-Hall extended kinetics]\n"
+            << "    Nucleation (phenyl-based):\n"
+            << "      Calpha1_BMH = " << Calpha1_BMH_ << " [kg*m3/kmol2/s]\n"
+            << "      Talpha1_BMH = " << Talpha1_BMH_ << " [K]\n"
+            << "      Calpha2_BMH = " << Calpha2_BMH_ << " [kg*m3/kmol2/s]\n"
+            << "      Talpha2_BMH = " << Talpha2_BMH_ << " [K]\n"
+            << "    Oxidation (OH-extended):\n"
+            << "      Comega2_BMH = " << Comega2_BMH_ << " [kg*m/kmol/s/sqrt(K)]\n"
+            << "      Tomega2_BMH = " << Tomega2_BMH_ << " [K]\n";
+    }
+
+    std::cout
         << "\n"
-        << " * Coagulation constants\n"
-        << "    + Cbeta   = " << Cbeta_ << "\n"
+        << " [Transport & radiation]\n"
+        << "    + Schmidt number (-):       " << this->schmidt_number_ << "\n"
+        << "    + Thermophoretic model:     " << this->thermophoretic_model() << "  (" << thermo_str(this->thermophoretic_model_) << ")\n"
+        << "    + Gas consumption:          " << (this->gas_consumption_ ? "yes" : "no") << "\n"
+        << "    + Radiative heat transfer:  " << (this->radiative_heat_transfer_ ? "yes" : "no") << "\n"
+        << "    + Planck coeff. model:      " << static_cast<int>(this->planck_model_) << "  (" << planck_str(this->planck_model_) << ")\n"
+        << "    + Closure dummy species:    " << (this->is_closure_dummy_species_ ? this->closure_dummy_species_ : "none") << "\n"
         << "\n"
-        << " * Oxidation constants\n"
-        << "    + Comega  = " << Comega_ << " [kg*m/kmol/s/sqrt(K)]\n"
-        << "    + etaColl = " << etaColl_ << "\n"
-        << "    + Coxid   = " << Coxid_ << "\n"
+        << " [Numerical floors]\n"
+        << "    + Ys_min (-):  " << Ys_min_ << "\n"
+        << "    + bs_min (-):  " << bs_min_ << "\n"
         << "\n"
-        << " * BM-Hall extended constants\n"
-        << "    + Calpha1_BMH = " << Calpha1_BMH_ << " [kg*m3/kmol2/s]\n"
-        << "    + Talpha1_BMH = " << Talpha1_BMH_ << " [K]\n"
-        << "    + Calpha2_BMH = " << Calpha2_BMH_ << " [kg*m3/kmol2/s]\n"
-        << "    + Talpha2_BMH = " << Talpha2_BMH_ << " [K]\n"
-        << "    + Comega2_BMH = " << Comega2_BMH_ << " [kg*m/kmol/s/sqrt(K)]\n"
-        << "    + Tomega2_BMH = " << Tomega2_BMH_ << " [K]\n"
-        << "\n"
-        << " * Numerical floors\n"
-        << "    + Ys_min (-):    " << Ys_min_ << "\n"
-        << "    + bs_min (-):    " << bs_min_ << "\n"
-        << "\n"
-        << " * Gas consumption:  " << (this->gas_consumption_ ? "yes" : "no") << "\n"
-        << " * Radiative HT:     " << (this->radiative_heat_transfer_ ? "yes" : "no") << "\n"
+        << " [Debug]\n"
+        << "    + Debug mode:  " << (is_debug_mode_ ? "yes" : "no") << "\n"
         << "------------------------------------------------------------------------------------------\n";
 }
 
