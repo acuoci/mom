@@ -130,33 +130,35 @@ public:
         bool is_active = true; //!< Enable this variant
 
         // ---- Process model selection (integer codes) -----------------------
-        int nucleation_model     = 0; //!< 0=off, 1=BrookesMoss, 2=BrookesMossHall
-        int surface_growth_model = 0; //!< Surface growth model index
-        int oxidation_model      = 0; //!< 0=off, 1=BrookesMoss, 2=BrookesMossHall
-        int coagulation_model    = 0; //!< Coagulation model index
-        int thermophoretic_model = 1; //!< Thermophoretic model
+        int nucleation_model     = 1; //!< 0=off, 1=BrookesMoss, 2=BrookesMossHall
+        int surface_growth_model = 1; //!< Surface growth model index
+        int oxidation_model      = 1; //!< 0=off, 1=BrookesMoss, 2=BrookesMossHall
+        int coagulation_model    = 1; //!< Coagulation model index
+        int thermophoretic_model = 0; //!< Thermophoretic model
 
         // ---- Gas species ---------------------------------------------------
         std::string precursors_species     = "C2H2"; //!< Nucleation precursor species
         std::string surface_growth_species = "C2H2"; //!< Surface growth species
+        std::string benzene_species = "C6H6";
+        std::string phenylradical_species = "C6H5";
 
         // ---- Gas consumption / closure -------------------------------------
         bool        gas_consumption           = false;  //!< Consume gas-phase species
         std::string gas_closure_dummy_species = "none"; //!< Dummy mass-closure species
 
         // ---- Soot/particle properties --------------------------------------
-        double soot_density_kg_m3       = 1800.; //!< Soot density          [kg/m³]
+        double soot_density_kg_m3       = 1800.; //!< Soot density          [kg/m3]
         double soot_particle_diameter_m = 1.e-9; //!< Mean particle diameter [m]
         double soot_particle_mw_kg_kmol = 144.;  //!< Particle MW            [kg/kmol]
-        double ns_norm                  = 1.e15; //!< Ns normalisation value  [#/m³]
+        double ns_norm                  = 1.e15; //!< Ns normalisation value  [#/m3]
 
         // ---- Model kinetic constants ----------------------------------------
         double calpha   = 54.;      //!< Nucleation pre-exponential   [1/s]
         double talpha   = 21000.;   //!< Nucleation activation temp.  [K]
         double cbeta    = 1.0;      //!< Condensation coefficient     [-]
-        double cgamma   = 11700.;   //!< Surface growth pre-exp.      [kg·m/kmol/s]
+        double cgamma   = 11700.;   //!< Surface growth pre-exp.      [kg*m/kmol/s]
         double tgamma   = 12100.;   //!< Surface growth activation T  [K]
-        double comega   = 105.8125; //!< Oxidation pre-exponential    [kg·m/kmol/√K/s]
+        double comega   = 105.8125; //!< Oxidation pre-exponential    [kg*m/kmol/s/sqrt(K)]
         double eta_coll = 0.04;     //!< Coagulation efficiency       [-]
         double coxid    = 0.015;    //!< Oxidation efficiency         [-]
 
@@ -164,6 +166,14 @@ public:
         double sg_exponent1        = 1.; //!< Surface growth exponent 1          [-]
         double sg_exponent2        = 1.; //!< Surface growth exponent 2          [-]
 
+        // ---- Model kinetic constants ----------------------------------------
+        double calpha1_bmh   = 127.*std::pow(10,8.88);  //!< Nucleation pre-exponential   [kg*m3/kmol2/s]
+        double talpha1_bmh   = 4378.;                   //!< Nucleation activation temp.  [K]
+        double calpha2_bmh   = 178*std::pow(10.,9.50);  //!< Nucleation pre-exponential   [kg*m3/kmol2/s]
+        double talpha2_bmh   = 6390.;                   //!< Nucleation activation temp.  [K]
+        double comega2_bmh   = 8903.51;                 //!< Oxidation pre-exponential    [kg*m/kmol/s/sqrt(K)]
+        double tomega2_bmh   = 19778;                   //!< Oxidation activation temp.   [K]
+        
         // ---- Radiation -----------------------------------------------------
         bool        radiative_heat_transfer = true;     //!< Optically-thin radiation
         std::string planck_coefficient      = "Smooke"; //!< Planck mean absorption coefficient
@@ -302,6 +312,8 @@ public:
 
     void SetPrecursors(std::string_view name);
     void SetSurfaceGrowthSpecies(std::string_view name);
+    void SetBenzeneSpecies(std::string_view name);
+    void SetPhenylRadicalSpecies(std::string_view name);
     void SetGasClosureDummySpecies(std::string_view name);
 
     /// Sets normalisation factor for nuclei concentration [#/m3] (default: 1e15).
@@ -315,17 +327,17 @@ public:
 
     // -- BrookesMoss-Hall model constants --------------------------------------
 
-    void SetCalpha1_MBH(double v) noexcept { Calpha1_MBH_ = v; }
+    void SetCalpha1_BMH(double v) noexcept { Calpha1_BMH_ = v; }
 
-    void SetCalpha2_MBH(double v) noexcept { Calpha2_MBH_ = v; }
+    void SetCalpha2_BMH(double v) noexcept { Calpha2_BMH_ = v; }
 
-    void SetTalpha1_MBH(double v) noexcept { Talpha1_MBH_ = v; }
+    void SetTalpha1_BMH(double v) noexcept { Talpha1_BMH_ = v; }
 
-    void SetTalpha2_MBH(double v) noexcept { Talpha2_MBH_ = v; }
+    void SetTalpha2_BMH(double v) noexcept { Talpha2_BMH_ = v; }
 
-    void SetComega2_MBH(double v) noexcept { Comega2_MBH_ = v; }
+    void SetComega2_BMH(double v) noexcept { Comega2_BMH_ = v; }
 
-    void SetTomega2_MBH(double v) noexcept { Tomega2_MBH_ = v; }
+    void SetTomega2_BMH(double v) noexcept { Tomega2_BMH_ = v; }
 
     // -- Model state queries ----------------------------------------------------
 
@@ -432,8 +444,8 @@ private:
     int index_O2_ = -1;    
 
     // -- Particle properties ----------------------------------------------------
-    double dp_  = 25.e-9; //!< soot particle diameter [m] (default 25 nm)
-    double mwp_ = 144.;   //!< soot particle molecular weight [kg/kmol]
+    double dp_  = 0.; //!< soot particle diameter [m]
+    double mwp_ = 0.;   //!< soot particle molecular weight [kg/kmol]
 
     // -- Model constants --------------------------------------------------------
     double Calpha_  = 0.; //!< inception rate pre-exponential
@@ -449,9 +461,12 @@ private:
     double exp_n_   = 0.; //!< exponent for Ys in oxidation
 
     // -- BM-Hall extended constants ---------------------------------------------
-    double Calpha1_MBH_ = 0., Calpha2_MBH_ = 0.;
-    double Talpha1_MBH_ = 0., Talpha2_MBH_ = 0.;
-    double Comega2_MBH_ = 0., Tomega2_MBH_ = 0.;
+    double Calpha1_BMH_ = 0.;
+    double Calpha2_BMH_ = 0.;
+    double Talpha1_BMH_ = 0.;
+    double Talpha2_BMH_ = 0.;
+    double Comega2_BMH_ = 0.;
+    double Tomega2_BMH_ = 0.;
 
     // -- Model flags ------------------------------------------------------------
     NucleationVariant nucleation_variant_ = NucleationVariant::Off;
@@ -460,9 +475,9 @@ private:
     int coagulation_model_                = 0;
 
     // -- Numerical parameters ---------------------------------------------------
-    double Ys_min_  = 1.e-15; //!< minimum Ys used in property calculations
+    double Ys_min_  = 0.; //!< minimum Ys used in property calculations
     double bs_min_  = 0.;     //!< minimum bs used in property calculations
-    double Ns_norm_ = 1.e15;  //!< normalisation factor for Ns [#/m3]
+    double Ns_norm_ = 0.;  //!< normalisation factor for Ns [#/m3]
 
     // -- Gas consumption intermediate quantities --------------------------------
     double dMdt_nucleation_       = 0.; //!< [kg/m3/s]

@@ -58,8 +58,8 @@ template <ThermoMap Thermo> BrookesMoss<Thermo>::BrookesMoss(const Thermo& therm
     this->schmidt_number_          = 50.;
     this->rho_particle_            = 1800.;
     this->planck_model_            = PlanckCoeffModel::Smooke;
-    this->SetThermophoreticModel(1);
-    this->closure_dummy_species_         = "none";
+    this->SetThermophoreticModel(0);
+    this->closure_dummy_species_ = "none";
     this->closure_dummy_index_   = -1;
     this->is_closure_dummy_species_ = false;
 
@@ -84,12 +84,12 @@ template <ThermoMap Thermo> BrookesMoss<Thermo>::BrookesMoss(const Thermo& therm
     exp_n_   = 1.;
 
     // -- BM-Hall extended constants -----------------------------------------
-    Calpha1_MBH_ = 127. * std::pow(10., 8.88);
-    Calpha2_MBH_ = 178. * std::pow(10., 9.50);
-    Talpha1_MBH_ = 4378.;
-    Talpha2_MBH_ = 6390.;
-    Comega2_MBH_ = 8903.51;
-    Tomega2_MBH_ = 19778.;
+    Calpha1_BMH_ = 127. * std::pow(10., 8.88);
+    Calpha2_BMH_ = 178. * std::pow(10., 9.50);
+    Talpha1_BMH_ = 4378.;
+    Talpha2_BMH_ = 6390.;
+    Comega2_BMH_ = 8903.51;
+    Tomega2_BMH_ = 19778.;
 
     // -- Model flags -------------------------------------------------------
     nucleation_variant_   = NucleationVariant::Off;
@@ -133,8 +133,8 @@ template <ThermoMap Thermo> BrookesMoss<Thermo>::BrookesMoss(const Thermo& therm
     index_O2_   = thermo_.IndexOfSpecies("O2");
     index_H2_   = thermo_.IndexOfSpecies("H2");
     index_C2H2_ = thermo_.IndexOfSpecies("C2H2");
-    index_C6H5_ = thermo_.IndexOfSpecies("A1-");
-    index_C6H6_ = thermo_.IndexOfSpecies("A1");
+    index_C6H5_ = -1;
+    index_C6H6_ = -1;
 
     // -- Key species concentrations ----------------------------------------
     conc_H2_ = 0.;
@@ -273,6 +273,46 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::SetSurfaceGrowthSpecies(st
     if (sg_nc_ <= 0.)
         throw std::runtime_error("[BrookesMoss] Surface growth species has no carbon atoms: " +
                                  sg_species_);
+}
+
+// ============================================================================
+// SetBenzene
+// ============================================================================
+
+template <ThermoMap Thermo> void BrookesMoss<Thermo>::SetBenzeneSpecies(std::string_view name)
+{
+    const std::string species_name = std::string(name);
+    index_C6H6_ = thermo_.IndexOfSpecies(name);
+
+    if (index_C6H6_ < 0)
+        throw std::runtime_error("[BrookesMoss] Benzene species not found in mechanism: " +
+                                 species_name);
+
+    double nc = static_cast<double>(thermo_.NumberOfCarbonAtoms(static_cast<unsigned>(index_C6H6_)));
+    double nh = static_cast<double>(thermo_.NumberOfHydrogenAtoms(static_cast<unsigned>(index_C6H6_)));
+
+    if (nc != 6. && nh != 6.)
+        throw std::runtime_error("[BrookesMoss] Benzene species has wrong atomic composition");
+}
+
+// ============================================================================
+// SetPhenylRadical
+// ============================================================================
+
+template <ThermoMap Thermo> void BrookesMoss<Thermo>::SetPhenylRadicalSpecies(std::string_view name)
+{
+    const std::string species_name = std::string(name);
+    index_C6H5_ = thermo_.IndexOfSpecies(name);
+
+    if (index_C6H5_ < 0)
+        throw std::runtime_error("[BrookesMoss] Phenyl radical species not found in mechanism: " +
+                                 species_name);
+
+    double nc = static_cast<double>(thermo_.NumberOfCarbonAtoms(static_cast<unsigned>(index_C6H5_)));
+    double nh = static_cast<double>(thermo_.NumberOfHydrogenAtoms(static_cast<unsigned>(index_C6H5_)));
+
+    if (nc != 6. && nh != 5.)
+        throw std::runtime_error("[BrookesMoss] Phenyl radical species has wrong atomic composition");
 }
 
 // ============================================================================
@@ -477,7 +517,7 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::NucleationSourceTerms_BMH(
     if (conc_C2H2_ > 0.)
     {
         // Inception rate (#/m3/s)
-        const double dNdt1 = 8.* Calpha1_MBH_ * this->Nav_kmol_/mwp_ * ( conc_C2H2_*conc_C2H2_*conc_C6H5_ / (conc_H2_ + 1.e-12) ) * std::exp(-Talpha1_MBH_ / this->T_);
+        const double dNdt1 = 8.* Calpha1_BMH_ * this->Nav_kmol_/mwp_ * ( conc_C2H2_*conc_C2H2_*conc_C6H5_ / (conc_H2_ + 1.e-12) ) * std::exp(-Talpha1_BMH_ / this->T_);
 
         // Inception rate (kg/m3/s)
         dMdt_nucleation_BMH_1_ = mwp_ / this->Nav_kmol_ * dNdt1 ;
@@ -487,7 +527,7 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::NucleationSourceTerms_BMH(
     if (conc_C6H6_ >= 0)
     {
         // Inception rate (#/m3/s)
-        const double dNdt2 = 8.* Calpha2_MBH_ * this->Nav_kmol_/mwp_ * ( conc_C2H2_*conc_C6H6_*conc_C6H5_ / (conc_H2_ + 1.e-12) ) * std::exp(-Talpha2_MBH_ / this->T_);
+        const double dNdt2 = 8.* Calpha2_BMH_ * this->Nav_kmol_/mwp_ * ( conc_C2H2_*conc_C6H6_*conc_C6H5_ / (conc_H2_ + 1.e-12) ) * std::exp(-Talpha2_BMH_ / this->T_);
 
         // Inception rate (kg/m3/s)
         dMdt_nucleation_BMH_2_ = mwp_ / this->Nav_kmol_ * dNdt2 ;
@@ -634,7 +674,7 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::OxidationSourceTerms_BMH()
     // Channel 2: O2 oxidation (Arrhenius-type with BMH constants)
     if (conc_O2_ > 0.)
     {
-        dMdt_oxid += Comega2_MBH_ * conc_O2_ * std::exp(-Tomega2_MBH_ / this->T_) * A;
+        dMdt_oxid += Comega2_BMH_ * conc_O2_ * std::exp(-Tomega2_BMH_ / this->T_) * A;
     }
 
     dMdt_oxidation_ = dMdt_oxid;
@@ -842,11 +882,11 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::PrintSummary() const
         << ", nH=" << sg_nh_ << ")\n"
         << "\n"
         << " * Nucleation constants\n"
-        << "    + Calpha  = " << Calpha_ << "\n"
+        << "    + Calpha  = " << Calpha_ << " [1/s]\n"
         << "    + Talpha  = " << Talpha_ << " [K]\n"
         << "\n"
         << " * Surface growth constants\n"
-        << "    + Cgamma  = " << Cgamma_ << "\n"
+        << "    + Cgamma  = " << Cgamma_ << " [kg*m/kmol]\n"
         << "    + Tgamma  = " << Tgamma_ << " [K]\n"
         << "    + exp_m   = " << exp_m_ << "\n"
         << "    + exp_n   = " << exp_n_ << "\n"
@@ -855,17 +895,17 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::PrintSummary() const
         << "    + Cbeta   = " << Cbeta_ << "\n"
         << "\n"
         << " * Oxidation constants\n"
-        << "    + Comega  = " << Comega_ << "\n"
+        << "    + Comega  = " << Comega_ << " [kg*m/kmol/s/sqrt(K)]\n"
         << "    + etaColl = " << etaColl_ << "\n"
         << "    + Coxid   = " << Coxid_ << "\n"
         << "\n"
         << " * BM-Hall extended constants\n"
-        << "    + Calpha1_MBH = " << Calpha1_MBH_ << "\n"
-        << "    + Calpha2_MBH = " << Calpha2_MBH_ << "\n"
-        << "    + Talpha1_MBH = " << Talpha1_MBH_ << " [K]\n"
-        << "    + Talpha2_MBH = " << Talpha2_MBH_ << " [K]\n"
-        << "    + Comega2_MBH = " << Comega2_MBH_ << "\n"
-        << "    + Tomega2_MBH = " << Tomega2_MBH_ << " [K]\n"
+        << "    + Calpha1_BMH = " << Calpha1_BMH_ << " [kg*m3/kmol2/s]\n"
+        << "    + Talpha1_BMH = " << Talpha1_BMH_ << " [K]\n"
+        << "    + Calpha2_BMH = " << Calpha2_BMH_ << " [kg*m3/kmol2/s]\n"
+        << "    + Talpha2_BMH = " << Talpha2_BMH_ << " [K]\n"
+        << "    + Comega2_BMH = " << Comega2_BMH_ << " [kg*m/kmol/s/sqrt(K)]\n"
+        << "    + Tomega2_BMH = " << Tomega2_BMH_ << " [K]\n"
         << "\n"
         << " * Numerical floors\n"
         << "    + Ys_min (-):    " << Ys_min_ << "\n"
@@ -895,6 +935,8 @@ void BrookesMoss<Thermo>::SetupFromConfig(const Config& cfg)
     // -- Gas species -------------------------------------------------------
     this->SetPrecursors(cfg.precursors_species);
     this->SetSurfaceGrowthSpecies(cfg.surface_growth_species);
+    this->SetBenzeneSpecies(cfg.benzene_species);
+    this->SetPhenylRadicalSpecies(cfg.phenylradical_species);
     this->SetGasClosureDummySpecies(cfg.gas_closure_dummy_species);
     this->SetGasConsumption(cfg.gas_consumption);
 
@@ -916,6 +958,13 @@ void BrookesMoss<Thermo>::SetupFromConfig(const Config& cfg)
     exp_l_   = cfg.nucleation_exponent;
     exp_m_   = cfg.sg_exponent1;
     exp_n_   = cfg.sg_exponent2;
+    Calpha1_BMH_ = cfg.calpha1_bmh;
+    Calpha2_BMH_ = cfg.calpha2_bmh;
+    Comega2_BMH_ = cfg.comega2_bmh;
+    Talpha1_BMH_ = cfg.talpha1_bmh;
+    Talpha2_BMH_ = cfg.talpha2_bmh;
+    Tomega2_BMH_ = cfg.tomega2_bmh;
+
 
     // -- Radiation / transport ---------------------------------------------
     this->SetRadiativeHeatTransfer(cfg.radiative_heat_transfer);
@@ -973,7 +1022,9 @@ BrookesMoss<Thermo>::ParseConfig(DictType& dict)
 
     if (dict.CheckOption("@Precursors"))            dict.ReadString("@Precursors",            cfg.precursors_species);
     if (dict.CheckOption("@SurfaceGrowthSpecies"))  dict.ReadString("@SurfaceGrowthSpecies",  cfg.surface_growth_species);
-    if (dict.CheckOption("@GasClosureDummySpecies")) dict.ReadString("@GasClosureDummySpecies", cfg.gas_closure_dummy_species);
+    if (dict.CheckOption("@GasClosureDummySpecies"))    dict.ReadString("@GasClosureDummySpecies", cfg.gas_closure_dummy_species);
+    if (dict.CheckOption("@Benzene"))                   dict.ReadString("@Benzene",            cfg.benzene_species);
+    if (dict.CheckOption("@PhenylRadical"))             dict.ReadString("@PhenylRadical",      cfg.phenylradical_species);
 
     if (dict.CheckOption("@GasConsumption"))
         dict.ReadBool("@GasConsumption", cfg.gas_consumption);
@@ -1046,7 +1097,7 @@ BrookesMoss<Thermo>::ParseConfig(DictType& dict)
     {
         double v; std::string u;
         dict.ReadMeasure("@Cgamma", v, u);
-        if (u != "kg.m/kmol/s") return std::unexpected(std::string{"@Cgamma: allowed units: kg.m/kmol/s"});
+        if (u != "kg*m/kmol/s") return std::unexpected(std::string{"@Cgamma: allowed units: kg*m/kmol/s"});
         cfg.cgamma = v;
     }
 
@@ -1062,8 +1113,8 @@ BrookesMoss<Thermo>::ParseConfig(DictType& dict)
     {
         double v; std::string u;
         dict.ReadMeasure("@Comega", v, u);
-        if (u != "kg.m/kmol/sqrt(K)/s")
-            return std::unexpected(std::string{"@Comega: allowed units: kg.m/kmol/sqrt(K)/s"});
+        if (u != "kg*m/kmol/sqrt(K)/s")
+            return std::unexpected(std::string{"@Comega: allowed units: kg*m/kmol/sqrt(K)/s"});
         cfg.comega = v;
     }
 
@@ -1073,6 +1124,57 @@ BrookesMoss<Thermo>::ParseConfig(DictType& dict)
     if (dict.CheckOption("@NucleationExponent"))     dict.ReadDouble("@NucleationExponent",     cfg.nucleation_exponent);
     if (dict.CheckOption("@SurfaceGrowthExponent1")) dict.ReadDouble("@SurfaceGrowthExponent1", cfg.sg_exponent1);
     if (dict.CheckOption("@SurfaceGrowthExponent2")) dict.ReadDouble("@SurfaceGrowthExponent2", cfg.sg_exponent2);
+    
+    if (dict.CheckOption("@Calpha1"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@Calpha1", v, u);
+        if (u != "kg*m3/kmol2/s")
+            return std::unexpected(std::string{"@Calpha1: allowed units: kg*m3/kmol2/s"});
+        cfg.calpha1_bmh = v;
+    }
+
+    if (dict.CheckOption("@Talpha1"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@Talpha1", v, u);
+        if (u != "K") return std::unexpected(std::string{"@Talpha1: allowed units: K"});
+        cfg.talpha1_bmh = v;
+    }      
+
+    if (dict.CheckOption("@Calpha2"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@Calpha2", v, u);
+        if (u != "kg*m3/kmol2/s")
+            return std::unexpected(std::string{"@Calpha2: allowed units: kg*m3/kmol2/s"});
+        cfg.calpha2_bmh = v;
+    }    
+
+    if (dict.CheckOption("@Talpha2"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@Talpha2", v, u);
+        if (u != "K") return std::unexpected(std::string{"@Talpha2: allowed units: K"});
+        cfg.talpha2_bmh = v;
+    }    
+
+    if (dict.CheckOption("@Comega2"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@Comega2", v, u);
+        if (u != "1/s")
+            return std::unexpected(std::string{"@Comega2: allowed units: 1/s"});
+        cfg.comega2_bmh = v;
+    }        
+    
+    if (dict.CheckOption("@Tomega2"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@Tomega2", v, u);
+        if (u != "K") return std::unexpected(std::string{"@Tomega2: allowed units: K"});
+        cfg.tomega2_bmh = v;
+    }    
 
     return cfg;
 }
