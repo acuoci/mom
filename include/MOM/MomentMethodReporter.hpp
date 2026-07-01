@@ -102,6 +102,7 @@
 #include "Utilities/OutputFileColumns.h"
 
 #include <cmath>
+#include <numbers>
 #include <numeric>
 #include <span>
 #include <string>
@@ -152,6 +153,57 @@ public:
     template <ThermoMap Thermo> void WriteRow(const AnyMomentMethod<Thermo>& any)
     {
         std::visit([&](const auto& m) { this->WriteRow(m); }, any);
+    }
+
+    // -- NDF snapshot API (ThreeEquations / TiO2 only) ------------------------
+    //
+    // Writes a self-contained NDF file: header + Complete() + data rows.
+    // The caller is responsible for opening and closing @p ndf_out.
+    //
+    // Column layout (all in nm / nm³ consistent units):
+    //   nu[nm3]        particle volume              [nm³]
+    //   n[#/m3/nm3]   dimensional NDF n(ν)         [#/m³_gas / nm³_particle]
+    //   nbar[1/nm3]   normalised NDF nbar(ν)       [1/nm³]
+    //   dsph[nm]      sphere-equivalent diameter   [nm]
+    //   nd[#/m3/nm]   diameter-space NDF n_d(d)    [#/m³_gas / nm]
+    //   ndbar[1/nm]   normalised diameter-space NDF [1/nm]
+    //
+    // The diameter-space NDF uses the Jacobian |dν/dd| = (π/2)·d²:
+    //   n_d(d) = n(ν) · (π/2) · d²
+    //
+    // Compile error (via `requires`) if called for HMOM or BrookesMoss.
+
+    /// Static-dispatch overload — zero overhead, preferred.
+    template <MomentMethod Model>
+    requires HasReconstructedNDF<Model>
+    void WriteReconstructedNDF(const Model& model,
+                               OutputFileColumns& ndf_out,
+                               int    nv                       = 100,
+                               double vmin_nm3                 = 1.0,
+                               double vmax_nm3                 = 1.0e6,
+                               bool   use_regularized_moments  = false,
+                               unsigned precision              = 16);
+
+    /// Runtime-dispatch overload for AnyMomentMethod.
+    /// No-op (silently) for variants that do not support NDF reconstruction.
+    template <ThermoMap Thermo>
+    void WriteReconstructedNDF(const AnyMomentMethod<Thermo>& any,
+                               OutputFileColumns& ndf_out,
+                               int    nv                       = 100,
+                               double vmin_nm3                 = 1.0,
+                               double vmax_nm3                 = 1.0e6,
+                               bool   use_regularized_moments  = false,
+                               unsigned precision              = 16)
+    {
+        std::visit(
+            [&](const auto& m) {
+                using M = std::decay_t<decltype(m)>;
+                if constexpr (HasReconstructedNDF<M>)
+                    this->WriteReconstructedNDF(m, ndf_out, nv, vmin_nm3, vmax_nm3,
+                                                use_regularized_moments, precision);
+                // BrookesMoss / HMOM: silently skip — no NDF reconstruction available.
+            },
+            any);
     }
 
 private:
@@ -300,6 +352,84 @@ template <MomentMethod Model> void MomentMethodReporter::WriteRow(const Model& m
                       m.variant_suffix_output([](std::string_view, double) {});
                   })
         model.variant_suffix_output(add_val);
+}
+
+// ============================================================================
+// WriteReconstructedNDF — template implementation
+// ============================================================================
+//
+// Writes a full NDF snapshot to @p ndf_out.  The function:
+//   1. Registers and locks the 6-column header (AddColumn + Complete).
+//   2. Loops over @p nv logarithmically-spaced volumes [vmin_nm3, vmax_nm3].
+//   3. For each point calls the model's ReconstructedNDF / ReconstructedNormalizedNDF
+//      (both work in SI [m³]), converts to nm-based units, and writes a row.
+//
+// Callers must open @p ndf_out before calling and close it afterwards.
+//
+// Unit derivations
+// ----------------
+//   nbar_SI [1/m³]  →  nbar_nm [1/nm³]    : × 1e-27  (1 m³ = 1e27 nm³)
+//   n_SI [#/m³/m³]  →  n_nm [#/m³/nm³]   : × 1e-27
+//   Jacobian |dν/dd| = (π/2)·d²   where d is in nm and ν in nm³
+//     → n_d  [#/m³/nm]  = n_nm  · (π/2) · dsph_nm²
+//     → ndbar [1/nm]    = nbar_nm · (π/2) · dsph_nm²
+
+template <MomentMethod Model>
+requires HasReconstructedNDF<Model>
+void MomentMethodReporter::WriteReconstructedNDF(const Model& model,
+                                                  OutputFileColumns& ndf_out,
+                                                  int    nv,
+                                                  double vmin_nm3,
+                                                  double vmax_nm3,
+                                                  bool   use_regularized_moments,
+                                                  unsigned precision)
+{
+    // -- Header ---------------------------------------------------------------
+    ndf_out.AddColumn("nu[nm3]",     precision);  //!< particle volume [nm³]
+    ndf_out.AddColumn("n[#/m3/nm3]", precision);  //!< dimensional NDF n(ν) [#/m³_gas/nm³]
+    ndf_out.AddColumn("nbar[1/nm3]", precision);  //!< normalised NDF nbar(ν) [1/nm³]
+    ndf_out.AddColumn("dsph[nm]",    precision);  //!< sphere-equivalent diameter [nm]
+    ndf_out.AddColumn("nd[#/m3/nm]", precision);  //!< diameter-space NDF n_d(d) [#/m³_gas/nm]
+    ndf_out.AddColumn("ndbar[1/nm]", precision);  //!< normalised diameter-space NDF [1/nm]
+    ndf_out.Complete();
+
+    // -- Volume grid: nv points log-spaced in [vmin_nm3, vmax_nm3] -----------
+    constexpr double pi = std::numbers::pi_v<double>;
+
+    if (nv < 2)
+        nv = 2;
+    const double log_ratio = std::log(vmax_nm3 / vmin_nm3) / static_cast<double>(nv - 1);
+
+    for (int i = 0; i < nv; ++i)
+    {
+        const double nu_nm3 = vmin_nm3 * std::exp(static_cast<double>(i) * log_ratio);
+        const double nu_m3  = nu_nm3 * 1.e-27;  // nm³ → m³
+
+        // NDF values from the model (SI: m³ argument, 1/m³ or #/m³/m³ output)
+        const double n_SI    = model.ReconstructedNDF(nu_m3, use_regularized_moments);
+        const double nbar_SI = model.ReconstructedNormalizedNDF(nu_m3, use_regularized_moments);
+
+        // Convert to nm-based units
+        const double n_nm    = n_SI    * 1.e-27;  // [#/m³_gas / nm³_particle]
+        const double nbar_nm = nbar_SI * 1.e-27;  // [1/nm³]
+
+        // Sphere-equivalent diameter [nm] from volume [nm³]
+        const double dsph_nm = std::pow(6. * nu_nm3 / pi, 1. / 3.);
+
+        // Diameter-space NDF via Jacobian |dν/dd| = (π/2)·d²
+        const double jacobian  = (pi / 2.) * dsph_nm * dsph_nm;
+        const double nd_nm     = n_nm    * jacobian;  // [#/m³_gas / nm]
+        const double ndbar_nm  = nbar_nm * jacobian;  // [1/nm]
+
+        ndf_out.NewRow();
+        ndf_out << nu_nm3;
+        ndf_out << n_nm;
+        ndf_out << nbar_nm;
+        ndf_out << dsph_nm;
+        ndf_out << nd_nm;
+        ndf_out << ndbar_nm;
+    }
+    // Caller is responsible for ndf_out.Close().
 }
 
 } // namespace MOM
