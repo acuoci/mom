@@ -155,23 +155,37 @@ public:
         std::visit([&](const auto& m) { this->WriteRow(m); }, any);
     }
 
-    // -- NDF snapshot API (ThreeEquations / TiO2 only) ------------------------
+    // -- NDF snapshot API (ThreeEquations, TiO2, HMOM) ------------------------
     //
-    // Writes a self-contained NDF file: header + Complete() + data rows.
-    // The caller is responsible for opening and closing @p ndf_out.
+    // Writes a self-contained NDF output file: header + Complete() + data rows.
+    // The caller is responsible for opening @p ndf_out before calling and for
+    // closing it afterwards.
     //
-    // Column layout (all in nm / nm³ consistent units):
+    // Core column layout (all in nm / nm³ units):
     //   nu[nm3]        particle volume              [nm³]
-    //   n[#/m3/nm3]   dimensional NDF n(ν)         [#/m³_gas / nm³_particle]
-    //   nbar[1/nm3]   normalised NDF nbar(ν)       [1/nm³]
+    //   n[#/m3/nm3]   dimensional NDF n(v)         [#/m³_gas / nm³_particle]
+    //   nbar[1/nm3]   normalised NDF nbar(v)       [1/nm³]
     //   dsph[nm]      sphere-equivalent diameter   [nm]
     //   nd[#/m3/nm]   diameter-space NDF n_d(d)    [#/m³_gas / nm]
     //   ndbar[1/nm]   normalised diameter-space NDF [1/nm]
     //
-    // The diameter-space NDF uses the Jacobian |dν/dd| = (π/2)·d²:
-    //   n_d(d) = n(ν) · (π/2) · d²
+    // The diameter-space NDF uses the Jacobian |dv/dd_sph| = (π/2)·d_sph²:
+    //   n_d(d) = n(v) · (π/2) · d_sph²
     //
-    // Compile error (via `requires`) if called for HMOM or BrookesMoss.
+    // Variant-specific extra columns (optional, via ndf_extra_output hook):
+    //   Variants may implement:
+    //     template <typename CB> void ndf_extra_output(CB&&) const;
+    //   which is detected at compile time via if constexpr (requires(...)).
+    //   If present, additional model-specific columns are appended after the
+    //   six core columns.  Currently only HMOM implements this hook,
+    //   adding: N0, V0, dp0, NL, VL, dpL_mean, sigma_ndf.
+    //
+    //   ThreeEquations and TiO2 do NOT implement ndf_extra_output; their
+    //   NDF parameters (alpha, sigma, k, …) are already written in the main
+    //   per-timestep reporter output (variant_prefix_output hook).
+    //
+    // Compile error (via `requires HasReconstructedNDF`) if called for
+    // BrookesMoss, which has no NDF reconstruction.
 
     /// Static-dispatch overload — zero overhead, preferred.
     template <MomentMethod Model>
@@ -185,7 +199,7 @@ public:
                                unsigned precision              = 16);
 
     /// Runtime-dispatch overload for AnyMomentMethod.
-    /// No-op (silently) for variants that do not support NDF reconstruction.
+    /// Silent no-op for BrookesMoss (no NDF reconstruction available).
     template <ThermoMap Thermo>
     void WriteReconstructedNDF(const AnyMomentMethod<Thermo>& any,
                                OutputFileColumns& ndf_out,
@@ -201,7 +215,7 @@ public:
                 if constexpr (HasReconstructedNDF<M>)
                     this->WriteReconstructedNDF(m, ndf_out, nv, vmin_nm3, vmax_nm3,
                                                 use_regularized_moments, precision);
-                // BrookesMoss / HMOM: silently skip — no NDF reconstruction available.
+                // BrookesMoss: silently skip — no NDF reconstruction available.
             },
             any);
     }
@@ -358,21 +372,34 @@ template <MomentMethod Model> void MomentMethodReporter::WriteRow(const Model& m
 // WriteReconstructedNDF — template implementation
 // ============================================================================
 //
-// Writes a full NDF snapshot to @p ndf_out.  The function:
-//   1. Registers and locks the 6-column header (AddColumn + Complete).
+// Writes a complete NDF snapshot to @p ndf_out.  Procedure:
+//   1. Registers the 6 core columns + optional variant-specific columns,
+//      then calls Complete() to lock the layout.
 //   2. Loops over @p nv logarithmically-spaced volumes [vmin_nm3, vmax_nm3].
-//   3. For each point calls the model's ReconstructedNDF / ReconstructedNormalizedNDF
-//      (both work in SI [m³]), converts to nm-based units, and writes a row.
+//   3. Per point: calls ReconstructedNDF / ReconstructedNormalizedNDF (SI),
+//      converts to nm-based units, computes the diameter-space NDF, writes row.
+//   4. If the model provides an `ndf_extra_output` hook, its values are appended
+//      after the six core values in each row.
 //
-// Callers must open @p ndf_out before calling and close it afterwards.
+// Callers must open @p ndf_out before the call and close it afterwards.
 //
 // Unit derivations
 // ----------------
-//   nbar_SI [1/m³]  →  nbar_nm [1/nm³]    : × 1e-27  (1 m³ = 1e27 nm³)
-//   n_SI [#/m³/m³]  →  n_nm [#/m³/nm³]   : × 1e-27
-//   Jacobian |dν/dd| = (π/2)·d²   where d is in nm and ν in nm³
-//     → n_d  [#/m³/nm]  = n_nm  · (π/2) · dsph_nm²
-//     → ndbar [1/nm]    = nbar_nm · (π/2) · dsph_nm²
+//   nbar_SI  [1/m³]      →  nbar_nm  [1/nm³]      : × 1e-27  (1 m³ = 1e27 nm³)
+//   n_SI     [#/m³/m³]   →  n_nm     [#/m³/nm³]   : × 1e-27
+//   Jacobian  |dv/dd_sph| = (π/2)·d_sph²   where d is in nm and v in nm³
+//     → n_d    [#/m³/nm]  = n_nm    · (π/2) · d_sph²
+//     → ndbar  [1/nm]     = nbar_nm · (π/2) · d_sph²
+//
+// ndf_extra_output hook
+// ----------------------
+// If the model satisfies:
+//   requires(const Model& m) { m.ndf_extra_output([](std::string_view,double){}); }
+// then in header mode the hook's labels are registered as extra columns, and in
+// row mode the hook's values are written after the six core values.  The hook
+// is called once per row — variant values that do not depend on v (like HMOM's
+// N0, V0, NL, VL) are repeated identically in every row to make the file
+// self-contained.
 
 template <MomentMethod Model>
 requires HasReconstructedNDF<Model>
@@ -385,41 +412,59 @@ void MomentMethodReporter::WriteReconstructedNDF(const Model& model,
                                                   unsigned precision)
 {
     // -- Header ---------------------------------------------------------------
-    ndf_out.AddColumn("nu[nm3]",     precision);  //!< particle volume [nm³]
-    ndf_out.AddColumn("n[#/m3/nm3]", precision);  //!< dimensional NDF n(ν) [#/m³_gas/nm³]
-    ndf_out.AddColumn("nbar[1/nm3]", precision);  //!< normalised NDF nbar(ν) [1/nm³]
-    ndf_out.AddColumn("dsph[nm]",    precision);  //!< sphere-equivalent diameter [nm]
-    ndf_out.AddColumn("nd[#/m3/nm]", precision);  //!< diameter-space NDF n_d(d) [#/m³_gas/nm]
-    ndf_out.AddColumn("ndbar[1/nm]", precision);  //!< normalised diameter-space NDF [1/nm]
+    // Core columns (same for all NDF-capable variants)
+    ndf_out.AddColumn("nu[nm3]",     precision);  // particle volume [nm³]
+    ndf_out.AddColumn("n[#/m3/nm3]", precision);  // dimensional NDF n(v) [#/m³_gas/nm³]
+    ndf_out.AddColumn("nbar[1/nm3]", precision);  // normalised NDF nbar(v) [1/nm³]
+    ndf_out.AddColumn("dsph[nm]",    precision);  // sphere-equivalent diameter [nm]
+    ndf_out.AddColumn("nd[#/m3/nm]", precision);  // diameter-space NDF n_d(d) [#/m³_gas/nm]
+    ndf_out.AddColumn("ndbar[1/nm]", precision);  // normalised diameter-space NDF [1/nm]
+
+    // Variant-specific extra columns (HMOM: N0, V0, dp0, NL, VL, dpL_mean, sigma_ndf)
+    auto add_col = [&](std::string_view label, double /*value*/)
+    {
+        ndf_out.AddColumn(std::string(label), precision);
+    };
+    if constexpr (requires(const Model& m) {
+                      m.ndf_extra_output([](std::string_view, double) {});
+                  })
+        model.ndf_extra_output(add_col);
+
     ndf_out.Complete();
 
-    // -- Volume grid: nv points log-spaced in [vmin_nm3, vmax_nm3] -----------
+    // -- Volume grid: nv points log-spaced in [vmin_nm3, vmax_nm3] nm³ -------
     constexpr double pi = std::numbers::pi_v<double>;
 
     if (nv < 2)
         nv = 2;
     const double log_ratio = std::log(vmax_nm3 / vmin_nm3) / static_cast<double>(nv - 1);
 
+    // Callback used in row mode for ndf_extra_output (uses value, ignores label)
+    auto add_val = [&](std::string_view /*label*/, double value)
+    {
+        ndf_out << value;
+    };
+
     for (int i = 0; i < nv; ++i)
     {
         const double nu_nm3 = vmin_nm3 * std::exp(static_cast<double>(i) * log_ratio);
-        const double nu_m3  = nu_nm3 * 1.e-27;  // nm³ → m³
+        const double nu_m3  = nu_nm3 * 1.e-27;   // nm³ → m³
 
-        // NDF values from the model (SI: m³ argument, 1/m³ or #/m³/m³ output)
+        // Query the model in SI units
         const double n_SI    = model.ReconstructedNDF(nu_m3, use_regularized_moments);
         const double nbar_SI = model.ReconstructedNormalizedNDF(nu_m3, use_regularized_moments);
 
-        // Convert to nm-based units
-        const double n_nm    = n_SI    * 1.e-27;  // [#/m³_gas / nm³_particle]
-        const double nbar_nm = nbar_SI * 1.e-27;  // [1/nm³]
+        // Convert to nm-based units (1 m³ = 1e27 nm³)
+        const double n_nm    = n_SI    * 1.e-27;   // [#/m³_gas / nm³_particle]
+        const double nbar_nm = nbar_SI * 1.e-27;   // [1/nm³]
 
-        // Sphere-equivalent diameter [nm] from volume [nm³]
+        // Sphere-equivalent diameter [nm] from volume [nm³]:  d_sph = (6v/π)^(1/3)
         const double dsph_nm = std::pow(6. * nu_nm3 / pi, 1. / 3.);
 
-        // Diameter-space NDF via Jacobian |dν/dd| = (π/2)·d²
-        const double jacobian  = (pi / 2.) * dsph_nm * dsph_nm;
-        const double nd_nm     = n_nm    * jacobian;  // [#/m³_gas / nm]
-        const double ndbar_nm  = nbar_nm * jacobian;  // [1/nm]
+        // Diameter-space NDF via Jacobian |dv/dd_sph| = (π/2)·d_sph²
+        const double jacobian = (pi / 2.) * dsph_nm * dsph_nm;
+        const double nd_nm    = n_nm    * jacobian;   // [#/m³_gas / nm]
+        const double ndbar_nm = nbar_nm * jacobian;   // [1/nm]
 
         ndf_out.NewRow();
         ndf_out << nu_nm3;
@@ -428,6 +473,12 @@ void MomentMethodReporter::WriteReconstructedNDF(const Model& model,
         ndf_out << dsph_nm;
         ndf_out << nd_nm;
         ndf_out << ndbar_nm;
+
+        // Variant-specific extra values (HMOM: N0, V0, dp0, NL, VL, dpL_mean, sigma_ndf)
+        if constexpr (requires(const Model& m) {
+                          m.ndf_extra_output([](std::string_view, double) {});
+                      })
+            model.ndf_extra_output(add_val);
     }
     // Caller is responsible for ndf_out.Close().
 }
