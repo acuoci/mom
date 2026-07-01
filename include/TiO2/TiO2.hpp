@@ -362,10 +362,14 @@ public:
         };
 
         cb("omegaTot[kg/m3/s]", this->omega_gas_.sum());
-        cb("omegaPrec[kg/m3/s]", omega_at(precursor_index_));
-        cb("omegaO2[kg/m3/s]", omega_at(O2_index_));
-        cb("omegaH2O[kg/m3/s]", omega_at(H2O_index_));
-        cb("omegaCO2[kg/m3/s]", omega_at(CO2_index_));
+        cb("omegaPrecursor[kg/m3/s]", omega_at(precursor_index_));
+        for (const auto& term : gas_stoichiometry_)
+        {
+            if (term.index == precursor_index_)
+                continue;
+            const std::string label = "omegaGas(" + term.species + ")[kg/m3/s]";
+            cb(std::string_view{label}, omega_at(term.index));
+        }
     }
 
     // -- NDF reconstruction ----------------------------------------------------

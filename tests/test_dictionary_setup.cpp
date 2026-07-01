@@ -16,6 +16,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -280,6 +281,11 @@ void requireNear(double value, double expected, const char* message)
         throw std::runtime_error(message);
 }
 
+bool containsLabel(const std::vector<std::string>& labels, std::string_view wanted)
+{
+    return std::find(labels.begin(), labels.end(), wanted) != labels.end();
+}
+
 void checkHMOMDictionarySetup()
 {
     const auto thermo = buildSootThermo();
@@ -518,6 +524,79 @@ void checkTiO2GasStoichiometrySetup()
     require(rejected_unbalanced, "TiO2 accepted an unbalanced explicit gas stoichiometry");
 }
 
+void checkTiO2ReporterLabels()
+{
+    const auto thermo = buildTiO2GasThermo();
+
+    MOM::TiO2<MOM::BasicThermoData> model(thermo);
+    model.SetPrecursor("TiOH4");
+    const std::vector<MOM::TiO2<MOM::BasicThermoData>::GasStoichiometryTerm> stoich{
+        {"TiOH4", -1.0},
+        {"H2O", 2.0}
+    };
+    model.SetGasStoichiometry(stoich);
+    model.SetGasConsumption(true);
+
+    std::vector<std::string> labels;
+    model.variant_prefix_output(
+        [&labels](std::string_view label, double)
+        {
+            labels.emplace_back(label);
+        });
+
+    require(containsLabel(labels, "omegaTot[kg/m3/s]"),
+            "TiO2 reporter is missing total gas-source label");
+    require(containsLabel(labels, "omegaPrecursor[kg/m3/s]"),
+            "TiO2 reporter is missing generic precursor gas-source label");
+    require(containsLabel(labels, "omegaGas(H2O)[kg/m3/s]"),
+            "TiO2 reporter is missing generic gas-stoichiometry species label");
+    require(!containsLabel(labels, "omegaPrec[kg/m3/s]"),
+            "TiO2 reporter still exposes deprecated omegaPrec label");
+    require(!containsLabel(labels, "omegaH2O[kg/m3/s]"),
+            "TiO2 reporter still exposes fixed TiO2 H2O label");
+}
+
+void checkTiO2LegacyAndExplicitStoichiometryMatch()
+{
+    const auto thermo = buildTiO2GasThermo();
+    const double Y[] = {0.10, 0.0, 0.90};
+
+    MOM::TiO2<MOM::BasicThermoData> legacy(thermo);
+    legacy.SetPrecursor("TiOH4");
+    legacy.SetGasConsumption(true);
+    legacy.SetStatus(1500.0, 101325.0, Y);
+    legacy.SetMoments(1.e-8, 1.e-3, 1.e2);
+    legacy.CalculateSourceMoments();
+
+    MOM::TiO2<MOM::BasicThermoData> explicit_model(thermo);
+    explicit_model.SetPrecursor("TiOH4");
+    const std::vector<MOM::TiO2<MOM::BasicThermoData>::GasStoichiometryTerm> stoich{
+        {"TiOH4", -1.0},
+        {"H2O", 2.0}
+    };
+    explicit_model.SetGasStoichiometry(stoich);
+    explicit_model.SetGasConsumption(true);
+    explicit_model.SetStatus(1500.0, 101325.0, Y);
+    explicit_model.SetMoments(1.e-8, 1.e-3, 1.e2);
+    explicit_model.CalculateSourceMoments();
+
+    const auto legacy_sources = legacy.sources();
+    const auto explicit_sources = explicit_model.sources();
+    require(legacy_sources.size() == explicit_sources.size(),
+            "TiO2 legacy and explicit source vectors have different sizes");
+    for (std::size_t i = 0; i < legacy_sources.size(); ++i)
+        requireNear(explicit_sources[i], legacy_sources[i],
+                    "TiO2 explicit stoichiometry changed solid source moments");
+
+    const auto legacy_omega = legacy.omega_gas();
+    const auto explicit_omega = explicit_model.omega_gas();
+    require(legacy_omega.size() == explicit_omega.size(),
+            "TiO2 legacy and explicit omega_gas vectors have different sizes");
+    for (std::size_t i = 0; i < legacy_omega.size(); ++i)
+        requireNear(explicit_omega[i], legacy_omega[i],
+                    "TiO2 explicit stoichiometry changed legacy gas sources");
+}
+
 } // namespace
 
 int main()
@@ -529,6 +608,8 @@ int main()
         checkBrookesMossDictionarySetup();
         checkTiO2DictionarySetup();
         checkTiO2GasStoichiometrySetup();
+        checkTiO2ReporterLabels();
+        checkTiO2LegacyAndExplicitStoichiometryMatch();
 
         std::cout << "[PASS] Dictionary parsing and setup paths for all MOM variants\n";
         return 0;
