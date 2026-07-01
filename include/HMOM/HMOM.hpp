@@ -148,6 +148,63 @@ public:
         double collision_diameter; //!< Aggregate collision diameter dc [m].
     };
 
+    /**
+     * @struct NDFReconstructionData
+     * @brief Parameters of the HMOM two-node NDF reconstruction, smeared to a
+     *        bimodal log-normal for diagnostic visualization.
+     *
+     * @par Physical background
+     * HMOM is a strict two-delta method (Mueller et al. 2009, §3.2).  The
+     * exact NDF carried by the transported moments is:
+     * @code
+     *   n(v) = N0 · δ(v − V0)  +  NL · δ(v − VL)
+     * @endcode
+     * where @c V0 is the fixed nucleation volume (derived from PAH geometry)
+     * and @c VL = NLVL/NL is the mean large-mode aggregate volume.  Both modes
+     * are **point masses** — the four transported moments M00, M10, M01, N0
+     * fully determine the node positions (V0, VL) and weights (N0, NL) but
+     * carry **no information** about within-mode polydispersity.
+     *
+     * @par Smeared visualization
+     * For output purposes each Dirac delta is replaced by a narrow log-normal
+     * kernel with a fixed, purely cosmetic log-volume standard deviation
+     * σ = kNDFSmearSigmaLnV:
+     * @code
+     *   n_vis(v) ≈ N0 · LN(v; μ₀, σ)  +  NL · LN(v; μL, σ)
+     * @endcode
+     * The location parameters preserve the original delta positions as means:
+     * @code
+     *   μ₀ = ln(V0) − σ²/2   so that  ⟨v⟩_small = V0
+     *   μL = ln(VL) − σ²/2   so that  ⟨v⟩_large = VL
+     * @endcode
+     *
+     * @warning The smearing width σ is **not** derived from any transported
+     *          moment; it is a visualization convenience only.  Users should
+     *          not interpret the width of the smeared peaks as physical
+     *          polydispersity information.
+     *
+     * @note All length-containing fields are in SI units [m³, #/m³].
+     *       MomentMethodReporter::WriteReconstructedNDF() applies nm³ conversion.
+     */
+    struct NDFReconstructionData
+    {
+        bool   valid;   //!< True if the reconstruction is physically meaningful.
+
+        // -- Small (nucleation) mode — monodisperse delta at V₀ in HMOM ------
+        double N0;      //!< Number density of the nucleation mode [#/m³].
+        double V0;      //!< Nucleation-mode particle volume [m³/#].
+        double mu0;     //!< Log-normal location: μ₀ = ln(V₀) − σ²/2  [ln(m³)].
+
+        // -- Large (growth / coagulation) mode — monodisperse delta at VL ----
+        double NL;      //!< Number density of the large (growth) mode [#/m³].
+        double VL;      //!< Mean particle volume of the large mode [m³/#].
+        double muL;     //!< Log-normal location: μL = ln(VL) − σ²/2  [ln(m³)].
+
+        // -- Shared cosmetic smearing width -----------------------------------
+        double sigma;   //!< Log-volume std dev used for both smeared modes [-].
+                        //!< Equals kNDFSmearSigmaLnV; stored here for self-containedness.
+    };
+
     // -- Configuration struct ------------------------------------------------
 
     /**
@@ -478,6 +535,75 @@ public:
      */
     [[nodiscard]] std::array<NDFNode, 2> NumberDensityFunctionNodes() const;
 
+    // -- NDF reconstruction (bimodal smeared log-normal) ----------------------
+
+    /**
+     * @brief Compute the bimodal smeared-log-normal NDF reconstruction parameters.
+     *
+     * Converts the two-delta HMOM representation (N0·δ(v−V₀) + NL·δ(v−VL))
+     * into a pair of narrow log-normal kernels of equal width σ = kNDFSmearSigmaLnV
+     * for visualization purposes.  See @c NDFReconstructionData for the full
+     * mathematical specification.
+     *
+     * @par Precondition
+     * Should be called after CalculateSourceMoments() so that N0_, NL_, NLVL_
+     * reflect the current transported moments.
+     *
+     * @param use_regularized_moments  If true, applies a floor @c kTinyNumberDensity
+     *   to N0 so that the reconstruction is well-defined even in particle-free
+     *   cells (useful for diagnostic robustness).
+     * @return  Populated @c NDFReconstructionData on success; an invalid struct
+     *          (valid = false) if the moments are zero or non-finite.
+     */
+    [[nodiscard]] NDFReconstructionData
+    ReconstructedNDFData(bool use_regularized_moments = false) const;
+
+    /**
+     * @brief Normalised smeared NDF  nbar(v) = n_vis(v) / (N0 + NL)  [1/m³].
+     *
+     * Satisfies the MOM::HasReconstructedNDF concept — same call signature as
+     * ThreeEquations and TiO2, enabling transparent dispatch through
+     * MomentMethodReporter::WriteReconstructedNDF().
+     *
+     * @par Formula
+     * @code
+     *   nbar(v) = (N0 · LN(v; μ₀, σ) + NL · LN(v; μL, σ)) / (N0 + NL)
+     * @endcode
+     * where LN denotes the log-normal PDF and σ = kNDFSmearSigmaLnV.
+     *
+     * @param nu                       Particle volume query point [m³].
+     * @param use_regularized_moments  Forwarded to ReconstructedNDFData().
+     * @return  nbar(v) [1/m³]; 0 if moments are invalid or v ≤ 0.
+     */
+    [[nodiscard]] double ReconstructedNormalizedNDF(
+        double nu, bool use_regularized_moments = false) const;
+
+    /**
+     * @brief Dimensional smeared NDF  n_vis(v) [#/m³_gas / m³_particle].
+     *
+     * @par Formula
+     * @code
+     *   n_vis(v) = N0 · LN(v; μ₀, σ)  +  NL · LN(v; μL, σ)
+     * @endcode
+     *
+     * @param nu                       Particle volume query point [m³].
+     * @param use_regularized_moments  Forwarded to ReconstructedNDFData().
+     * @return  n(v) [#/m³_gas / m³_particle]; 0 if moments are invalid or v ≤ 0.
+     */
+    [[nodiscard]] double ReconstructedNDF(
+        double nu, bool use_regularized_moments = false) const;
+
+    /**
+     * @brief Vectorized form of ReconstructedNDF.
+     *
+     * @param nu                       Input volume grid [m³], size n.
+     * @param n                        Output NDF values [#/m³/m³], resized to n.
+     * @param use_regularized_moments  Forwarded to each scalar call.
+     */
+    void ReconstructedNDF(const Eigen::VectorXd& nu,
+                          Eigen::VectorXd&       n,
+                          bool use_regularized_moments = false) const;
+
     /** @brief Small-particle number density N0 [#/m3]. */
     [[nodiscard]] double soot_small_number_density() const noexcept;
 
@@ -652,6 +778,43 @@ public:
         cb("omegaO2[kg/m3/s]", this->omega_gas_[index_O2_]);
         cb("omegaH2O[kg/m3/s]", this->omega_gas_[index_H2O_]);
         cb("omegaOH[kg/m3/s]", this->omega_gas_[index_OH_]);
+    }
+
+    /**
+     * @brief HMOM-specific NDF extra columns: two-node reconstruction parameters.
+     *
+     * Called by MomentMethodReporter::WriteReconstructedNDF() via
+     * `if constexpr (requires(...))` detection — the same extensibility
+     * protocol used by variant_prefix_output / variant_suffix_output.
+     *
+     * Emits seven scalar columns that characterise the HMOM two-node NDF:
+     *   - N0, V0, dp0: nucleation-mode density, volume, and sphere-equivalent diameter.
+     *   - NL, VL, dpL_mean: large-mode density, mean volume, and sphere-equivalent diameter.
+     *   - sigma_ndf: the cosmetic smearing half-width (log-volume) used for visualization.
+     *
+     * These scalars are the **same for every nu grid point** in the NDF output
+     * file — they are node properties, not functions of v.  They are repeated
+     * in each row to make every row of the output file self-contained.
+     *
+     * @tparam CB  Callable with signature `void(std::string_view, double)`.
+     * @param  cb  In header mode: uses the label to register the column.
+     *             In row mode: uses the value to write data.
+     */
+    template <typename CB>
+    void ndf_extra_output(CB&& cb) const
+    {
+        const auto   d       = ReconstructedNDFData();
+        const double dp0_nm  = std::pow(6. * d.V0 / this->pi_, 1. / 3.) * 1.e9;
+        const double dpL_nm  = (d.NL > kSootNumberFloor && d.VL > 0.)
+                                   ? std::pow(6. * d.VL / this->pi_, 1. / 3.) * 1.e9
+                                   : 0.;
+        cb("N0[#/m3]",     d.N0);
+        cb("V0[m3/#]",     d.V0);
+        cb("dp0[nm]",      dp0_nm);
+        cb("NL[#/m3]",     d.NL);
+        cb("VL[m3/#]",     d.VL);
+        cb("dpL_mean[nm]", dpL_nm);
+        cb("sigma_ndf[-]", d.sigma);
     }
 
     /**
@@ -997,6 +1160,26 @@ private:
     static constexpr double kSootVolumeFloor   = 1.e-40; //!< [-]
     static constexpr double kSootSurfaceFloor  = 1.e-30; //!< [m2/m3]
     static constexpr double kMomentEps         = 1.e-300;
+
+    // -- NDF visualization constant --------------------------------------------
+    //
+    /// Log-volume standard deviation used to smear the two HMOM delta-function
+    /// nodes into narrow log-normal kernels for diagnostic visualization.
+    ///
+    /// @par Value choice
+    /// σ_ln(v) = 0.5 corresponds to a geometric standard deviation in primary-
+    /// particle diameter of σ_g,dp = exp(0.5/3) ≈ 1.18, i.e. roughly ±18%
+    /// variation in dp.  On a six-decade log-volume axis this produces a peak
+    /// FWHM of ~0.51 decades (~8 % of the axis), which is clearly visible but
+    /// easily identifiable as a spike rather than a broad mode.
+    ///
+    /// @par Important caveat
+    /// This constant has **no physical meaning**.  HMOM carries no information
+    /// about within-mode polydispersity.  The only physically meaningful
+    /// quantities are the node weights (N0, NL) and positions (V0, VL).
+    /// The smearing is a pure visualization aid to prevent the two delta masses
+    /// from being invisible on a continuous NDF plot.
+    static constexpr double kNDFSmearSigmaLnV = 0.5;
 };
 
 } // namespace MOM

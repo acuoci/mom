@@ -1498,6 +1498,202 @@ template <ThermoMap Thermo> double HMOM<Thermo>::soot_d63() const noexcept
 }
 
 // ============================================================================
+// NDF reconstruction — bimodal smeared log-normal
+// ============================================================================
+//
+// Physical background
+// -------------------
+// HMOM (Mueller et al. 2009, §3.2) is a strict two-delta method.  The exact
+// NDF carried by the four transported moments (M00, M10, M01, N0) is:
+//
+//   n(v) = N0 · δ(v − V0)  +  NL · δ(v − VL)            (1)
+//
+// where:
+//   - N0  [#/m³]: small (nucleation) mode number density — transported as N0_.
+//   - V0  [m³/#]: nucleation particle volume — fixed by PAH geometry, stored as V0_.
+//   - NL  [#/m³]: large (growth) mode number density — NL_ = M00_ − N0_.
+//   - VL  [m³/#]: mean large-mode aggregate volume — VL = NLVL_ / NL_.
+//
+// Both modes are point masses.  The transported moments uniquely determine
+// the node weights and positions but carry NO information about within-mode
+// polydispersity (no second-order moment of the large mode is transported;
+// the closure for fractional moments in the source terms uses a log-normal
+// assumption internally, but the resulting σ_g is a derived diagnostic only —
+// see soot_large_log_geom_std_dev_primary_particle_diameter() — and cannot
+// serve as a reliable width here because GetMissingMoment() evaluates moments
+// at the mean VL/SL, always yielding σ = 0 when substituted into
+// LogGeomStdDevFromMoments()).
+//
+// Smeared visualization
+// ---------------------
+// For diagnostic output each Dirac delta in (1) is replaced by a narrow
+// log-normal kernel of common width σ = kNDFSmearSigmaLnV:
+//
+//   n_vis(v) = N0 · LN(v; μ₀, σ)  +  NL · LN(v; μL, σ)  (2)
+//
+// where the log-normal PDF in volume space is:
+//
+//   LN(v; μ, σ) = (σ · v · √(2π))⁻¹ · exp(−(ln(v) − μ)² / (2σ²))
+//
+// The location parameters μ₀, μL preserve the original node positions as
+// the mean of each smeared distribution:
+//
+//   μ₀ = ln(V0) − σ²/2   →   ⟨v⟩_small = exp(μ₀ + σ²/2) = V0  ✓
+//   μL = ln(VL) − σ²/2   →   ⟨v⟩_large = exp(μL + σ²/2) = VL  ✓
+//
+// Implementation notes
+// --------------------
+// - PDF evaluations are performed in the log domain to avoid exp() overflow
+//   for extreme v values:
+//
+//     ln(LN(v; μ, σ)) = −ln(v) − ln(σ) − ½ln(2π) − (ln(v)−μ)²/(2σ²)
+//
+//   The log value is clamped to [ln(DBL_MIN), ln(DBL_MAX)] before exp().
+//   Values outside this range produce 0 (deep tail → effectively zero density).
+//
+// - All methods require GetMoments() (called by CalculateSourceMoments()) to
+//   have been invoked so that N0_, NL_, NLVL_ hold up-to-date values.
+
+template <ThermoMap Thermo>
+typename HMOM<Thermo>::NDFReconstructionData
+HMOM<Thermo>::ReconstructedNDFData(bool use_regularized_moments) const
+{
+    NDFReconstructionData d{};
+    d.valid = false;
+
+    // -- Retrieve node weights from cached state -------------------------------
+    // N0_ and NL_ are updated by GetMoments() inside CalculateSourceMoments().
+    double N0 = N0_;   // small-mode number density [#/m³]
+    double NL = NL_;   // large-mode number density [#/m³]
+
+    if (use_regularized_moments)
+    {
+        // Apply a floor to the nucleation-mode density so that the
+        // reconstruction is well-defined even in particle-free cells.
+        // Mirrors the regularization used by ThreeEquations and TiO2.
+        N0 = std::max(N0, kTinyNumberDensity);
+        NL = std::max(NL, 0.);
+    }
+
+    if (N0 <= 0. && NL <= 0.)
+        return d;   // no soot present; reconstruction undefined
+
+    // -- Small (nucleation) mode parameters -----------------------------------
+    // V0_ is computed from the PAH geometry during SetupFromConfig() and is
+    // constant for the lifetime of the HMOM object.  It does NOT change with
+    // the transported moments.
+    const double V0 = V0_;
+    if (V0 <= 0. || !std::isfinite(V0))
+        return d;
+
+    // -- Large (growth / coagulation) mode parameters -------------------------
+    // VL is the number-averaged aggregate volume for the large mode.
+    // Falls back to V0 when NL is below the numerical floor (no large mode yet).
+    const double VL = (NL > kSootNumberFloor && NLVL_ > kSootVolumeFloor)
+                          ? NLVL_ / NL
+                          : V0;   // fallback: large mode not yet meaningful
+    if (VL <= 0. || !std::isfinite(VL))
+        return d;
+
+    // -- Cosmetic smearing: same σ for both modes ----------------------------
+    // σ = kNDFSmearSigmaLnV is a fixed visualization constant.
+    // It does NOT encode physical polydispersity (see class-level comment).
+    //
+    // The location parameters are chosen so that the mean of each log-normal
+    // equals the original delta position:
+    //   E[v | LN(μ, σ)] = exp(μ + σ²/2) = V  →  μ = ln(V) − σ²/2
+    const double sigma = kNDFSmearSigmaLnV;
+    const double mu0   = std::log(V0) - 0.5 * sigma * sigma;
+    const double muL   = std::log(VL) - 0.5 * sigma * sigma;
+
+    d.valid = true;
+    d.N0    = std::max(N0, 0.);
+    d.V0    = V0;
+    d.mu0   = mu0;
+    d.NL    = std::max(NL, 0.);
+    d.VL    = VL;
+    d.muL   = muL;
+    d.sigma = sigma;
+    return d;
+}
+
+template <ThermoMap Thermo>
+double HMOM<Thermo>::ReconstructedNDF(double nu, bool use_regularized_moments) const
+{
+    if (!std::isfinite(nu) || nu <= 0.)
+        return 0.;
+
+    const auto d = ReconstructedNDFData(use_regularized_moments);
+    if (!d.valid)
+        return 0.;
+
+    // Shared pre-computations (avoids recomputing per mode)
+    const double log_nu       = std::log(nu);
+    const double log_sigma    = std::log(d.sigma);
+    const double half_log_2pi = 0.5 * std::log(2. * this->pi_);
+    const double log_dbl_min  = std::log(std::numeric_limits<double>::min());
+    const double log_dbl_max  = std::log(std::numeric_limits<double>::max());
+
+    // Evaluate the log-normal PDF entirely in the log domain to prevent
+    // exp() overflow when v is far into the tails of either mode.
+    //
+    //   ln(LN(v; μ, σ)) = −ln(v) − ln(σ) − ½ln(2π) − (ln(v)−μ)²/(2σ²)
+    //
+    auto lognorm_pdf = [&](double mu) -> double
+    {
+        const double z  = (log_nu - mu) / d.sigma;
+        const double lg = -log_nu - log_sigma - half_log_2pi - 0.5 * z * z;
+        return (lg > log_dbl_min && lg < log_dbl_max) ? std::exp(lg) : 0.;
+    };
+
+    double n = 0.;
+
+    // Small-mode contribution: N0 · LN(v; μ₀, σ)
+    // Smears the nucleation-mode Dirac delta at V0 into a narrow peak.
+    if (d.N0 > 0.)
+        n += d.N0 * lognorm_pdf(d.mu0);
+
+    // Large-mode contribution: NL · LN(v; μL, σ)
+    // Smears the growth-mode Dirac delta at VL into a narrow peak.
+    if (d.NL > 0.)
+        n += d.NL * lognorm_pdf(d.muL);
+
+    return (std::isfinite(n) && n >= 0.) ? n : 0.;
+}
+
+template <ThermoMap Thermo>
+double HMOM<Thermo>::ReconstructedNormalizedNDF(double nu, bool use_regularized_moments) const
+{
+    if (!std::isfinite(nu) || nu <= 0.)
+        return 0.;
+
+    const auto d = ReconstructedNDFData(use_regularized_moments);
+    if (!d.valid)
+        return 0.;
+
+    const double N_tot = d.N0 + d.NL;
+    if (N_tot <= 0.)
+        return 0.;
+
+    // nbar(v) = n_vis(v) / (N0 + NL)
+    // ReconstructedNDF() makes one additional ReconstructedNDFData() call; this
+    // is acceptable for the typical 100-point NDF grid (cheap struct from cached
+    // members).  Keeping separate functions avoids duplicating the PDF logic.
+    const double n = ReconstructedNDF(nu, use_regularized_moments);
+    return (std::isfinite(n) && n >= 0.) ? n / N_tot : 0.;
+}
+
+template <ThermoMap Thermo>
+void HMOM<Thermo>::ReconstructedNDF(const Eigen::VectorXd& nu,
+                                    Eigen::VectorXd&       n,
+                                    bool use_regularized_moments) const
+{
+    n.resize(nu.size());
+    for (int i = 0; i < nu.size(); ++i)
+        n(i) = ReconstructedNDF(nu(i), use_regularized_moments);
+}
+
+// ============================================================================
 // Coagulation breakdown span accessors
 // ============================================================================
 

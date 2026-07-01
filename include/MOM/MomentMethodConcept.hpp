@@ -182,6 +182,24 @@ concept MomentMethod =
     };
 
 /**
+ * @concept HasReconstructedNDF
+ * @brief Satisfied by models that provide a Pareto + log-normal NDF reconstruction.
+ *
+ * Currently satisfied by ThreeEquations and TiO2.  Not satisfied by HMOM or
+ * BrookesMoss, which do not reconstruct the particle size distribution.
+ *
+ * Used by MomentMethodReporter::WriteReconstructedNDF to conditionally enable
+ * NDF output for capable variants without any modification to the reporter or
+ * to non-NDF variants.
+ */
+template <typename M>
+concept HasReconstructedNDF =
+    requires(const M& cm) {
+        { cm.ReconstructedNDF(0.0, false) }           -> std::same_as<double>;
+        { cm.ReconstructedNormalizedNDF(0.0, false) } -> std::same_as<double>;
+    };
+
+/**
  * @brief Illustrates the "one line to switch" idiom.
  *
  * The `static_assert` fires at include time with a clear message if the

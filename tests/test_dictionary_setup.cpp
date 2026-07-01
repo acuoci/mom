@@ -16,6 +16,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -87,6 +88,19 @@ MOM::BasicThermoData buildTiO2Thermo()
     th.no    = {4, 2};
     th.nn    = {0, 2};
     th.nti   = {1, 0};
+    return th;
+}
+
+MOM::BasicThermoData buildTiO2GasThermo()
+{
+    MOM::BasicThermoData th;
+    th.names = {"TiOH4", "H2O", "N2"};
+    th.mw    = {115.899, 18.015, 28.014};
+    th.nc    = {0, 0, 0};
+    th.nh    = {4, 2, 0};
+    th.no    = {4, 1, 0};
+    th.nn    = {0, 0, 2};
+    th.nti   = {1, 0, 0};
     return th;
 }
 
@@ -206,7 +220,7 @@ FakeDictionary buildTiO2Dictionary()
 {
     FakeDictionary dict;
 
-    dict.bools["@TiO2"] = true;
+    dict.bools["@MetalOxide"] = true;
     dict.bools["@GasConsumption"] = false;
     dict.bools["@SinteringDeferred"] = true;
 
@@ -214,23 +228,42 @@ FakeDictionary buildTiO2Dictionary()
     dict.ints["@CoagulationModel"] = 1;
     dict.ints["@CondensationModel"] = 0;
     dict.ints["@ThermophoreticModel"] = 0;
-    dict.ints["@MinimumTiO2Units"] = 3;
-    dict.ints["@NucleatedParticleTiO2Units"] = 6;
+    dict.ints["@MinimumFormulaUnits"] = 3;
+    dict.ints["@NucleatedParticleFormulaUnits"] = 6;
 
     dict.doubles["@SchmidtNumber"] = 39.0;
     dict.doubles["@MinimumFv"] = 1.e-20;
     dict.doubles["@ns"] = 1.25;
+    dict.doubles["@SolidFormulaUnitsPerPrecursor"] = 2.0;
 
     dict.strings["@Precursor"] = "TiOH4";
+    dict.strings["@SolidName"] = "GenericOxide";
     dict.strings["@GasClosureDummySpecies"] = "none";
     dict.strings["@NucleationModel"] = "fixed-cluster";
 
+    dict.measures["@SolidMolecularWeight"] = {100.0, "kg/kmol"};
+    dict.measures["@SolidDensity"] = {4.5, "g/cm3"};
     dict.measures["@SinteringDpMinimum"] = {3.0, "nm"};
     dict.measures["@SinteringTauMinimum"] = {1.e-8, "s"};
     dict.measures["@SinteringKMaximum"] = {1.e9, "1/s"};
     dict.measures["@As"] = {8.0e16, "s,K,m"};
     dict.measures["@Ts"] = {32000.0, "K"};
     dict.measures["@MinimumNs"] = {4.0, "#/cm3"};
+
+    return dict;
+}
+
+FakeDictionary buildTiO2GasDictionary()
+{
+    FakeDictionary dict;
+
+    dict.bools["@MetalOxide"] = true;
+    dict.bools["@GasConsumption"] = true;
+
+    dict.strings["@Precursor"] = "TiOH4";
+    dict.strings["@GasClosureDummySpecies"] = "none";
+    dict.strings["@NucleationModel"] = "binary";
+    dict.strings["@GasStoichiometry"] = "\"TiOH4:-1,H2O:2\"";
 
     return dict;
 }
@@ -246,6 +279,11 @@ void requireNear(double value, double expected, const char* message)
     const double scale = std::max({1.0, std::abs(value), std::abs(expected)});
     if (std::abs(value - expected) > 1.e-12 * scale)
         throw std::runtime_error(message);
+}
+
+bool containsLabel(const std::vector<std::string>& labels, std::string_view wanted)
+{
+    return std::find(labels.begin(), labels.end(), wanted) != labels.end();
 }
 
 void checkHMOMDictionarySetup()
@@ -384,6 +422,12 @@ void checkTiO2DictionarySetup()
     require(cfg.has_value(), "TiO2 ParseConfig returned an unexpected error");
     require(cfg->is_active, "TiO2 activation flag was not parsed");
     require(cfg->precursor_species == "TiOH4", "TiO2 @Precursor was not parsed");
+    require(cfg->solid_name == "GenericOxide", "TiO2 @SolidName was not parsed");
+    requireNear(cfg->solid_molecular_weight_kg_kmol, 100.0,
+                "TiO2 @SolidMolecularWeight was not parsed");
+    requireNear(cfg->solid_density_kg_m3, 4500.0, "TiO2 @SolidDensity conversion failed");
+    requireNear(cfg->solid_formula_units_per_precursor, 2.0,
+                "TiO2 @SolidFormulaUnitsPerPrecursor was not parsed");
     require(cfg->nucleation_model == "fixed-cluster", "TiO2 @NucleationModel was not parsed");
     require(cfg->sintering_model == 0, "TiO2 @SinteringModel was not parsed");
     require(cfg->coagulation_model == 1, "TiO2 @CoagulationModel was not parsed");
@@ -404,6 +448,11 @@ void checkTiO2DictionarySetup()
     const auto& tio2 = std::get<MOM::TiO2<MOM::BasicThermoData>>(model);
     require(tio2.is_active(), "TiO2 model was not activated");
     require(tio2.precursor_species() == "TiOH4", "TiO2 precursor species was not applied");
+    require(tio2.solid_name() == "GenericOxide", "TiO2 solid name was not applied");
+    requireNear(tio2.solid_molecular_weight(), 100.0, "TiO2 solid molecular weight was not applied");
+    requireNear(tio2.solid_density(), 4500.0, "TiO2 solid density was not applied");
+    requireNear(tio2.solid_formula_units_per_precursor(), 2.0,
+                "TiO2 formula units per precursor was not applied");
     require(tio2.nucleation_model() == 2, "TiO2 nucleation flag was not applied");
     require(tio2.sintering_model() == 0, "TiO2 sintering flag was not applied");
     require(tio2.coagulation_model() == 1, "TiO2 coagulation flag was not applied");
@@ -411,6 +460,117 @@ void checkTiO2DictionarySetup()
     require(tio2.thermophoretic_model() == 0, "TiO2 thermophoretic flag was not applied");
     require(!tio2.gas_consumption(), "TiO2 gas-consumption flag was not applied");
     requireNear(tio2.schmidt_number(), 39.0, "TiO2 Schmidt number was not applied");
+}
+
+void checkTiO2GasStoichiometrySetup()
+{
+    const auto thermo = buildTiO2GasThermo();
+
+    auto parse_dict = buildTiO2GasDictionary();
+    auto cfg = MOM::TiO2<MOM::BasicThermoData>::ParseConfig(parse_dict);
+
+    require(parse_dict.grammar_was_set, "ParseConfig did not install the TiO2 gas grammar");
+    require(cfg.has_value(), "TiO2 gas ParseConfig returned an unexpected error");
+    require(cfg->gas_consumption, "TiO2 gas @GasConsumption was not parsed");
+    require(cfg->gas_stoichiometry.size() == 2u, "TiO2 @GasStoichiometry was not parsed");
+    require(cfg->gas_stoichiometry[0].species == "TiOH4",
+            "TiO2 first gas-stoichiometry species was not parsed");
+    requireNear(cfg->gas_stoichiometry[0].coefficient, -1.0,
+                "TiO2 first gas-stoichiometry coefficient was not parsed");
+    require(cfg->gas_stoichiometry[1].species == "H2O",
+            "TiO2 second gas-stoichiometry species was not parsed");
+    requireNear(cfg->gas_stoichiometry[1].coefficient, 2.0,
+                "TiO2 second gas-stoichiometry coefficient was not parsed");
+
+    auto setup_dict = buildTiO2GasDictionary();
+    auto model = MOM::MakeAnyMomentMethod<MOM::BasicThermoData>(thermo, "TiO2");
+    MOM::SetupFromDictionary(model, setup_dict);
+
+    auto& tio2 = std::get<MOM::TiO2<MOM::BasicThermoData>>(model);
+    require(tio2.gas_consumption(), "TiO2 explicit gas-consumption flag was not applied");
+
+    const double Y[] = {0.10, 0.0, 0.90};
+    tio2.SetStatus(1500.0, 101325.0, Y);
+    tio2.CalculateSourceMoments();
+
+    const auto omega = tio2.omega_gas();
+    require(omega.size() == 3u, "TiO2 omega_gas size is wrong");
+    require(omega[0] < 0.0, "TiO2 explicit stoichiometry did not consume precursor");
+    require(omega[1] > 0.0, "TiO2 explicit stoichiometry did not produce H2O");
+    requireNear(omega[1] / (-omega[0]), 2.0 * 18.015 / 115.899,
+                "TiO2 explicit gas stoichiometry produced the wrong H2O/precursor mass ratio");
+
+    bool rejected_unbalanced = false;
+    try
+    {
+        MOM::TiO2<MOM::BasicThermoData>::Config bad;
+        bad.precursor_species = "TiOH4";
+        bad.gas_consumption = true;
+        bad.gas_stoichiometry = {{"TiOH4", -1.0}};
+
+        MOM::TiO2<MOM::BasicThermoData> bad_model(thermo);
+        bad_model.SetupFromConfig(bad);
+    }
+    catch (const std::runtime_error&)
+    {
+        rejected_unbalanced = true;
+    }
+    require(rejected_unbalanced, "TiO2 accepted an unbalanced explicit gas stoichiometry");
+}
+
+void checkTiO2ReporterLabels()
+{
+    const auto thermo = buildTiO2GasThermo();
+
+    MOM::TiO2<MOM::BasicThermoData> model(thermo);
+    model.SetPrecursor("TiOH4");
+    const std::vector<MOM::TiO2<MOM::BasicThermoData>::GasStoichiometryTerm> stoich{
+        {"TiOH4", -1.0},
+        {"H2O", 2.0}
+    };
+    model.SetGasStoichiometry(stoich);
+    model.SetGasConsumption(true);
+
+    std::vector<std::string> labels;
+    model.variant_prefix_output(
+        [&labels](std::string_view label, double)
+        {
+            labels.emplace_back(label);
+        });
+
+    require(containsLabel(labels, "omegaTot[kg/m3/s]"),
+            "TiO2 reporter is missing total gas-source label");
+    require(containsLabel(labels, "omegaPrecursor[kg/m3/s]"),
+            "TiO2 reporter is missing generic precursor gas-source label");
+    require(containsLabel(labels, "omegaGas(H2O)[kg/m3/s]"),
+            "TiO2 reporter is missing generic gas-stoichiometry species label");
+    require(!containsLabel(labels, "omegaPrec[kg/m3/s]"),
+            "TiO2 reporter still exposes deprecated omegaPrec label");
+    require(!containsLabel(labels, "omegaH2O[kg/m3/s]"),
+            "TiO2 reporter still exposes fixed TiO2 H2O label");
+}
+
+void checkTiO2RequiresExplicitGasStoichiometry()
+{
+    const auto thermo = buildTiO2GasThermo();
+
+    bool rejected_missing_stoichiometry = false;
+    try
+    {
+        MOM::TiO2<MOM::BasicThermoData>::Config cfg;
+        cfg.precursor_species = "TiOH4";
+        cfg.gas_consumption = true;
+
+        MOM::TiO2<MOM::BasicThermoData> model(thermo);
+        model.SetupFromConfig(cfg);
+    }
+    catch (const std::runtime_error&)
+    {
+        rejected_missing_stoichiometry = true;
+    }
+
+    require(rejected_missing_stoichiometry,
+            "TiO2 accepted gas consumption without explicit gas stoichiometry");
 }
 
 } // namespace
@@ -423,6 +583,9 @@ int main()
         checkThreeEquationsDictionarySetup();
         checkBrookesMossDictionarySetup();
         checkTiO2DictionarySetup();
+        checkTiO2GasStoichiometrySetup();
+        checkTiO2ReporterLabels();
+        checkTiO2RequiresExplicitGasStoichiometry();
 
         std::cout << "[PASS] Dictionary parsing and setup paths for all MOM variants\n";
         return 0;

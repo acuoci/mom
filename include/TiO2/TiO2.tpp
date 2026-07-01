@@ -41,8 +41,9 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <span>
 #include <numeric>
+#include <span>
+#include <sstream>
 namespace MOM
 {
 
@@ -52,10 +53,10 @@ namespace MOM
 
 template <ThermoMap Thermo> TiO2<Thermo>::TiO2(const Thermo& thermo) : thermo_(thermo)
 {
-    // -- Fixed material / physics constants (not user-configurable) --------
-    // TiO2 density is a known material property; Planck model is None because
-    // TiO2 is a dielectric and does not emit thermally at soot wavelengths.
-    this->rho_particle_ = rho_TiO2_;
+    // -- Default material / physics constants -----------------------------
+    // Config{} keeps TiO2/anatase as the default material. The material can be
+    // replaced at setup time for generic metal-oxide use.
+    this->rho_particle_ = solid_density_kg_m3_;
     this->planck_model_ = PlanckCoeffModel::None;
 
     // -- Enhancement factors (not exposed in Config; set before ApplyConfig
@@ -72,7 +73,8 @@ template <ThermoMap Thermo> TiO2<Thermo>::TiO2(const Thermo& thermo) : thermo_(t
 
     // -- Apply all tunable parameter defaults from Config{} ----------------
     // Config{} is the single source of truth for every numerical constant.
-    // ApplyConfig calls Precalculations() internally after setting nTiO2_min_
+    // ApplyConfig calls Precalculations() internally after setting
+    // n_formula_units_min_
     // and the other geometry-affecting parameters.
     ApplyConfig(Config{});
 
@@ -97,7 +99,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::MemoryAllocation()
     // Initial moments (IC at numerical floor values)
     const double N0  = std::max(N_min_, 0.0);
     const double fv0 = N0 * v0_;
-    const double Y0  = rho_TiO2_ / 1.0 * fv0; // reference gas density 1 kg/m3
+    const double Y0  = solid_density_kg_m3_ / 1.0 * fv0; // reference gas density 1 kg/m3
     const double S0  = N0 * s0_;
 
     initial_moments_cache_(0) = Y0;
@@ -106,14 +108,12 @@ template <ThermoMap Thermo> void TiO2<Thermo>::MemoryAllocation()
 }
 
 // ============================================================================
-// Precalculations  (call whenever nTiO2_min_ or vprec_/dprec_ change)
+// Precalculations  (call whenever n_formula_units_min_ or vprec_/dprec_ change)
 // ============================================================================
 
 template <ThermoMap Thermo> void TiO2<Thermo>::Precalculations()
 {
-    const double v_TiO2 = m_TiO2_ / rho_TiO2_;
-
-    v0_ = static_cast<double>(nTiO2_min_) * v_TiO2;
+    v0_ = static_cast<double>(n_formula_units_min_) * solid_formula_unit_volume_m3_;
     d0_ = std::pow(6. * v0_ / this->pi_, 1. / 3.);
     s0_ = this->pi_ * d0_ * d0_;
 
@@ -122,14 +122,74 @@ template <ThermoMap Thermo> void TiO2<Thermo>::Precalculations()
 
     // Kernel prefactor for nucleation (temperature-independent part)
     if (vprec_ > 0. && dprec_ > 0.)
-        alpha_nuc_ = epsilon_nuc_ * std::sqrt(this->pi_ * this->kB_ / (2. * rho_TiO2_)) *
+        alpha_nuc_ = epsilon_nuc_ * std::sqrt(this->pi_ * this->kB_ / (2. * solid_density_kg_m3_)) *
                      std::sqrt(2. / vprec_) * std::pow(2. * dprec_, 2.);
     else
         alpha_nuc_ = 0.;
 
-    alpha_coag_ = epsilon_coag_ * std::sqrt(this->pi_ * this->kB_ / (2. * rho_TiO2_));
+    alpha_coag_ = epsilon_coag_ * std::sqrt(this->pi_ * this->kB_ / (2. * solid_density_kg_m3_));
 
-    alpha_cond_ = epsilon_cond_ * std::sqrt(this->pi_ * this->kB_ / (2. * rho_TiO2_));
+    alpha_cond_ = epsilon_cond_ * std::sqrt(this->pi_ * this->kB_ / (2. * solid_density_kg_m3_));
+}
+
+// ============================================================================
+// Material configuration
+// ============================================================================
+
+template <ThermoMap Thermo>
+void TiO2<Thermo>::SetSolidMaterial(std::string_view name,
+                                    double molecular_weight_kg_kmol,
+                                    double density_kg_m3)
+{
+    if (name.empty())
+        throw std::invalid_argument("[TiO2] Solid material name cannot be empty.");
+    if (!std::isfinite(molecular_weight_kg_kmol) || molecular_weight_kg_kmol <= 0.)
+        throw std::invalid_argument("[TiO2] Solid molecular weight must be positive.");
+    if (!std::isfinite(density_kg_m3) || density_kg_m3 <= 0.)
+        throw std::invalid_argument("[TiO2] Solid density must be positive.");
+
+    solid_name_                       = std::string{name};
+    solid_molecular_weight_kg_kmol_   = molecular_weight_kg_kmol;
+    solid_density_kg_m3_              = density_kg_m3;
+    solid_formula_unit_mass_kg_       = solid_molecular_weight_kg_kmol_ / this->Nav_kmol_;
+    solid_formula_unit_volume_m3_     = solid_formula_unit_mass_kg_ / solid_density_kg_m3_;
+    this->rho_particle_               = solid_density_kg_m3_;
+    if (precursor_index_ >= 0)
+        vprec_ = solid_formula_units_per_precursor_ * solid_formula_unit_volume_m3_;
+
+    Precalculations();
+}
+
+template <ThermoMap Thermo>
+void TiO2<Thermo>::SetSolidFormulaUnitsPerPrecursor(double n)
+{
+    if (!std::isfinite(n) || n <= 0.)
+        throw std::invalid_argument("[TiO2] Solid formula units per precursor must be positive.");
+
+    solid_formula_units_per_precursor_ = n;
+    vprec_ = (precursor_index_ >= 0) ? solid_formula_units_per_precursor_ * solid_formula_unit_volume_m3_ : 0.;
+    Precalculations();
+}
+
+template <ThermoMap Thermo>
+void TiO2<Thermo>::SetNumberOfFormulaUnitsPerNucleatedParticle(unsigned n)
+{
+    if (n == 0u)
+        throw std::invalid_argument(
+            "[TiO2] Number of formula units per nucleated particle must be positive.");
+
+    n0_ = n;
+    Precalculations();
+}
+
+template <ThermoMap Thermo>
+void TiO2<Thermo>::SetMinimumNumberOfFormulaUnits(unsigned n)
+{
+    if (n == 0u)
+        throw std::invalid_argument("[TiO2] Minimum number of formula units must be positive.");
+
+    n_formula_units_min_ = n;
+    Precalculations();
 }
 
 // ============================================================================
@@ -176,11 +236,13 @@ template <ThermoMap Thermo> void TiO2<Thermo>::SetMoments(std::span<const double
 }
 
 template <ThermoMap Thermo>
-void TiO2<Thermo>::SetMoments(double YTiO2, double NTiO2N, double STiO2) noexcept
+void TiO2<Thermo>::SetMoments(double solid_mass_fraction,
+                              double scaled_number_density,
+                              double surface_area_concentration) noexcept
 {
-    YTiO2_  = std::max(YTiO2, 0.);
-    NTiO2N_ = std::max(NTiO2N, 0.);
-    STiO2_  = std::max(STiO2, 0.);
+    solid_mass_fraction_ = std::max(solid_mass_fraction, 0.);
+    scaled_number_density_ = std::max(scaled_number_density, 0.);
+    surface_area_concentration_ = std::max(surface_area_concentration, 0.);
 }
 
 // ============================================================================
@@ -194,10 +256,6 @@ template <ThermoMap Thermo> void TiO2<Thermo>::SetPrecursor(std::string_view nam
     if (precursor_species_ == "none")
     {
         precursor_index_ = -1;
-        nti_precursor_   = 0.;
-        nh_precursor_    = 0.;
-        no_precursor_    = 0.;
-        nc_precursor_    = 0.;
         Y_precursor_     = 0.;
         c_precursor_     = 0.;
         W_precursor_     = 0.;
@@ -219,78 +277,119 @@ template <ThermoMap Thermo> void TiO2<Thermo>::SetPrecursor(std::string_view nam
 
     W_precursor_   = thermo_.MolecularWeight(ui);
     m_precursor_   = W_precursor_ / this->Nav_kmol_;
-    nti_precursor_ = thermo_.NumberOfTitaniumAtoms(ui);
-    nh_precursor_  = thermo_.NumberOfHydrogenAtoms(ui);
-    no_precursor_  = thermo_.NumberOfOxygenAtoms(ui);
-    nc_precursor_  = thermo_.NumberOfCarbonAtoms(ui);
 
-    if (nti_precursor_ <= 0.)
-        throw std::runtime_error("[TiO2] Precursor species has no Ti atoms: " + precursor_species_);
-
-    v_precursor_ = m_precursor_ / rho_TiO2_;
+    v_precursor_ = m_precursor_ / solid_density_kg_m3_;
     d_precursor_ = std::pow(6. * v_precursor_ / this->pi_, 1. / 3.);
 
     // Effective collision geometry used by nucleation/condensation kernels:
-    // volume contribution = one TiO2 unit per Ti atom in the precursor molecule
-    const double v_TiO2_local = m_TiO2_ / rho_TiO2_;
-    vprec_                    = nti_precursor_ * v_TiO2_local;
-    dprec_                    = d_precursor_;
+    // volume contribution = configured solid formula units per precursor.
+    vprec_ = solid_formula_units_per_precursor_ * solid_formula_unit_volume_m3_;
+    dprec_ = d_precursor_;
 
-    SetupGasConsumptionStoichiometry();
     Precalculations();
 }
 
 // ============================================================================
-// SetupGasConsumptionStoichiometry
+// Gas stoichiometry setup
 // ============================================================================
-//
-// Atom balance for precursor Ti_a C_b H_c O_d decomposing to TiO2(s):
-//
-//   Ti_a C_b H_c O_d + x O2  →  a TiO2(s) + b CO2 + (c/2) H2O
-//
-//   O balance: d + 2x = 2a + 2b + c/2
-//              x = (2a + 2b + c/2 - d) / 2
-//
-// nu_O2_from_prec_ is positive when O2 is produced, negative when consumed.
-// (x > 0 means O2 is consumed, so we store -x)
 
-template <ThermoMap Thermo> void TiO2<Thermo>::SetupGasConsumptionStoichiometry()
+template <ThermoMap Thermo> void TiO2<Thermo>::ClearGasStoichiometry() noexcept
 {
-    nu_H2O_from_prec_ = 0.;
-    nu_CO2_from_prec_ = 0.;
-    nu_O2_from_prec_  = 0.;
-    H2O_index_ = CO2_index_ = O2_index_ = -1;
-    W_H2O_ = W_CO2_ = W_O2_ = 0.;
+    gas_stoichiometry_.clear();
+}
 
-    if (precursor_index_ < 0 || nti_precursor_ <= 0.)
+template <ThermoMap Thermo>
+void TiO2<Thermo>::AddGasStoichiometryTerm(std::string_view species, double coefficient)
+{
+    if (!std::isfinite(coefficient))
+        throw std::invalid_argument("[TiO2] Gas stoichiometric coefficient must be finite.");
+    if (std::fabs(coefficient) <= 1.e-14)
         return;
 
-    const double a = nti_precursor_;
-    const double b = nc_precursor_;
-    const double c = nh_precursor_;
-    const double d = no_precursor_;
+    const int index = thermo_.IndexOfSpecies(species);
+    if (index < 0)
+        throw std::runtime_error("[TiO2] Gas stoichiometry species not found: " +
+                                 std::string(species));
 
-    // Stoichiometric coefficients per precursor molecule
-    nu_H2O_from_prec_ = 0.5 * c;
-    nu_CO2_from_prec_ = b;
+    const double mw = thermo_.MolecularWeight(static_cast<unsigned>(index));
 
-    // x = moles of O2 consumed per precursor molecule
-    // Positive x = O2 consumed; store as negative convention (consumed < 0)
-    const double x_O2 = (2. * a + 2. * b + 0.5 * c - d) / 2.;
-    nu_O2_from_prec_  = -x_O2; // negative = consumed, positive = produced
+    for (auto& term : gas_stoichiometry_)
+    {
+        if (term.index == index)
+        {
+            term.coefficient += coefficient;
+            return;
+        }
+    }
 
-    // Look up gas species indices and molecular weights
-    H2O_index_ = thermo_.IndexOfSpecies("H2O");
-    if (H2O_index_ >= 0)
-        W_H2O_ = thermo_.MolecularWeight(static_cast<unsigned>(H2O_index_));
+    gas_stoichiometry_.push_back(
+        RuntimeGasStoichiometryTerm{index, coefficient, mw, std::string(species)});
+}
 
-    CO2_index_ = thermo_.IndexOfSpecies("CO2");
-    if (CO2_index_ >= 0)
-        W_CO2_ = thermo_.MolecularWeight(static_cast<unsigned>(CO2_index_));
+template <ThermoMap Thermo> void TiO2<Thermo>::ValidateGasStoichiometryMassBalance() const
+{
+    if (gas_stoichiometry_.empty() || precursor_index_ < 0)
+        return;
 
-    O2_index_ = thermo_.IndexOfSpecies("O2");
-    if (O2_index_ >= 0)
-        W_O2_ = thermo_.MolecularWeight(static_cast<unsigned>(O2_index_));
+    bool has_precursor = false;
+    double precursor_coefficient = 0.;
+    double gas_mass = 0.;
+
+    for (const auto& term : gas_stoichiometry_)
+    {
+        gas_mass += term.coefficient * term.molecular_weight_kg_kmol;
+        if (term.index == precursor_index_)
+        {
+            has_precursor = true;
+            precursor_coefficient += term.coefficient;
+        }
+    }
+
+    if (!has_precursor)
+        throw std::runtime_error("[TiO2] Gas stoichiometry must include precursor species '" +
+                                 precursor_species_ + "' with coefficient -1.");
+
+    if (std::fabs(precursor_coefficient + 1.) > 1.e-12)
+        throw std::runtime_error("[TiO2] Gas stoichiometry is normalized per precursor; species '" +
+                                 precursor_species_ + "' must have coefficient -1.");
+
+    const double solid_mass =
+        solid_formula_units_per_precursor_ * solid_molecular_weight_kg_kmol_;
+    const double residual = gas_mass + solid_mass;
+    const double scale = std::max({std::fabs(gas_mass), std::fabs(solid_mass), 1.});
+
+    if (std::fabs(residual) > gas_stoichiometry_mass_tolerance_ * scale)
+    {
+        std::ostringstream msg;
+        msg << "[TiO2] Gas stoichiometry is not mass balanced: gas_mass=" << gas_mass
+            << " kg/kmol_precursor, solid_mass=" << solid_mass
+            << " kg/kmol_precursor, residual=" << residual
+            << " kg/kmol_precursor, tolerance=" << gas_stoichiometry_mass_tolerance_;
+        throw std::runtime_error(msg.str());
+    }
+}
+
+template <ThermoMap Thermo>
+void TiO2<Thermo>::SetGasStoichiometry(std::span<const GasStoichiometryTerm> terms,
+                                       double relative_mass_tolerance)
+{
+    if (!std::isfinite(relative_mass_tolerance) || relative_mass_tolerance < 0.)
+        throw std::invalid_argument("[TiO2] Gas stoichiometry mass tolerance must be non-negative.");
+
+    gas_stoichiometry_mass_tolerance_ = relative_mass_tolerance;
+    ClearGasStoichiometry();
+
+    if (terms.empty())
+        return;
+
+    for (const auto& term : terms)
+    {
+        if (term.species.empty())
+            throw std::invalid_argument("[TiO2] Gas stoichiometry species name cannot be empty.");
+        AddGasStoichiometryTerm(term.species, term.coefficient);
+    }
+
+    ValidateGasStoichiometryMassBalance();
 }
 
 // ============================================================================
@@ -334,12 +433,12 @@ void TiO2<Thermo>::Properties(double& fv,
                               double& ssph,
                               double& tauS) const noexcept
 {
-    const double Y = std::max(YTiO2_, 0.);
-    const double N = std::max(NTiO2N_ * N0_scaling_, 0.);
-    const double S = std::max(STiO2_, 0.);
+    const double Y = std::max(solid_mass_fraction_, 0.);
+    const double N = std::max(scaled_number_density_ * N0_scaling_, 0.);
+    const double S = std::max(surface_area_concentration_, 0.);
 
     // Volume fraction [-]
-    fv = this->rho_ / rho_TiO2_ * Y;
+    fv = this->rho_ / solid_density_kg_m3_ * Y;
 
     // Number density used for property calculation (regularized)
     const double NStar  = std::max(N, N_min_);
@@ -361,7 +460,7 @@ void TiO2<Thermo>::Properties(double& fv,
     da = std::max(da, d0_);
 
     // Primary particle diameter [m]
-    // dp ≤ da always (since ss ≥ ssph ensures 6*vs/ss ≤ 6*vs/ssph = da)
+    // dp ≤ da always (since ss ≥ ssph ensures 6*vs/ss ≤ 6*vs/ssph = da)    
     dp = 6. * vs / ss;
     dp = std::max(dp, d0_);
 
@@ -385,22 +484,22 @@ void TiO2<Thermo>::Properties(double& fv,
 
 template <ThermoMap Thermo> double TiO2<Thermo>::volume_fraction() const noexcept
 {
-    return this->rho_ / rho_TiO2_ * std::max(YTiO2_, 0.);
+    return this->rho_ / solid_density_kg_m3_ * std::max(solid_mass_fraction_, 0.);
 }
 
 template <ThermoMap Thermo> double TiO2<Thermo>::mass_fraction() const noexcept
 {
-    return std::max(YTiO2_, 0.);
+    return std::max(solid_mass_fraction_, 0.);
 }
 
 template <ThermoMap Thermo> double TiO2<Thermo>::particle_number_density() const noexcept
 {
-    return std::max(NTiO2N_ * N0_scaling_, 0.);
+    return std::max(scaled_number_density_ * N0_scaling_, 0.);
 }
 
 template <ThermoMap Thermo> double TiO2<Thermo>::specific_surface() const noexcept
 {
-    return std::max(STiO2_, 0.);
+    return std::max(surface_area_concentration_, 0.);
 }
 
 // ============================================================================
@@ -462,16 +561,14 @@ template <ThermoMap Thermo> double TiO2<Thermo>::diffusion_coefficient() const n
 
 template <ThermoMap Thermo> double TiO2<Thermo>::NucleationParticleVolume() const noexcept
 {
-    const double v_TiO2_local = m_TiO2_ / rho_TiO2_;
-
     if (nucleation_variant_ == NucleationVariant::Binary)
     {
         if (vprec_ > 0.)
             return 2. * vprec_;
-        return 2. * v_TiO2_local;
+        return 2. * solid_formula_unit_volume_m3_;
     }
     if (nucleation_variant_ == NucleationVariant::FixedCluster)
-        return static_cast<double>(n0_) * v_TiO2_local;
+        return static_cast<double>(n0_) * solid_formula_unit_volume_m3_;
 
     return v0_;
 }
@@ -502,7 +599,8 @@ template <ThermoMap Thermo> void TiO2<Thermo>::NucleationSourceTerms_Binary()
 
     // Free-molecular binary collision kernel [m3/s]
     const double beta_nuc = epsilon_nuc_ *
-                            std::sqrt(this->pi_ * this->kB_ * this->T_ / (2. * rho_TiO2_)) *
+                            std::sqrt(this->pi_ * this->kB_ * this->T_ /
+                                      (2. * solid_density_kg_m3_)) *
                             std::sqrt(1. / vprec_ + 1. / vprec_) * std::pow(2. * dprec_, 2.);
 
     // Rate of nucleation events [#/m3/s]
@@ -517,7 +615,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::NucleationSourceTerms_Binary()
     const double source_S =
         std::pow(18. * this->pi_, 1. / 3.) * std::pow(vprec_, 2. / 3.) * beta_nuc * Nprec * Nprec;
 
-    this->source_nucleation_(0) = rho_TiO2_ / this->rho_ * source_fv;
+    this->source_nucleation_(0) = solid_density_kg_m3_ / this->rho_ * source_fv;
     this->source_nucleation_(1) = source_N / N0_scaling_;
     this->source_nucleation_(2) = source_S;
 }
@@ -531,8 +629,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::NucleationSourceTerms_FixedCluste
     if (c_precursor_ <= 0.)
         return;
 
-    const double v_TiO2_local = m_TiO2_ / rho_TiO2_;
-    const double v_cluster    = static_cast<double>(n0_) * v_TiO2_local;
+    const double v_cluster = static_cast<double>(n0_) * solid_formula_unit_volume_m3_;
     const double d_cluster    = std::pow(6. * v_cluster / this->pi_, 1. / 3.);
 
     // Precursor number density [#/m3]
@@ -540,7 +637,8 @@ template <ThermoMap Thermo> void TiO2<Thermo>::NucleationSourceTerms_FixedCluste
 
     // Free-molecular collision kernel for a cluster colliding with itself
     const double beta_nuc = epsilon_nuc_ *
-                            std::sqrt(this->pi_ * this->kB_ * this->T_ / (2. * rho_TiO2_)) *
+                            std::sqrt(this->pi_ * this->kB_ * this->T_ /
+                                      (2. * solid_density_kg_m3_)) *
                             std::sqrt(2. / v_cluster) * std::pow(2. * d_cluster, 2.);
 
     const double eventRate = 0.5 * beta_nuc * Nprec * Nprec;
@@ -550,7 +648,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::NucleationSourceTerms_FixedCluste
     const double source_S =
         std::pow(18. * this->pi_, 1. / 3.) * std::pow(v_cluster, 2. / 3.) * beta_nuc * Nprec * Nprec;
 
-    this->source_nucleation_(0) = rho_TiO2_ / this->rho_ * source_fv;
+    this->source_nucleation_(0) = solid_density_kg_m3_ / this->rho_ * source_fv;
     this->source_nucleation_(1) = source_N / N0_scaling_;
     this->source_nucleation_(2) = source_S;
 }
@@ -561,7 +659,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::NucleationSourceTerms_FixedCluste
 
 template <ThermoMap Thermo> void TiO2<Thermo>::CoagulationSourceTerms()
 {
-    const double N = NTiO2N_ * N0_scaling_;
+    const double N = scaled_number_density_ * N0_scaling_;
     if (N <= N_min_)
         return;
 
@@ -575,7 +673,8 @@ template <ThermoMap Thermo> void TiO2<Thermo>::CoagulationSourceTerms()
 
     // Free-molecular kernel [m3/s]
     const double beta_fm = epsilon_coag_ *
-                           std::sqrt(this->pi_ * this->kB_ * this->T_ / (2. * rho_TiO2_)) *
+                           std::sqrt(this->pi_ * this->kB_ * this->T_ /
+                                     (2. * solid_density_kg_m3_)) *
                            std::sqrt(2. / vs) * std::pow(2. * dcSafe, 2.);
 
     // Continuum kernel with Cunningham slip correction [m3/s]
@@ -606,7 +705,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::CondensationSourceTerms()
     if (c_precursor_ <= 0. || vprec_ <= 0. || dprec_ <= 0.)
         return;
 
-    const double N = NTiO2N_ * N0_scaling_;
+    const double N = scaled_number_density_ * N0_scaling_;
     if (N <= N_min_)
         return;
 
@@ -621,24 +720,22 @@ template <ThermoMap Thermo> void TiO2<Thermo>::CondensationSourceTerms()
 
     // Free-molecular condensation kernel [m3/s]: precursor + particle
     const double beta_cond = epsilon_cond_ *
-                             std::sqrt(this->pi_ * this->kB_ * this->T_ / (2. * rho_TiO2_)) *
+                             std::sqrt(this->pi_ * this->kB_ * this->T_ /
+                                       (2. * solid_density_kg_m3_)) *
                              std::sqrt(1. / vprec_ + 1. / vs) * std::pow(dprec_ + dc, 2.);
 
     const double BetaNprecN = beta_cond * Nprec * N;
 
     // Surface area change per condensation event (fractal correction).
     // deltas = (2/3) * (vprec/vs) * ss * np^chi
-    // The np^chi factor (chi = -0.2043) accounts for the fractal morphology of
-    // aggregates: a particle with np primaries grows its surface less per unit
-    // volume added than a sphere would.  When np = 1 (sphere) the factor is 1.
-    // Dropping this term causes deltas to be overestimated whenever coagulation
-    // has produced aggregates (np > 1), which is why results diverge only when
-    // both coagulation and condensation are active.
+    // The np^chi factor (chi = -0.2043) accounts for the fractal morphology of aggregates: 
+    // a particle with np primaries grows its surface less per unit volume added than a sphere
+    // would.  When np = 1 (sphere) the factor is 1. Dropping this term causes deltas to be 
+    // overestimated whenever coagulation has produced aggregates (np > 1).
     constexpr double chi = -0.2043;
-    const double deltas = (2. / 3.) * (vprec_ / vs) * ss *
-                          std::pow(std::max(np, 1.), chi);
+    const double deltas = (2. / 3.) * (vprec_ / vs) * ss * std::pow(std::max(np, 1.), chi);
 
-    this->source_condensation_(0) = rho_TiO2_ / this->rho_ * vprec_ * BetaNprecN;
+    this->source_condensation_(0) = solid_density_kg_m3_ / this->rho_ * vprec_ * BetaNprecN;
     this->source_condensation_(1) = 0.;
     this->source_condensation_(2) = deltas * BetaNprecN;
 }
@@ -649,8 +746,8 @@ template <ThermoMap Thermo> void TiO2<Thermo>::CondensationSourceTerms()
 
 template <ThermoMap Thermo> void TiO2<Thermo>::SinteringSourceTerms()
 {
-    const double N = NTiO2N_ * N0_scaling_;
-    const double S = STiO2_;
+    const double N = scaled_number_density_ * N0_scaling_;
+    const double S = surface_area_concentration_;
 
     if (N <= N_min_ || S <= 0.)
         return;
@@ -698,17 +795,17 @@ template <ThermoMap Thermo> void TiO2<Thermo>::SinteringSourceTerms()
 template <ThermoMap Thermo> double TiO2<Thermo>::SinteringDeferredUpdate(double dt_ode)
 {
     if (sintering_model_ == 0)
-        return STiO2_;
+        return surface_area_concentration_;
 
-    const double N = NTiO2N_ * N0_scaling_;
+    const double N = scaled_number_density_ * N0_scaling_;
     if (N <= N_min_)
-        return STiO2_;
+        return surface_area_concentration_;
 
     double fv, dp, dc, da, np, ss, vs, ssph, tauS;
     Properties(fv, dp, dc, da, np, ss, vs, ssph, tauS);
 
     const double S_sphere = N * ssph;
-    const double S        = STiO2_;
+    const double S        = surface_area_concentration_;
 
     if (S <= S_sphere)
         return S;
@@ -805,38 +902,29 @@ template <ThermoMap Thermo> void TiO2<Thermo>::CalculateOmegaGas_internal() noex
         return;
     if (precursor_index_ < 0)
         return;
-
-    // nti_precursor_ must be positive — validated during SetPrecursor() setup.
-    assert(nti_precursor_ > 0. && "[TiO2] CalculateOmegaGas_internal: precursor has zero Ti atoms.");
-
-    // Total TiO2 mass deposition rate from nucleation + condensation [kg/m3/s]
-    const double omegaTiO2 =
-        this->rho_ * (this->source_nucleation_(0) + this->source_condensation_(0));
-
-    if (omegaTiO2 <= 0.)
+    if (gas_stoichiometry_.empty())
         return;
 
-    // Molar rate of TiO2 deposition [kmol/m3/s]
-    const double RTiO2 = omegaTiO2 / W_TiO2_;
+    if (solid_formula_units_per_precursor_ <= 0.)
+        return;
+
+    // Total solid mass deposition rate from nucleation + condensation [kg/m3/s]
+    const double omegaSolid =
+        this->rho_ * (this->source_nucleation_(0) + this->source_condensation_(0));
+
+    if (omegaSolid <= 0.)
+        return;
+
+    // Molar rate of solid formula-unit deposition [kmol/m3/s]
+    const double Rsolid = omegaSolid / solid_molecular_weight_kg_kmol_;
 
     // Molar rate of precursor consumed [kmol/m3/s]
-    // Each precursor molecule yields nti_precursor_ TiO2 formula units
-    const double Rprec = RTiO2 / nti_precursor_;
+    // Each precursor molecule yields the configured number of solid formula units.
+    const double Rprec = Rsolid / solid_formula_units_per_precursor_;
 
-    // Precursor consumption
-    this->omega_gas_[precursor_index_] -= Rprec * W_precursor_;
-
-    // H2O production
-    if (nu_H2O_from_prec_ > 0. && H2O_index_ >= 0)
-        this->omega_gas_[H2O_index_] += nu_H2O_from_prec_ * Rprec * W_H2O_;
-
-    // CO2 production
-    if (nu_CO2_from_prec_ > 0. && CO2_index_ >= 0)
-        this->omega_gas_[CO2_index_] += nu_CO2_from_prec_ * Rprec * W_CO2_;
-
-    // O2 production/consumption (nu_O2_from_prec_ negative = consumed)
-    if (std::fabs(nu_O2_from_prec_) > 1.e-14 && O2_index_ >= 0)
-        this->omega_gas_[O2_index_] += nu_O2_from_prec_ * Rprec * W_O2_;
+    for (const auto& term : gas_stoichiometry_)
+        this->omega_gas_[term.index] +=
+            term.coefficient * Rprec * term.molecular_weight_kg_kmol;
 
     // Dummy species closure: adjust to enforce sum(omega_gas) = 0
     if (this->is_closure_dummy_species_ && this->closure_dummy_index_ >= 0)
@@ -860,7 +948,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::PrintSummary() const
     const auto nuc_str = [](NucleationVariant v) -> const char* {
         switch (v) {
             case NucleationVariant::Off:          return "off";
-            case NucleationVariant::Binary:       return "binary (Ti(OH)4+Ti(OH)4)";
+            case NucleationVariant::Binary:       return "binary (precursor+precursor)";
             case NucleationVariant::FixedCluster: return "fixed cluster";
             default:                               return "unknown";
         }
@@ -885,20 +973,19 @@ template <ThermoMap Thermo> void TiO2<Thermo>::PrintSummary() const
     std::cout
         << "\n"
         << "------------------------------------------------------------------------------------------\n"
-        << "                         TiO2 Nanoparticle Model Summary\n"
+        << "                      Solid Oxide Nanoparticle Model Summary\n"
         << "------------------------------------------------------------------------------------------\n"
         << " * Active: " << (this->is_active_ ? "yes" : "no") << "\n"
         << "\n"
         << " [Physical properties]\n"
-        << "    + TiO2 density (kg/m3):          " << rho_TiO2_ << "\n"
-        << "    + TiO2 mol. weight (kg/kmol):    " << W_TiO2_ << "\n"
-        << "    + TiO2 mass (kg):                " << m_TiO2_ << "\n"
-        << "    + TiO2 volume (m3):              " << m_TiO2_ / rho_TiO2_ << "\n"
+        << "    + Solid name:                    " << solid_name_ << "\n"
+        << "    + Solid density (kg/m3):         " << solid_density_kg_m3_ << "\n"
+        << "    + Solid mol. weight (kg/kmol):   " << solid_molecular_weight_kg_kmol_ << "\n"
+        << "    + Formula units per precursor:   " << solid_formula_units_per_precursor_ << "\n"
         << "\n"
         << " [Monomer / nucleated particle geometry]\n"
-        << "    + nTiO2 per nucleated particle:  " << n0_ << "\n"
-        << "    + nTiO2_min (-):                 " << nTiO2_min_ << "\n"
-        << "    + m0 (kg):                       " << v0_*rho_TiO2_ << "\n"
+        << "    + formula units/nucleated part.: " << n0_ << "\n"
+        << "    + minimum formula units (-):     " << n_formula_units_min_ << "\n"
         << "    + v0 (m3):                       " << v0_ << "\n"
         << "    + d0 (m):                        " << d0_ << "\n"
         << "    + s0 (m2):                       " << s0_ << "\n"
@@ -930,14 +1017,24 @@ template <ThermoMap Thermo> void TiO2<Thermo>::PrintSummary() const
             << "    + MW (kg/kmol):                  " << W_precursor_ << "\n"
             << "    + m (kg):                        " << m_precursor_ << "\n"
             << "    + v (m3):                        " << v_precursor_ << "\n"
-            << "    + d (m):                         " << d_precursor_ << "\n"
-            << "    + nTi:                           " << nti_precursor_ << "\n"
-            << "    + nH:                            " << nh_precursor_ << "\n"
-            << "    + nO:                            " << no_precursor_ << "\n"
-            << "    + nC:                            " << nc_precursor_ << "\n"
-            << "    + nu_H2O:                        " << nu_H2O_from_prec_ << "\n"
-            << "    + nu_CO2:                        " << nu_CO2_from_prec_ << "\n"
-            << "    + nu_O2:                         " << nu_O2_from_prec_ << "\n";
+            << "    + d (m):                         " << d_precursor_ << "\n";
+    }
+
+    std::cout
+        << "\n"
+        << " [Gas stoichiometry]\n"
+        << "    + Source:                        explicit\n"
+        << "    + Mass tolerance (-):            " << gas_stoichiometry_mass_tolerance_ << "\n";
+    if (gas_stoichiometry_.empty())
+    {
+        std::cout << "    + Terms:                         none\n";
+    }
+    else
+    {
+        for (const auto& term : gas_stoichiometry_)
+            std::cout << "    + nu(" << term.species << "):"
+                      << std::string(term.species.size() < 24 ? 24 - term.species.size() : 1, ' ')
+                      << term.coefficient << "\n";
     }
 
     std::cout
@@ -976,13 +1073,30 @@ void TiO2<Thermo>::ApplyConfig(const Config& cfg)
 {
     this->is_active_ = cfg.is_active;
 
+    // -- Solid material ----------------------------------------------------
+    this->SetSolidMaterial(cfg.solid_name,
+                           cfg.solid_molecular_weight_kg_kmol,
+                           cfg.solid_density_kg_m3);
+    this->SetSolidFormulaUnitsPerPrecursor(cfg.solid_formula_units_per_precursor);
+
     // -- Precursor / gas setup ---------------------------------------------
     // Always call SetPrecursor — including when cfg.precursor_species == "none",
     // which resets all precursor-derived geometry (vprec_, dprec_, etc.) to 0.
     // This ensures a subsequent SetupFromConfig("none") can clear a prior precursor.
     this->SetPrecursor(cfg.precursor_species);
+    this->SetGasStoichiometry(cfg.gas_stoichiometry,
+                              cfg.gas_stoichiometry_mass_tolerance);
     this->SetGasClosureDummySpecies(cfg.gas_closure_dummy_species);
     this->SetGasConsumption(cfg.gas_consumption);
+
+    if (cfg.gas_consumption && precursor_index_ >= 0)
+    {
+        if (gas_stoichiometry_.empty())
+            throw std::runtime_error(
+                "[TiO2] Gas consumption is enabled but no gas stoichiometry is available. "
+                "Provide explicit gas stoichiometry.");
+        ValidateGasStoichiometryMassBalance();
+    }
 
     // -- Nucleation model (string → enum → int) ----------------------------
     if (cfg.nucleation_model == "none" || cfg.nucleation_model == "0")
@@ -999,9 +1113,18 @@ void TiO2<Thermo>::ApplyConfig(const Config& cfg)
     this->SetThermophoreticModel(cfg.thermophoretic_model);
 
     // -- Cluster sizes -----------------------------------------------------
-    this->SetMinimumNumberOfTiO2Units(static_cast<unsigned int>(cfg.minimum_tio2_units));
-    this->SetNumberOfTiO2UnitsPerNucleatedParticle(
-        static_cast<unsigned int>(cfg.nucleated_particle_tio2_units));
+    const int minimum_units = cfg.minimum_formula_units;
+    const int nucleated_units = cfg.nucleated_particle_formula_units;
+
+    if (minimum_units <= 0)
+        throw std::invalid_argument("[TiO2] minimum formula units must be positive.");
+    if (nucleated_units <= 0)
+        throw std::invalid_argument(
+            "[TiO2] nucleated-particle formula units must be positive.");
+
+    this->SetMinimumNumberOfFormulaUnits(static_cast<unsigned int>(minimum_units));
+    this->SetNumberOfFormulaUnitsPerNucleatedParticle(
+        static_cast<unsigned int>(nucleated_units));
 
     // -- Sintering kinetics ------------------------------------------------
     As_ = cfg.sintering_As_s_K_m;
@@ -1020,7 +1143,7 @@ void TiO2<Thermo>::ApplyConfig(const Config& cfg)
     // -- Numerical floors + geometry recompute -----------------------------
     N_min_  = cfg.ns_minimum_per_m3;
     fv_min_ = cfg.fv_minimum;
-    Precalculations(); // recompute geometry that depends on N_min_, nTiO2_min_, epsilon_*
+    Precalculations(); // recompute geometry that depends on N_min_, n_formula_units_min_, epsilon_*
 
     // -- Transport ---------------------------------------------------------
     this->SetSchmidtNumber(cfg.schmidt_number);
@@ -1050,23 +1173,23 @@ typename TiO2<Thermo>::NDFReconstructionData TiO2<Thermo>::ReconstructedNDFData(
 {
     NDFReconstructionData d{}; // all zero, valid = false
 
-    const double Y_raw = std::max(YTiO2_, 0.);
-    const double N_raw = std::max(NTiO2N_ * N0_scaling_, 0.);
+    const double Y_raw = std::max(solid_mass_fraction_, 0.);
+    const double N_raw = std::max(scaled_number_density_ * N0_scaling_, 0.);
 
     double Y = Y_raw;
     double N = N_raw;
     if (use_regularized_moments)
     {
-        const double fv_raw = this->rho_ / rho_TiO2_ * Y_raw;
+        const double fv_raw = this->rho_ / solid_density_kg_m3_ * Y_raw;
         if (fv_raw < fv_min_)
-            Y = rho_TiO2_ / this->rho_ * fv_min_;
+            Y = solid_density_kg_m3_ / this->rho_ * fv_min_;
         N = std::max(N, N_min_);
     }
 
     if (Y <= 0. || N <= 0.)
         return d;
 
-    const double fv = this->rho_ / rho_TiO2_ * Y;
+    const double fv = this->rho_ / solid_density_kg_m3_ * Y;
     if (!std::isfinite(fv) || fv <= 0.)
         return d;
 
@@ -1206,17 +1329,86 @@ TiO2<Thermo>::ParseConfig(DictType& dict)
 
     Config cfg;
 
-    if (dict.CheckOption("@TiO2"))
-        dict.ReadBool("@TiO2", cfg.is_active);
+    if (dict.CheckOption("@MetalOxide"))
+        dict.ReadBool("@MetalOxide", cfg.is_active);
 
     if (dict.CheckOption("@Precursor"))
         dict.ReadString("@Precursor", cfg.precursor_species);
+
+    if (dict.CheckOption("@SolidName"))
+        dict.ReadString("@SolidName", cfg.solid_name);
+
+    if (dict.CheckOption("@SolidMolecularWeight"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@SolidMolecularWeight", v, u);
+        if (u == "kg/kmol") cfg.solid_molecular_weight_kg_kmol = v;
+        else return std::unexpected(
+            std::string{"@SolidMolecularWeight: allowed units: kg/kmol"});
+    }
+
+    if (dict.CheckOption("@SolidDensity"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@SolidDensity", v, u);
+        if (u == "kg/m3")      cfg.solid_density_kg_m3 = v;
+        else if (u == "g/cm3") cfg.solid_density_kg_m3 = v * 1000.;
+        else return std::unexpected(std::string{"@SolidDensity: allowed units: kg/m3 | g/cm3"});
+    }
+
+    if (dict.CheckOption("@SolidFormulaUnitsPerPrecursor"))
+        dict.ReadDouble("@SolidFormulaUnitsPerPrecursor",
+                        cfg.solid_formula_units_per_precursor);
 
     if (dict.CheckOption("@GasClosureDummySpecies"))
         dict.ReadString("@GasClosureDummySpecies", cfg.gas_closure_dummy_species);
 
     if (dict.CheckOption("@GasConsumption"))
         dict.ReadBool("@GasConsumption", cfg.gas_consumption);
+
+    if (dict.CheckOption("@GasStoichiometry"))
+    {
+        std::string spec;
+        dict.ReadString("@GasStoichiometry", spec);
+        std::ranges::replace(spec, '"', ' ');
+        std::ranges::replace(spec, '\'', ' ');
+        std::ranges::replace(spec, ',', ' ');
+        std::ranges::replace(spec, ';', ' ');
+
+        std::istringstream iss(spec);
+        std::string token;
+        while (iss >> token)
+        {
+            auto pos = token.find(':');
+            if (pos == std::string::npos)
+                pos = token.find('=');
+            if (pos == std::string::npos || pos == 0u || pos + 1u >= token.size())
+                return std::unexpected(
+                    std::string{"@GasStoichiometry: expected entries like Species:-1"});
+
+            const std::string species = token.substr(0u, pos);
+            const std::string coefficient_text = token.substr(pos + 1u);
+
+            try
+            {
+                std::size_t parsed = 0u;
+                const double coefficient = std::stod(coefficient_text, &parsed);
+                if (parsed != coefficient_text.size())
+                    return std::unexpected(
+                        std::string{"@GasStoichiometry: invalid coefficient in entry "} + token);
+                cfg.gas_stoichiometry.push_back(GasStoichiometryTerm{species, coefficient});
+            }
+            catch (const std::exception&)
+            {
+                return std::unexpected(
+                    std::string{"@GasStoichiometry: invalid coefficient in entry "} + token);
+            }
+        }
+    }
+
+    if (dict.CheckOption("@GasStoichiometryMassTolerance"))
+        dict.ReadDouble("@GasStoichiometryMassTolerance",
+                        cfg.gas_stoichiometry_mass_tolerance);
 
     if (dict.CheckOption("@NucleationModel"))
         dict.ReadString("@NucleationModel", cfg.nucleation_model);
@@ -1226,16 +1418,16 @@ TiO2<Thermo>::ParseConfig(DictType& dict)
     if (dict.CheckOption("@CondensationModel")) dict.ReadInt("@CondensationModel", cfg.condensation_model);
     if (dict.CheckOption("@ThermophoreticModel")) dict.ReadInt("@ThermophoreticModel", cfg.thermophoretic_model);
 
-    if (dict.CheckOption("@MinimumTiO2Units"))
+    if (dict.CheckOption("@MinimumFormulaUnits"))
     {
-        int n; dict.ReadInt("@MinimumTiO2Units", n);
-        cfg.minimum_tio2_units = n;
+        int n; dict.ReadInt("@MinimumFormulaUnits", n);
+        cfg.minimum_formula_units = n;
     }
 
-    if (dict.CheckOption("@NucleatedParticleTiO2Units"))
+    if (dict.CheckOption("@NucleatedParticleFormulaUnits"))
     {
-        int n; dict.ReadInt("@NucleatedParticleTiO2Units", n);
-        cfg.nucleated_particle_tio2_units = n;
+        int n; dict.ReadInt("@NucleatedParticleFormulaUnits", n);
+        cfg.nucleated_particle_formula_units = n;
     }
 
     if (dict.CheckOption("@SinteringDeferred"))
