@@ -43,11 +43,17 @@ void TiO2_Grammar::DefineRules()
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@TiO2", 
         OpenSMOKEpp::SINGLE_BOOL, 
-        "TiO2 model: on/off (default: true)", 
+        "Legacy activation key for the solid oxide model: on/off (default: true)", 
+        true));
+
+    AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
+        "@MetalOxide",
+        OpenSMOKEpp::SINGLE_BOOL,
+        "Solid oxide model: on/off (default: true)",
         true));
 
     // ----------------------------------------------------------------------------------------------------------- //
-    // Soot models
+    // Process models
     // ----------------------------------------------------------------------------------------------------------- //
 
     AddKeyWord(
@@ -88,7 +94,7 @@ void TiO2_Grammar::DefineRules()
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@Precursor",
         OpenSMOKEpp::SINGLE_STRING,
-        "Species to be assumed as precursor (example: @Precursor H4O4TI;)",
+        "Gas-phase precursor species (example: @Precursor H4O4TI;)",
         true));
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
@@ -118,7 +124,7 @@ void TiO2_Grammar::DefineRules()
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@GasClosureDummySpecies",
         OpenSMOKEpp::SINGLE_STRING,
-        "Species to be assumed as gaseous dummy species (example: @GasClosureDummySpecies TIO2RU;)",
+        "Gas species used for optional mass closure (example: @GasClosureDummySpecies N2;)",
         true));
 
     AddKeyWord(
@@ -202,7 +208,7 @@ void TiO2_Grammar::DefineRules()
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@MinimumTiO2Units", 
         OpenSMOKEpp::SINGLE_INT, 
-        "Legacy alias for @MinimumFormulaUnits (default: 2)", 
+        "Deprecated TiO2-specific alias for @MinimumFormulaUnits (default: 2)", 
         false));
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
@@ -214,7 +220,7 @@ void TiO2_Grammar::DefineRules()
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@NucleatedParticleTiO2Units",
         OpenSMOKEpp::SINGLE_INT,
-        "Legacy alias for @NucleatedParticleFormulaUnits (default: 5)",
+        "Deprecated TiO2-specific alias for @NucleatedParticleFormulaUnits (default: 5)",
         false));
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
@@ -230,13 +236,13 @@ void TiO2_Grammar::DefineRules()
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@MinimumNs",
         OpenSMOKEpp::SINGLE_MEASURE,
-        "Minimum Ns for the calculation of TiO2 properties (default: 1e3 #/m3)",
+        "Minimum number density for solid particle property reconstruction (default: 1e3 #/m3)",
         false));
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@MinimumFv",
         OpenSMOKEpp::SINGLE_DOUBLE,
-        "Minimum fv for the calculation of TiO2 properties (default: 1e-16)",
+        "Minimum solid volume fraction for particle property reconstruction (default: 1e-16)",
         false));
 
     // ----------------------------------------------------------------------------------------------------------- //

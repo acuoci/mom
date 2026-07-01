@@ -54,12 +54,12 @@ namespace MOM
 
 /**
  * @class TiO2
- * @brief Three-equation method of moments for TiO2 nanoparticle formation and evolution.
+ * @brief Three-equation method of moments for solid oxide nanoparticle formation and evolution.
  *
- * Models TiO2 (anatase) nanoparticle formation from gas-phase titanium precursors
- * (e.g. Ti(OH)4, TiCl4 families) via nucleation, condensation, coagulation, and
- * sintering.  Shares the three-scalar transport structure of `ThreeEquations` but
- * is adapted for an inorganic oxidic system without surface carbon chemistry.
+ * Historically named TiO2, this class now models a configurable solid oxide
+ * material from a gas-phase precursor via nucleation, condensation, coagulation,
+ * and sintering.  TiO2/anatase remains the default material for backward
+ * compatibility.
  *
  * @par References
  * - Kruis, Kusters & Pratsinis, *Aerosol Sci. Technol.* **19** (1993) 514–526.
@@ -68,13 +68,13 @@ namespace MOM
  * @par Transported variables
  * | Index | Symbol | Physical meaning |
  * |---|---|---|
- * | 0 | YTiO2  | TiO2 particle mass fraction [-] |
- * | 1 | NTiO2N | Scaled number density = N / N0_scaling [-] (default N0_scaling = 10¹⁵ #/m³) |
- * | 2 | STiO2  | Total particle surface area per gas volume [m²/m³] |
+ * | 0 | Ysolid | Solid particle mass fraction [-] |
+ * | 1 | NsolidN | Scaled number density = N / N0_scaling [-] (default N0_scaling = 10¹⁵ #/m³) |
+ * | 2 | Ssolid | Total particle surface area per gas volume [m²/m³] |
  *
  * @par Physical processes modelled
  * - **Nucleation** — binary (precursor + precursor) or fixed-cluster variant.
- * - **Condensation** — precursor condensation on existing TiO2 particles.
+ * - **Condensation** — precursor condensation on existing solid oxide particles.
  * - **Coagulation** — free-molecular kernel with enhancement factor.
  * - **Sintering** — viscous-flow model (Kruis et al. 1993):
  *   τ_s = (1/A_s)·T^{−n_s}·exp(T_s/T).
@@ -157,7 +157,7 @@ public:
 
     /**
      * @struct Config
-     * @brief Plain configuration parameters for the TiO2 variant.
+     * @brief Plain configuration parameters for the solid oxide variant.
      *
      * The @c nucleation_model field uses strings matching the grammar convention:
      * @c "none" | @c "binary" (default) | @c "fixed-cluster".
@@ -167,7 +167,7 @@ public:
     {
         // ---- Activation / precursor ----------------------------------------
         bool        is_active         = true;   //!< Enable this variant
-        std::string precursor_species = "none"; //!< TiO2 precursor species
+        std::string precursor_species = "none"; //!< Solid oxide precursor species
 
         // ---- Solid material -------------------------------------------------
         std::string solid_name                       = "TiO2";   //!< Solid product label
@@ -257,12 +257,14 @@ public:
     /// @param Y    Mass fractions, size = n_species
     void SetStatus(double T, double P_Pa, const double* Y) noexcept;
 
-    /// Generic span setter. Order: [YTiO2, NTiO2N, STiO2].
-    /// YTiO2 [-], NTiO2N [-], STiO2 [m2/m3].
+    /// Generic span setter. Order: [Ysolid, NsolidN, Ssolid].
+    /// Ysolid [-], NsolidN [-], Ssolid [m2/m3].
     void SetMoments(std::span<const double> m) noexcept;
 
-    /// Named setter (preferred for TiO2-aware code).
-    void SetMoments(double YTiO2, double NTiO2N, double STiO2) noexcept;
+    /// Named setter for the transported solid moments.
+    void SetMoments(double solid_mass_fraction,
+                    double scaled_number_density,
+                    double surface_area_concentration) noexcept;
 
     // -- MomentMethod concept — core computation -------------------------------
 
@@ -288,8 +290,8 @@ public:
     [[nodiscard]] double collision_diameter() const noexcept; //!< aggregate collision diameter [m]
     [[nodiscard]] double AggregateDiameter() const noexcept; //!< mobility aggregate diameter [m]
     [[nodiscard]] double particle_number_density() const noexcept;    //!< [#/m3]
-    [[nodiscard]] double mass_fraction() const noexcept;             //!< = YTiO2_
-    [[nodiscard]] double specific_surface() const noexcept;          //!< STiO2 [m2/m3]
+    [[nodiscard]] double mass_fraction() const noexcept;             //!< solid mass fraction [-]
+    [[nodiscard]] double specific_surface() const noexcept;          //!< total surface area [m2/m3]
     [[nodiscard]] double number_primary_particles() const noexcept; //!< np [-]
     [[nodiscard]] double diffusion_coefficient() const noexcept;     //!< [kg/m/s]
 
@@ -334,7 +336,7 @@ public:
     //   • header mode — lambda uses label to register the column
     //   • row mode    — lambda uses value to write the data
 
-    /// TiO2-specific prefix columns: da, np, ss, vs, tauS, NDF parameters.
+    /// Variant-specific prefix columns: da, np, ss, vs, tauS, NDF parameters.
     template <typename CB> void variant_prefix_output(CB&& cb) const
     {
         double fv, dp, dc, da, np, ss, vs, ssph, tauS;
@@ -366,7 +368,7 @@ public:
         cb("omegaCO2[kg/m3/s]", omega_at(CO2_index_));
     }
 
-    // -- NDF reconstruction (TiO2-specific) -----------------------------------
+    // -- NDF reconstruction ----------------------------------------------------
 
     [[nodiscard]] NDFReconstructionData ReconstructedNDFData(bool use_regularized_moments = false) const;
 
@@ -478,7 +480,7 @@ public:
     /**
      * @name CRTP extension points — per-process source storage
      *
-     * TiO2 models: nucleation, coagulation, condensation, sintering.
+     * Solid oxide models: nucleation, coagulation, condensation, sintering.
      * Growth and oxidation are **not** modelled; `sources_growth()` and
      * `sources_oxidation()` return zero spans automatically.
      * @{
@@ -533,9 +535,9 @@ private:
     const Thermo& thermo_;
 
     // -- Transported variables --------------------------------------------------
-    double YTiO2_      = 0.;    //!< TiO2 mass fraction [-]
-    double NTiO2N_     = 0.;    //!< N / N0_scaling [-]
-    double STiO2_      = 0.;    //!< surface area concentration [m2/m3]
+    double solid_mass_fraction_          = 0.; //!< solid particle mass fraction [-]
+    double scaled_number_density_        = 0.; //!< N / N0_scaling [-]
+    double surface_area_concentration_   = 0.; //!< surface area concentration [m2/m3]
     double N0_scaling_ = 1.e15; //!< [#/m3]
 
     // -- Material properties ----------------------------------------------------
@@ -643,7 +645,7 @@ private:
 
     // -- Per-process source storage (owned by TiO2, not by base) --------------
     //
-    // TiO2 models: nucleation, coagulation, condensation, sintering.
+    // Solid oxide models: nucleation, coagulation, condensation, sintering.
     // growth and oxidation are absent; base class returns zero span for both.
 
     MomentVector source_nucleation_   = MomentVector::Zero();

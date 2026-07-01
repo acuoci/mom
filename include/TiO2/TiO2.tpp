@@ -236,11 +236,13 @@ template <ThermoMap Thermo> void TiO2<Thermo>::SetMoments(std::span<const double
 }
 
 template <ThermoMap Thermo>
-void TiO2<Thermo>::SetMoments(double YTiO2, double NTiO2N, double STiO2) noexcept
+void TiO2<Thermo>::SetMoments(double solid_mass_fraction,
+                              double scaled_number_density,
+                              double surface_area_concentration) noexcept
 {
-    YTiO2_  = std::max(YTiO2, 0.);
-    NTiO2N_ = std::max(NTiO2N, 0.);
-    STiO2_  = std::max(STiO2, 0.);
+    solid_mass_fraction_ = std::max(solid_mass_fraction, 0.);
+    scaled_number_density_ = std::max(scaled_number_density, 0.);
+    surface_area_concentration_ = std::max(surface_area_concentration, 0.);
 }
 
 // ============================================================================
@@ -507,9 +509,9 @@ void TiO2<Thermo>::Properties(double& fv,
                               double& ssph,
                               double& tauS) const noexcept
 {
-    const double Y = std::max(YTiO2_, 0.);
-    const double N = std::max(NTiO2N_ * N0_scaling_, 0.);
-    const double S = std::max(STiO2_, 0.);
+    const double Y = std::max(solid_mass_fraction_, 0.);
+    const double N = std::max(scaled_number_density_ * N0_scaling_, 0.);
+    const double S = std::max(surface_area_concentration_, 0.);
 
     // Volume fraction [-]
     fv = this->rho_ / solid_density_kg_m3_ * Y;
@@ -558,22 +560,22 @@ void TiO2<Thermo>::Properties(double& fv,
 
 template <ThermoMap Thermo> double TiO2<Thermo>::volume_fraction() const noexcept
 {
-    return this->rho_ / solid_density_kg_m3_ * std::max(YTiO2_, 0.);
+    return this->rho_ / solid_density_kg_m3_ * std::max(solid_mass_fraction_, 0.);
 }
 
 template <ThermoMap Thermo> double TiO2<Thermo>::mass_fraction() const noexcept
 {
-    return std::max(YTiO2_, 0.);
+    return std::max(solid_mass_fraction_, 0.);
 }
 
 template <ThermoMap Thermo> double TiO2<Thermo>::particle_number_density() const noexcept
 {
-    return std::max(NTiO2N_ * N0_scaling_, 0.);
+    return std::max(scaled_number_density_ * N0_scaling_, 0.);
 }
 
 template <ThermoMap Thermo> double TiO2<Thermo>::specific_surface() const noexcept
 {
-    return std::max(STiO2_, 0.);
+    return std::max(surface_area_concentration_, 0.);
 }
 
 // ============================================================================
@@ -733,7 +735,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::NucleationSourceTerms_FixedCluste
 
 template <ThermoMap Thermo> void TiO2<Thermo>::CoagulationSourceTerms()
 {
-    const double N = NTiO2N_ * N0_scaling_;
+    const double N = scaled_number_density_ * N0_scaling_;
     if (N <= N_min_)
         return;
 
@@ -779,7 +781,7 @@ template <ThermoMap Thermo> void TiO2<Thermo>::CondensationSourceTerms()
     if (c_precursor_ <= 0. || vprec_ <= 0. || dprec_ <= 0.)
         return;
 
-    const double N = NTiO2N_ * N0_scaling_;
+    const double N = scaled_number_density_ * N0_scaling_;
     if (N <= N_min_)
         return;
 
@@ -820,8 +822,8 @@ template <ThermoMap Thermo> void TiO2<Thermo>::CondensationSourceTerms()
 
 template <ThermoMap Thermo> void TiO2<Thermo>::SinteringSourceTerms()
 {
-    const double N = NTiO2N_ * N0_scaling_;
-    const double S = STiO2_;
+    const double N = scaled_number_density_ * N0_scaling_;
+    const double S = surface_area_concentration_;
 
     if (N <= N_min_ || S <= 0.)
         return;
@@ -869,17 +871,17 @@ template <ThermoMap Thermo> void TiO2<Thermo>::SinteringSourceTerms()
 template <ThermoMap Thermo> double TiO2<Thermo>::SinteringDeferredUpdate(double dt_ode)
 {
     if (sintering_model_ == 0)
-        return STiO2_;
+        return surface_area_concentration_;
 
-    const double N = NTiO2N_ * N0_scaling_;
+    const double N = scaled_number_density_ * N0_scaling_;
     if (N <= N_min_)
-        return STiO2_;
+        return surface_area_concentration_;
 
     double fv, dp, dc, da, np, ss, vs, ssph, tauS;
     Properties(fv, dp, dc, da, np, ss, vs, ssph, tauS);
 
     const double S_sphere = N * ssph;
-    const double S        = STiO2_;
+    const double S        = surface_area_concentration_;
 
     if (S <= S_sphere)
         return S;
@@ -1262,8 +1264,8 @@ typename TiO2<Thermo>::NDFReconstructionData TiO2<Thermo>::ReconstructedNDFData(
 {
     NDFReconstructionData d{}; // all zero, valid = false
 
-    const double Y_raw = std::max(YTiO2_, 0.);
-    const double N_raw = std::max(NTiO2N_ * N0_scaling_, 0.);
+    const double Y_raw = std::max(solid_mass_fraction_, 0.);
+    const double N_raw = std::max(scaled_number_density_ * N0_scaling_, 0.);
 
     double Y = Y_raw;
     double N = N_raw;
@@ -1420,6 +1422,8 @@ TiO2<Thermo>::ParseConfig(DictType& dict)
 
     if (dict.CheckOption("@TiO2"))
         dict.ReadBool("@TiO2", cfg.is_active);
+    if (dict.CheckOption("@MetalOxide"))
+        dict.ReadBool("@MetalOxide", cfg.is_active);
 
     if (dict.CheckOption("@Precursor"))
         dict.ReadString("@Precursor", cfg.precursor_species);

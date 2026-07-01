@@ -219,7 +219,7 @@ FakeDictionary buildTiO2Dictionary()
 {
     FakeDictionary dict;
 
-    dict.bools["@TiO2"] = true;
+    dict.bools["@MetalOxide"] = true;
     dict.bools["@GasConsumption"] = false;
     dict.bools["@SinteringDeferred"] = true;
 
@@ -256,7 +256,7 @@ FakeDictionary buildTiO2GasDictionary()
 {
     FakeDictionary dict;
 
-    dict.bools["@TiO2"] = true;
+    dict.bools["@MetalOxide"] = true;
     dict.bools["@GasConsumption"] = true;
 
     dict.strings["@Precursor"] = "TiOH4";
@@ -415,6 +415,12 @@ void checkTiO2DictionarySetup()
     require(parse_dict.grammar_was_set, "ParseConfig did not install the TiO2 grammar");
     require(cfg.has_value(), "TiO2 ParseConfig returned an unexpected error");
     require(cfg->is_active, "TiO2 activation flag was not parsed");
+
+    FakeDictionary legacy_activation;
+    legacy_activation.bools["@TiO2"] = false;
+    auto legacy_cfg = MOM::TiO2<MOM::BasicThermoData>::ParseConfig(legacy_activation);
+    require(legacy_cfg.has_value(), "TiO2 legacy activation ParseConfig returned an error");
+    require(!legacy_cfg->is_active, "TiO2 legacy @TiO2 activation key was not parsed");
     require(cfg->precursor_species == "TiOH4", "TiO2 @Precursor was not parsed");
     require(cfg->solid_name == "GenericOxide", "TiO2 @SolidName was not parsed");
     requireNear(cfg->solid_molecular_weight_kg_kmol, 100.0,
