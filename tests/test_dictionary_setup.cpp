@@ -1,5 +1,5 @@
 /*-----------------------------------------------------------------------*\
-|   MOM Library - HMOM dictionary setup regression test                    |
+|   MOM Library - Dictionary setup regression test                        |
 \*-----------------------------------------------------------------------*/
 
 // ParseConfig is a function template. This test intentionally instantiates it
@@ -20,7 +20,7 @@
 #include <utility>
 
 #if !defined(MOM_USE_DICTIONARY)
-#error "test_hmom_dictionary_setup.cpp must be built only with MOM_USE_DICTIONARY enabled"
+#error "test_dictionary_setup.cpp must be built only with MOM_USE_DICTIONARY enabled"
 #endif
 
 namespace

@@ -136,11 +136,11 @@ if(MOM_BUILD_TESTS)
     add_test(NAME ReporterUsageExample COMMAND reporter_usage_example)
 
     if(MOM_USE_DICTIONARY)
-        add_executable(test_hmom_dictionary_setup tests/test_hmom_dictionary_setup.cpp)
-        target_link_libraries(test_hmom_dictionary_setup PRIVATE MOM)
-        target_compile_options(test_hmom_dictionary_setup PRIVATE
+        add_executable(test_dictionary_setup tests/test_dictionary_setup.cpp)
+        target_link_libraries(test_dictionary_setup PRIVATE MOM)
+        target_compile_options(test_dictionary_setup PRIVATE
             $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>)
-        add_test(NAME HMOMDictionarySetup COMMAND test_hmom_dictionary_setup)
+        add_test(NAME DictionarySetup COMMAND test_dictionary_setup)
     endif()
 
 endif()
