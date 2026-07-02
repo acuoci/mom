@@ -80,7 +80,7 @@ template <ThermoMap Thermo> BrookesMoss<Thermo>::BrookesMoss(const Thermo& therm
 
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::MemoryAllocation()
 {
-    this->ZeroSources();          // zeros source_all_, omega_gas_ (base class)
+    this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by BrookesMoss — zeroed explicitly
     source_coagulation_.setZero();
     source_growth_.setZero();
@@ -355,7 +355,7 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::CheckBrookesMossHallSpecie
 
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::CalculateSourceMoments() noexcept
 {
-    this->ZeroSources();          // zeros source_all_, omega_gas_ (base class)
+    this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by BrookesMoss — zeroed explicitly
     source_coagulation_.setZero();
     source_growth_.setZero();
@@ -396,7 +396,8 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::CalculateSourceMoments() n
                                this->source_oxidation_(i) + this->source_coagulation_(i);
     }
 
-    CalculateOmegaGas();
+    if (this->gas_consumption_)
+        CalculateOmegaGas();
 }
 
 // ============================================================================

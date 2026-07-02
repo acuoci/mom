@@ -727,6 +727,66 @@ static bool validateBrookesMossInvalidModelFlags()
     return ok;
 }
 
+static bool validateHMOMGasConsumptionDisableClearsOutput()
+{
+    const auto th = buildSootThermo();
+    const auto Y  = X2Y({0.010, 0.020, 0.180, 0.010, 0.100, 0.060, 0.620}, th);
+
+    bool produced_gas_sources = false;
+    bool cleared_on_disable = false;
+    bool stayed_clear_after_calculation = false;
+
+    try
+    {
+        MOM::HMOM<MOM::BasicThermoData> model(th);
+        model.SetNucleation(1);
+        model.SetCoagulation(1);
+        model.SetCondensation(1);
+        model.SetSurfaceGrowth(1);
+        model.SetOxidation(1);
+        model.SetStatus(1800., 101325., Y.data());
+        model.SetMoments(model.initial_moments());
+        model.CalculateSourceMoments();
+
+        const auto gas_enabled = model.omega_gas();
+        produced_gas_sources =
+            std::any_of(gas_enabled.begin(), gas_enabled.end(), [](double v) { return v != 0.; });
+
+        model.SetGasConsumption(false);
+        const auto gas_disabled = model.omega_gas();
+        cleared_on_disable = std::all_of(
+            gas_disabled.begin(), gas_disabled.end(), [](double v) { return v == 0.; });
+
+        model.CalculateSourceMoments();
+        const auto gas_after_calculation = model.omega_gas();
+        stayed_clear_after_calculation =
+            std::all_of(gas_after_calculation.begin(),
+                        gas_after_calculation.end(),
+                        [](double v) { return v == 0.; });
+    }
+    catch (const std::runtime_error&)
+    {
+        produced_gas_sources = false;
+        cleared_on_disable = false;
+        stayed_clear_after_calculation = false;
+    }
+
+    const bool ok = produced_gas_sources && cleared_on_disable && stayed_clear_after_calculation;
+
+    std::cout << "\n=== HMOM gas-consumption disabled output handling ===\n";
+    std::cout << (produced_gas_sources
+                      ? "  [PASS] Enabled gas consumption produced non-zero gas sources\n"
+                      : "  [FAIL] Enabled gas consumption did not produce a testable gas source\n");
+    std::cout << (cleared_on_disable
+                      ? "  [PASS] Disabling gas consumption clears omega_gas\n"
+                      : "  [FAIL] Disabling gas consumption left stale omega_gas values\n");
+    std::cout << (stayed_clear_after_calculation
+                      ? "  [PASS] Disabled gas consumption remains zero after source evaluation\n"
+                      : "  [FAIL] Disabled gas consumption was modified during source evaluation\n");
+
+    return ok;
+}
+
 // ============================================================================
 // main
 // ============================================================================
@@ -754,6 +814,7 @@ int main()
     all_ok &= validateBrookesMossReporterMissingSpecies();
     all_ok &= validateBrookesMossHallConfigDefaults();
     all_ok &= validateBrookesMossInvalidModelFlags();
+    all_ok &= validateHMOMGasConsumptionDisableClearsOutput();
 
     // ════════════════════════════════════════════════════════════════════
     // 1. HMOM  (NEq = 4)

@@ -88,7 +88,7 @@ template <ThermoMap Thermo> MetalOxide<Thermo>::MetalOxide(const Thermo& thermo)
 
 template <ThermoMap Thermo> void MetalOxide<Thermo>::MemoryAllocation()
 {
-    this->ZeroSources();          // zeros source_all_, omega_gas_ (base class)
+    this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by MetalOxide — zeroed explicitly
     source_coagulation_.setZero();
     source_condensation_.setZero();
@@ -837,14 +837,18 @@ template <ThermoMap Thermo> double MetalOxide<Thermo>::SinteringDeferredUpdate(d
 
 template <ThermoMap Thermo> void MetalOxide<Thermo>::CalculateSourceMoments() noexcept
 {
-    this->ZeroSources();          // zeros source_all_, omega_gas_ (base class)
+    this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by MetalOxide — must be zeroed before early return
     source_coagulation_.setZero();
     source_condensation_.setZero();
     source_sintering_.setZero();
 
     if (!this->is_active_)
+    {
+        if (this->gas_consumption_)
+            this->omega_gas_.setZero();
         return;
+    }
 
     if (nucleation_variant_ != NucleationVariant::Off)
         NucleationSourceTerms();

@@ -118,7 +118,7 @@ ThreeEquations<Thermo>::ThreeEquations(const Thermo& thermo) : thermo_(thermo)
 
 template <ThermoMap Thermo> void ThreeEquations<Thermo>::MemoryAllocation()
 {
-    this->ZeroSources();          // zeros source_all_, omega_gas_ (base class)
+    this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by ThreeEquations — zeroed explicitly
     source_coagulation_.setZero();
     source_condensation_.setZero();
@@ -925,7 +925,7 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::OxidationSourceTerms()
 
 template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateSourceMoments() noexcept
 {
-    this->ZeroSources();          // zeros source_all_, omega_gas_ (base class)
+    this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by ThreeEquations — zeroed explicitly
     source_coagulation_.setZero();
     source_condensation_.setZero();
@@ -964,7 +964,8 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateSourceMoments(
                                this->source_condensation_(i);
     }
 
-    CalculateOmegaGas();
+    if (this->gas_consumption_)
+        CalculateOmegaGas();
 }
 
 // ============================================================================

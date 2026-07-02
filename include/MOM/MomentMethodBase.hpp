@@ -177,9 +177,16 @@ public:
     /**
      * @brief Enables or disables gas-phase precursor consumption.
      * @param flag If `true` (default), `omega_gas_` is computed and the precursor
-     *             source term is added to the gas-phase chemistry residual.
+     *             source term is added to the gas-phase chemistry residual.  If
+     *             `false`, the gas source vector is cleared once and then left
+     *             untouched by the per-cell moment-source reset.
      */
-    void SetGasConsumption(bool flag) noexcept { gas_consumption_ = flag; }
+    void SetGasConsumption(bool flag) noexcept
+    {
+        gas_consumption_ = flag;
+        if (!gas_consumption_)
+            omega_gas_.setZero();
+    }
 
     /**
      * @brief Enables or disables particle contribution to radiative heat transfer.
@@ -452,12 +459,13 @@ protected:
      *
      * Each `Derived::CalculateSourceMoments()` implementation must call this
      * first, then zero its own per-process vectors (`source_nucleation_`, etc.)
-     * before accumulating new source terms.
+     * before accumulating new source terms.  This deliberately does not clear
+     * `omega_gas_`; gas source vectors can be large and are reset only when gas
+     * consumption is enabled.
      */
     void ZeroSources() noexcept
     {
         source_all_.setZero();
-        omega_gas_.setZero();
     }
 
     // -- CRTP down-cast helpers ---------------------------------------------
