@@ -216,22 +216,35 @@ template <ThermoMap Thermo> void HMOM<Thermo>::Precalculations()
 
 template <ThermoMap Thermo> void HMOM<Thermo>::SetPAH(std::string_view name)
 {
-    pah_species_ = std::string(name);
-    pah_index_   = thermo_.IndexOfSpecies(name);
-    ncpah_       = static_cast<double>(thermo_.NumberOfCarbonAtoms(pah_index_));
-    nhpah_       = static_cast<double>(thermo_.NumberOfHydrogenAtoms(pah_index_));
+    const auto pah_index = thermo_.IndexOfSpecies(name);
+    if (pah_index < 0)
+        throw std::runtime_error("[HMOM] PAH species not found in mechanism: " + std::string(name));
+
+    const auto pah_index_u = static_cast<unsigned>(pah_index);
+    const auto ncpah       = static_cast<double>(thermo_.NumberOfCarbonAtoms(pah_index_u));
+    const auto nhpah       = static_cast<double>(thermo_.NumberOfHydrogenAtoms(pah_index_u));
 
     // -- PAH mass and geometry ---------------------------------------------
-    mwpah_ = thermo_.MolecularWeight(pah_index_); // [kg/kmol]
+    auto mwpah = thermo_.MolecularWeight(pah_index_u); // [kg/kmol]
     if (is_simplified_pah_mass_)
-        mwpah_ = ncpah_ * this->WC_;
+        mwpah = ncpah * this->WC_;
 
-    vpah_ = mwpah_ / this->rho_particle_ / this->Nav_kmol_; // [m3]
-    dpah_ = std::pow(6. / this->pi_ * vpah_, 1. / 3.);      // [m]
-    spah_ = this->pi_ * dpah_ * dpah_;                      // [m2]
-    mpah_ = mwpah_ / this->Nav_kmol_;                       // [kg]
+    const auto vpah = mwpah / this->rho_particle_ / this->Nav_kmol_; // [m3]
+    const auto dpah = std::pow(6. / this->pi_ * vpah, 1. / 3.);      // [m]
+    const auto spah = this->pi_ * dpah * dpah;                       // [m2]
+    const auto mpah = mwpah / this->Nav_kmol_;                       // [kg]
 
     const double K_spher = K_spher_HMOM(this->pi_);
+
+    pah_species_ = std::string(name);
+    pah_index_   = pah_index;
+    ncpah_       = ncpah;
+    nhpah_       = nhpah;
+    mwpah_       = mwpah;
+    vpah_        = vpah;
+    dpah_        = dpah;
+    spah_        = spah;
+    mpah_        = mpah;
 
     dimer_volume_  = 2. * vpah_;
     dimer_surface_ = K_spher * std::pow(dimer_volume_, 2. / 3.);

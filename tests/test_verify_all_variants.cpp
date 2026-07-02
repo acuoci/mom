@@ -446,6 +446,28 @@ static bool validateAnyMomentMethodAccessors(const MOM::BasicThermoData& th)
     return ok;
 }
 
+static bool validateHMOMSpeciesValidation()
+{
+    const auto th = buildSootThermo();
+
+    bool ok = false;
+    try
+    {
+        MOM::HMOM<MOM::BasicThermoData> model(th);
+        model.SetPAH("MISSING_PAH");
+    }
+    catch (const std::runtime_error& e)
+    {
+        ok = std::string(e.what()).find("MISSING_PAH") != std::string::npos;
+    }
+
+    std::cout << "\n=== HMOM species validation ===\n";
+    std::cout << (ok ? "  [PASS] Missing PAH species is rejected during setup\n"
+                     : "  [FAIL] Missing PAH species was not reported clearly\n");
+
+    return ok;
+}
+
 static bool validateThreeEquationsSpeciesValidation()
 {
     auto th = buildSootThermo();
@@ -726,6 +748,7 @@ int main()
     bool all_ok = true;
 
     all_ok &= validateAnyMomentMethodAccessors(thS);
+    all_ok &= validateHMOMSpeciesValidation();
     all_ok &= validateThreeEquationsSpeciesValidation();
     all_ok &= validateBrookesMossHallSpeciesValidation();
     all_ok &= validateBrookesMossReporterMissingSpecies();
