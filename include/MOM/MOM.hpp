@@ -88,3 +88,21 @@
 // ============================================================================
 
 template struct MOM::AllVariants::ConceptCheck<MOM::BasicThermoData>;
+
+// ============================================================================
+// [T1] Compile-time HasReconstructedNDF concept matrix — fires in every TU
+// ============================================================================
+//
+// Mirrors the matrix documented in MomentMethodConcept.hpp.  If a variant's
+// NDF reconstruction status changes (added or removed), the build will fail
+// here with a clear message pointing at the offending type.
+// ============================================================================
+
+static_assert( MOM::HasReconstructedNDF<MOM::HMOM<MOM::BasicThermoData>>,
+               "[MOM] HMOM must satisfy HasReconstructedNDF.");
+static_assert( MOM::HasReconstructedNDF<MOM::ThreeEquations<MOM::BasicThermoData>>,
+               "[MOM] ThreeEquations must satisfy HasReconstructedNDF.");
+static_assert( MOM::HasReconstructedNDF<MOM::MetalOxide<MOM::BasicThermoData>>,
+               "[MOM] MetalOxide must satisfy HasReconstructedNDF.");
+static_assert(!MOM::HasReconstructedNDF<MOM::BrookesMoss<MOM::BasicThermoData>>,
+               "[MOM] BrookesMoss must NOT satisfy HasReconstructedNDF.");

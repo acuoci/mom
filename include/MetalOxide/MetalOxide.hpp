@@ -91,6 +91,10 @@ namespace MOM
  * @note When sintering is stiff relative to the flow time step, use
  *       `SinteringDeferredUpdate()` to integrate it separately via an ODE sub-step.
  *
+ * @par Thread safety
+ * Not thread-safe — one instance per OpenMP thread.
+ * See `MomentMethodBase` for the complete thread-safety contract.
+ *
  * @tparam Thermo  Must satisfy the MOM::ThermoMap concept.
  */
 
@@ -219,6 +223,7 @@ public:
     // -- Construction ---------------------------------------------------------
 
     explicit MetalOxide(const Thermo& thermo);
+    explicit MetalOxide(const Thermo&&) = delete; ///< Prevents binding a temporary as thermo (dangling ref).
 
     MetalOxide(const MetalOxide&)            = delete;
     MetalOxide& operator=(const MetalOxide&) = delete;

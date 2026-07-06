@@ -139,6 +139,22 @@ namespace MOM
  * `sources_X() → derived().sources_X_impl()` is collapsed to a direct memory
  * access at **all** optimisation levels, including debug (`-O0`) and profiling
  * (`-Og`) builds.
+ *
+ * @par Thread safety
+ * **One instance per thread — never shared across threads.**
+ *
+ * Each concrete instance holds mutable internal state that is overwritten on
+ * every call to `CalculateSourceMoments()` (moment values, intermediate species
+ * concentrations, source vectors).  Concurrent access to the same instance from
+ * multiple threads is undefined behaviour.
+ *
+ * For MPI+OpenMP or pure-OpenMP CFD solvers:
+ * - Allocate **one model instance per OpenMP thread** (e.g. in a `#pragma omp threadprivate`
+ *   variable or via an `std::vector<Model>` of size `omp_get_max_threads()`).
+ * - The shared `Thermo` reference may be safely read from multiple threads
+ *   simultaneously, provided no thread writes to it during the parallel region.
+ * - `MomentMethodReporter` and `OutputFileColumns` carry the same constraint —
+ *   use one reporter instance per thread, or serialise output behind a mutex.
  */
 template <class Derived, unsigned NEq> class MomentMethodBase
 {

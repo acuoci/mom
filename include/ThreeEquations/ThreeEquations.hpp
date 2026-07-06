@@ -91,6 +91,10 @@ namespace MOM
  *
  * @note Sintering is not modelled; `sources_sintering()` returns a zero span.
  *
+ * @par Thread safety
+ * Not thread-safe — one instance per OpenMP thread.
+ * See `MomentMethodBase` for the complete thread-safety contract.
+ *
  * @tparam Thermo  Must satisfy the MOM::ThermoMap concept.
  */
 
@@ -218,6 +222,7 @@ public:
      * @param thermo  Const reference to the thermodynamics map (must outlive this object).
      */
     explicit ThreeEquations(const Thermo& thermo);
+    explicit ThreeEquations(const Thermo&&) = delete; ///< Prevents binding a temporary as thermo (dangling ref).
 
     ThreeEquations(const ThreeEquations&)            = delete;
     ThreeEquations& operator=(const ThreeEquations&) = delete;

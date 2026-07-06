@@ -83,6 +83,10 @@ namespace MOM
  *   returns a zero span.
  * - **Sintering**: `sources_sintering()` returns a zero span.
  *
+ * @par Thread safety
+ * Not thread-safe — one instance per OpenMP thread.
+ * See `MomentMethodBase` for the complete thread-safety contract.
+ *
  * @tparam Thermo  Must satisfy the MOM::ThermoMap concept.
  */
 
@@ -189,6 +193,7 @@ public:
     // -- Construction ---------------------------------------------------------
 
     explicit BrookesMoss(const Thermo& thermo);
+    explicit BrookesMoss(const Thermo&&) = delete; ///< Prevents binding a temporary as thermo (dangling ref).
 
     BrookesMoss(const BrookesMoss&)            = delete;
     BrookesMoss& operator=(const BrookesMoss&) = delete;

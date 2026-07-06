@@ -185,6 +185,26 @@ template <ThermoMap Thermo>
                                                           std::string_view label);
 
 /**
+ * @brief Deleted overload — prevents a temporary Thermo from being silently bound.
+ *
+ * `const Thermo&&` is NOT a forwarding reference (it is const-qualified), so it
+ * matches rvalues and moved objects but never plain lvalues.  The live lvalue
+ * overload above therefore remains reachable for all valid call sites.
+ *
+ * @note Use this pattern to diagnose mistakes early:
+ * @code
+ *   // BAD  — thermo lifetime ends before the returned variant is used:
+ *   auto m = MOM::MakeAnyMomentMethod(MOM::BasicThermoData{...}, "HMOM"); // deleted ✓
+ *
+ *   // GOOD — thermo outlives the variant:
+ *   MOM::BasicThermoData thermo{...};
+ *   auto m = MOM::MakeAnyMomentMethod(thermo, "HMOM");                    // OK ✓
+ * @endcode
+ */
+template <ThermoMap Thermo>
+AnyMomentMethod<Thermo> MakeAnyMomentMethod(const Thermo&&, std::string_view) = delete;
+
+/**
  * @name Runtime dispatch helpers for AnyMomentMethod
  *
  * These free functions reproduce the full `MomentMethod` concept interface as
