@@ -236,15 +236,14 @@ public:
                                int    nv                       = 100,
                                double vmin_nm3                 = 1.0,
                                double vmax_nm3                 = 1.0e6,
-                               bool   use_regularized_moments  = false,
-                               unsigned precision              = 16)
+                               bool   use_regularized_moments  = false)
     {
         std::visit(
             [&](const auto& m) {
                 using M = std::decay_t<decltype(m)>;
                 if constexpr (HasReconstructedNDF<M>)
                     this->WriteReconstructedNDF(m, ndf_out, nv, vmin_nm3, vmax_nm3,
-                                                use_regularized_moments, precision);
+                                                use_regularized_moments);
                 // BrookesMoss: silently skip — no NDF reconstruction available.
             },
             any);
