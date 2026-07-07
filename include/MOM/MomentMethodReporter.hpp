@@ -196,6 +196,12 @@ public:
     // Compile error (via `requires HasReconstructedNDF`) if called for
     // BrookesMoss, which has no NDF reconstruction.
 
+    template <MomentMethod Model>
+    requires HasReconstructedNDF<Model>
+    void WriteHeaderLineReconstructedNDF(   const Model& model,
+                                            OutputFileColumns& ndf_out,
+                                            unsigned precision);
+
     /// Static-dispatch overload — zero overhead, preferred.
     template <MomentMethod Model>
     requires HasReconstructedNDF<Model>
@@ -204,8 +210,23 @@ public:
                                int    nv                       = 100,
                                double vmin_nm3                 = 1.0,
                                double vmax_nm3                 = 1.0e6,
-                               bool   use_regularized_moments  = false,
-                               unsigned precision              = 16);
+                               bool   use_regularized_moments  = false);
+
+    /// Runtime-dispatch overload for AnyMomentMethod.
+    /// Silent no-op for BrookesMoss (no NDF reconstruction available).
+    template <ThermoMap Thermo>
+    void WriteHeaderLineReconstructedNDF(   const AnyMomentMethod<Thermo>& any,
+                                            OutputFileColumns& ndf_out,
+                                            unsigned precision = 16)
+    {
+        std::visit(
+            [&](const auto& m) {
+                using M = std::decay_t<decltype(m)>;
+                if constexpr (HasReconstructedNDF<M>)
+                    this->WriteHeaderLineReconstructedNDF(m, ndf_out, precision);
+            },
+            any);
+    }
 
     /// Runtime-dispatch overload for AnyMomentMethod.
     /// Silent no-op for BrookesMoss (no NDF reconstruction available).
@@ -228,6 +249,8 @@ public:
             },
             any);
     }
+
+
 
 private:
 
@@ -415,13 +438,9 @@ template <MomentMethod Model> void MomentMethodReporter::WriteRow(const Model& m
 
 template <MomentMethod Model>
 requires HasReconstructedNDF<Model>
-void MomentMethodReporter::WriteReconstructedNDF(const Model& model,
-                                                  OutputFileColumns& ndf_out,
-                                                  int    nv,
-                                                  double vmin_nm3,
-                                                  double vmax_nm3,
-                                                  bool   use_regularized_moments,
-                                                  unsigned precision)
+void MomentMethodReporter::WriteHeaderLineReconstructedNDF( const Model& model,
+                                                            OutputFileColumns& ndf_out,
+                                                            unsigned precision)
 {
     // -- Header ---------------------------------------------------------------
     // Core columns (same for all NDF-capable variants)
@@ -440,10 +459,20 @@ void MomentMethodReporter::WriteReconstructedNDF(const Model& model,
     if constexpr (requires(const Model& m) {
                       m.ndf_extra_output([](std::string_view, double) {});
                   })
-        model.ndf_extra_output(add_col);
+    model.ndf_extra_output(add_col);
 
     ndf_out.Complete();
+}
 
+template <MomentMethod Model>
+requires HasReconstructedNDF<Model>
+void MomentMethodReporter::WriteReconstructedNDF(   const Model& model,
+                                                    OutputFileColumns& ndf_out,
+                                                    int    nv,
+                                                    double vmin_nm3,
+                                                    double vmax_nm3,
+                                                    bool   use_regularized_moments)
+{
     // -- Volume grid: nv points log-spaced in [vmin_nm3, vmax_nm3] nm³ -------
     constexpr double pi = std::numbers::pi_v<double>;
 
