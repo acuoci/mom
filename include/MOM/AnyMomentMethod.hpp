@@ -395,6 +395,127 @@ GetOxidationSources(const AnyMomentMethod<Thermo>& m) noexcept
 }
 
 /**
+ * @name Per-process activation queries
+ *
+ * Return the integer model flag for each physical process (0 = off, >0 = active variant).
+ * These route through the `model_X()` CRTP dispatchers in `MomentMethodBase`, so the
+ * return value is always 0 for models that do not implement that process (e.g.
+ * `GetSinteringModel` returns 0 for all soot models; `GetCondensationModel` returns 0
+ * for BrookesMoss).
+ *
+ * Typical CFD usage:
+ * @code
+ *   if (MOM::GetOxidationModel(mom_) > 0) {
+ *       // oxidation is active — apply operator splitting
+ *   }
+ *   if (MOM::GetSinteringModel(mom_) > 0) {
+ *       // sintering sources are available
+ *       auto s = MOM::GetSinteringSources(mom_);
+ *   }
+ * @endcode
+ * @{
+ */
+
+/** @brief Returns the nucleation model flag (0 = off, >0 = active variant). */
+template <ThermoMap Thermo>
+[[nodiscard]] inline int GetNucleationModel(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.model_nucleation(); }, m);
+}
+
+/** @brief Returns the surface-growth model flag (0 = off, >0 = active variant). */
+template <ThermoMap Thermo>
+[[nodiscard]] inline int GetGrowthModel(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.model_growth(); }, m);
+}
+
+/** @brief Returns the coagulation model flag (0 = off, >0 = active variant). */
+template <ThermoMap Thermo>
+[[nodiscard]] inline int GetCoagulationModel(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.model_coagulation(); }, m);
+}
+
+/** @brief Returns the condensation model flag (0 = off, >0 = active variant). */
+template <ThermoMap Thermo>
+[[nodiscard]] inline int GetCondensationModel(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.model_condensation(); }, m);
+}
+
+/** @brief Returns the oxidation model flag (0 = off, >0 = active variant). */
+template <ThermoMap Thermo>
+[[nodiscard]] inline int GetOxidationModel(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.model_oxidation(); }, m);
+}
+
+/** @brief Returns the sintering model flag (0 = off, >0 = active; MetalOxide only). */
+template <ThermoMap Thermo>
+[[nodiscard]] inline int GetSinteringModel(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.model_sintering(); }, m);
+}
+
+/** @} */
+
+/**
+ * @name Per-process source term accessors
+ *
+ * Zero-copy spans into the model's internal per-process source storage.
+ * For models that do not implement a given process, the base-class CRTP fallback
+ * returns a span over a static constexpr zero array — no runtime branch, no
+ * allocation, same size as `n_equations`.
+ *
+ * Always check the corresponding `GetXxxModel() > 0` before consuming these
+ * values to distinguish "process off" from "process on but rate happens to be zero".
+ * @{
+ */
+
+/** @brief Zero-copy span over the nucleation source terms [model-specific units]. */
+template <ThermoMap Thermo>
+[[nodiscard]] inline std::span<const double>
+GetNucleationSources(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.sources_nucleation(); }, m);
+}
+
+/** @brief Zero-copy span over the surface-growth source terms. */
+template <ThermoMap Thermo>
+[[nodiscard]] inline std::span<const double>
+GetGrowthSources(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.sources_growth(); }, m);
+}
+
+/** @brief Zero-copy span over the coagulation source terms. */
+template <ThermoMap Thermo>
+[[nodiscard]] inline std::span<const double>
+GetCoagulationSources(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.sources_coagulation(); }, m);
+}
+
+/** @brief Zero-copy span over the condensation source terms. */
+template <ThermoMap Thermo>
+[[nodiscard]] inline std::span<const double>
+GetCondensationSources(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.sources_condensation(); }, m);
+}
+
+/** @brief Zero-copy span over the sintering source terms (MetalOxide only). */
+template <ThermoMap Thermo>
+[[nodiscard]] inline std::span<const double>
+GetSinteringSources(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.sources_sintering(); }, m);
+}
+
+/** @} */
+
+/**
  * @brief Writes `source_all[i] - source_oxidation[i]` into @p out for each moment.
  *
  * For operator splitting of the stiff oxidation terms: pass these reduced sources

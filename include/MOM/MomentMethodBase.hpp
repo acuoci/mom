@@ -376,6 +376,74 @@ public:
     }
 
     /**
+     * @name Per-process activation flags — CRTP dispatch with zero fallback
+     *
+     * Each method returns the integer model flag (0 = off, >0 = variant index)
+     * for the corresponding physical process.  The query detects at compile time
+     * whether `Derived` exposes the matching getter; if not, 0 (off) is returned.
+     *
+     * This mirrors the `sources_X()` zero-span pattern so that `AnyMomentMethod`
+     * free functions can query process activation uniformly across all variants.
+     * @{
+     */
+
+    /** @brief Returns the nucleation model flag (0 = off). */
+    [[nodiscard, gnu::always_inline]] int model_nucleation() const noexcept
+    {
+        if constexpr (requires(const Derived& d) { d.nucleation_model(); })
+            return derived().nucleation_model();
+        else
+            return 0;
+    }
+
+    /** @brief Returns the surface-growth model flag (0 = off). */
+    [[nodiscard, gnu::always_inline]] int model_growth() const noexcept
+    {
+        if constexpr (requires(const Derived& d) { d.surface_growth_model(); })
+            return derived().surface_growth_model();
+        else
+            return 0;
+    }
+
+    /** @brief Returns the coagulation model flag (0 = off). */
+    [[nodiscard, gnu::always_inline]] int model_coagulation() const noexcept
+    {
+        if constexpr (requires(const Derived& d) { d.coagulation_model(); })
+            return derived().coagulation_model();
+        else
+            return 0;
+    }
+
+    /** @brief Returns the condensation model flag (0 = off). */
+    [[nodiscard, gnu::always_inline]] int model_condensation() const noexcept
+    {
+        if constexpr (requires(const Derived& d) { d.condensation_model(); })
+            return derived().condensation_model();
+        else
+            return 0;
+    }
+
+    /** @brief Returns the oxidation model flag (0 = off). */
+    [[nodiscard, gnu::always_inline]] int model_oxidation() const noexcept
+    {
+        if constexpr (requires(const Derived& d) { d.oxidation_model(); })
+            return derived().oxidation_model();
+        else
+            return 0;
+    }
+
+    /** @brief Returns the sintering model flag (0 = off; non-zero for MetalOxide). */
+    [[nodiscard, gnu::always_inline]] int model_sintering() const noexcept
+    {
+        if constexpr (requires(const Derived& d) { d.sintering_model(); })
+            return derived().sintering_model();
+        else
+            return 0;
+    }
+
+    /** @} */
+
+    /**
      * @brief Oxidation-only gas-phase source terms [kg/m³/s].
      *
      * Returns the subset of `omega_gas_` due exclusively to soot oxidation
