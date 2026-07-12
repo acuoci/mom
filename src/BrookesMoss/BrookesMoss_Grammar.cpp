@@ -101,7 +101,7 @@ void BrookesMoss_Grammar::DefineRules()
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@GasConsumption",
         OpenSMOKEpp::SINGLE_BOOL,
-        "Consumption of gaseous species is accounted for (default: false)",
+        "Consumption of gaseous species is accounted for (default: true)",
         true));
 
     // Transport and radiation

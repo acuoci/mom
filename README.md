@@ -473,6 +473,345 @@ These keys are only needed when `@NucleationModel BrookesMossHall;`, `@Nucleatio
 
 When BM-Hall is selected, the C++ configuration also applies BM-Hall-specific defaults unless the user explicitly overrides them: the soot particle molecular weight becomes `1200 kg/kmol`, the surface-growth coefficient becomes `9000.6 kg*m/kmol/s`, and the OH collision efficiency becomes `0.13`.
 
+---
+
+## HMOM Dictionary Configuration
+
+The `HMOM` dictionary configures the four-equation Hybrid Method of Moments soot model. The transported variables are the normalized moments `[M00, M10, M01, N0]`, and the active source terms may include PAH dimerization nucleation, HACA surface growth, PAH condensation, oxidation, discrete coagulation, continuous coagulation, gas-phase coupling, thermophoresis, and soot radiation.
+
+```cpp
+Dictionary HMOM
+{
+    @HMOM                          true;
+
+    @PAH                           A2;
+    @SimplifiedPAHMass             true;
+    @GasClosureDummySpecies        CSOOT;
+
+    @CollisionDiameterModel        2;
+    @FractalDiameterModel          1;
+    @ThermophoreticModel           1;
+
+    @NucleationModel               1;
+    @SurfaceGrowthModel            1;
+    @OxidationModel                0;
+    @CondensationModel             1;
+    @CoagulationModel              1;
+    @ContinuousCoagulationModel    1;
+
+    @GasConsumption                true;
+
+    @DebugMode                     false;
+}
+```
+
+### Required Keywords
+
+| Keyword | Type / units | Accepted values | Default in C++ config | Effect |
+|---|---:|---|---:|---|
+| `@HMOM` | `bool` | `true`, `false` | `true` | Enables or disables the HMOM variant. |
+| `@GasClosureDummySpecies` | `string` | Mechanism species name or `none` | `none` | Optional gas species used to close the gas-phase mass balance. It must exist when not `none`, cannot be the PAH precursor, and cannot be `H`, `H2`, `O2`, `OH`, `H2O`, or `C2H2`. |
+
+### Core Species and Gas-Coupling Controls
+
+| Keyword | Type / units | Accepted values | Default | Effect |
+|---|---:|---|---:|---|
+| `@PAH` | `string` | Mechanism species name | `C2H2` | PAH precursor used for dimerization nucleation and condensation. The species must exist in the thermodynamic map. |
+| `@SimplifiedPAHMass` | `bool` | `true`, `false` | `false` | If enabled, the PAH molecular weight used by HMOM is computed as `nC * WC`, ignoring hydrogen. |
+| `@GasConsumption` | `bool` | `true`, `false` | `true` | If enabled, computes gas-phase source terms from active soot processes. |
+| `@DebugMode` | `bool` | `true`, `false` | `false` | Enables verbose diagnostics. |
+
+### Process and Geometry Model Switches
+
+| Keyword | Type | Accepted values | Default | Effect |
+|---|---:|---|---:|---|
+| `@NucleationModel` | `int` | `0`, `1` | `1` | Enables PAH dimerization nucleation when `1`. |
+| `@SurfaceGrowthModel` | `int` | `0`, `1` | `1` | Enables HACA surface growth when `1`. |
+| `@OxidationModel` | `int` | `0`, `1` | `1` | Enables O2/OH soot oxidation when `1`. |
+| `@CondensationModel` | `int` | `0`, `1` | `1` | Enables PAH condensation on soot particles when `1`. |
+| `@CoagulationModel` | `int` | `0`, `1` | `1` | Enables discrete HMOM coagulation when `1`. |
+| `@ContinuousCoagulationModel` | `int` | `0`, `1` | `1` | Enables the continuum coagulation correction when `1`. |
+| `@ThermophoreticModel` | `int` | `0`, `1` | `1` | Enables thermophoretic drift contribution when `1`. |
+| `@FractalDiameterModel` | `int` | `0`, `1` | `1` | Selects the primary-particle/fractal-diameter closure. |
+| `@CollisionDiameterModel` | `int` | `1`, `2` | `2` | Selects the aggregate collision-diameter closure. |
+
+### Transport, Radiation, and Material Properties
+
+| Keyword | Type / units | Accepted values | Default | Effect |
+|---|---:|---|---:|---|
+| `@SootDensity` | measure | `kg/m3`, `g/cm3` | `1800 kg/m3` | Soot material density used for PAH volume, soot volume, particle diameter, and coagulation geometry. |
+| `@SchmidtNumber` | `double` | Positive scalar expected | `50` | Schmidt number used in the effective particle diffusion coefficient. |
+| `@RadiativeHeatTransfer` | `bool` | `true`, `false` | `true` | Enables soot contribution to radiative heat transfer. |
+| `@PlanckCoefficient` | `string` | `Smooke`, `Kent`, `Sazhin`, `none` | `Smooke` | Selects the soot Planck mean absorption coefficient model. Unrecognized labels map to `none` in the current C++ helper. |
+
+### Surface Density and Active-Site Correction
+
+| Keyword | Type / units | Accepted values | Default | Effect |
+|---|---:|---|---:|---|
+| `@SurfaceDensity` | measure | `#/m2`, `#/cm2`, `#/mm2` | `1.7e19 #/m2` | Active surface-site density used by HACA kinetics. |
+| `@SurfaceDensityCorrectionCoefficient` | `bool` | `true`, `false` | `false` | Enables the temperature-dependent surface-density correction. |
+| `@SurfaceDensityCorrectionCoefficientA1` | `double` | Any scalar | `12.65` | Coefficient `A1` for the surface-density correction. |
+| `@SurfaceDensityCorrectionCoefficientA2` | `double` | Any scalar | `-0.00563` | Coefficient `A2` for the surface-density correction `[1/K]`. |
+| `@SurfaceDensityCorrectionCoefficientB1` | `double` | Any scalar | `-1.38` | Coefficient `B1` for the surface-density correction. |
+| `@SurfaceDensityCorrectionCoefficientB2` | `double` | Any scalar | `0.00069` | Coefficient `B2` for the surface-density correction `[1/K]`. |
+
+### PAH Sticking Coefficient
+
+| Keyword | Type | Accepted values | Default | Effect |
+|---|---:|---|---:|---|
+| `@StickingCoefficientModel` | `string` | `constant`, `pah-dependent` | `constant` | Selects the PAH-PAH sticking model used in dimerization nucleation. |
+| `@StickingCoefficientConstant` | `double` | Non-negative scalar expected | `2e-3` | Base sticking coefficient. For `pah-dependent`, the implementation multiplies this value by a PAH-mass-dependent factor. |
+
+### HACA Kinetic Parameters
+
+Frequency factors must use the literal dictionary unit `cm3,mol,s`. Activation energies must use `kJ/mol`. The C++ implementation converts activation energies internally to activation temperatures.
+
+| Keyword | Type / units | Default | Reaction role |
+|---|---:|---:|---|
+| `@A1f` | measure, `cm3,mol,s` | `6.72e1` | Forward rate for reaction 1. |
+| `@A1b` | measure, `cm3,mol,s` | `6.44e-1` | Backward rate for reaction 1. |
+| `@n1f` | `double` | `3.33` | Temperature exponent for reaction 1 forward. |
+| `@n1b` | `double` | `3.79` | Temperature exponent for reaction 1 backward. |
+| `@E1f` | measure, `kJ/mol` | `6.09` | Activation energy for reaction 1 forward. |
+| `@E1b` | measure, `kJ/mol` | `27.96` | Activation energy for reaction 1 backward. |
+| `@A2f` | measure, `cm3,mol,s` | `1.00e8` | Forward rate for reaction 2. |
+| `@A2b` | measure, `cm3,mol,s` | `8.68e4` | Backward rate for reaction 2. |
+| `@n2f` | `double` | `1.80` | Temperature exponent for reaction 2 forward. |
+| `@n2b` | `double` | `2.36` | Temperature exponent for reaction 2 backward. |
+| `@E2f` | measure, `kJ/mol` | `68.42` | Activation energy for reaction 2 forward. |
+| `@E2b` | measure, `kJ/mol` | `25.46` | Activation energy for reaction 2 backward. |
+| `@A3f` | measure, `cm3,mol,s` | `1.13e16` | Forward rate for reaction 3. |
+| `@A3b` | measure, `cm3,mol,s` | `4.17e13` | Backward rate for reaction 3. |
+| `@n3f` | `double` | `-0.06` | Temperature exponent for reaction 3 forward. |
+| `@n3b` | `double` | `0.15` | Temperature exponent for reaction 3 backward. |
+| `@E3f` | measure, `kJ/mol` | `476.05` | Activation energy for reaction 3 forward. |
+| `@E3b` | measure, `kJ/mol` | `0.00` | Activation energy for reaction 3 backward. |
+| `@A4` | measure, `cm3,mol,s` | `2.52e9` | C2H2-addition rate. |
+| `@n4` | `double` | `1.10` | Temperature exponent for C2H2 addition. |
+| `@E4` | measure, `kJ/mol` | `17.13` | Activation energy for C2H2 addition. |
+| `@A5` | measure, `cm3,mol,s` | `2.20e12` | O2 oxidation rate. |
+| `@n5` | `double` | `0.00` | Temperature exponent for O2 oxidation. |
+| `@E5` | measure, `kJ/mol` | `31.38` | Activation energy for O2 oxidation. |
+| `@Efficiency6` | `double` | `0.13` | Efficiency factor for the OH oxidation contribution. |
+
+---
+
+## ThreeEquations Dictionary Configuration
+
+The `ThreeEquations` dictionary configures the three-equation soot model. The transported variables are soot mass fraction `Ys`, scaled soot number density `NsNorm = Ns / 1e15`, and soot specific surface area `Ss`. The model supports PAH dimerization nucleation, PAH condensation, surface growth, oxidation, coagulation, thermophoretic transport, gas-phase coupling, and soot radiation.
+
+```cpp
+Dictionary ThreeEquations
+{
+    @ThreeEquations                 true;
+
+    @NucleationModel                1;
+    @SurfaceGrowthModel             1;
+    @OxidationModel                 0;
+    @CondensationModel              1;
+    @CoagulationModel               1;
+
+    @DimerModel                     qssa-rodrigues;
+
+    @SurfaceChemistryModel          HMOM;
+    @SootDensity                    1800 kg/m3;
+    @ThermophoreticModel            1;
+
+    @StickingCoefficientModel       constant;
+    @StickingCoefficientConstant    2e-3;
+
+    @SimplifiedPAHMass              true;
+    @PAH                            A2;
+    @GasConsumption                 false;
+    @GasClosureDummySpecies         CSOOT;
+
+    // @RadiativeHeatTransfer       true;
+    // @PlanckCoefficient           Smooke;
+    // @SchmidtNumber               50;
+
+    @epsNucleation                  2.2;
+    @epsCondensation                1.3;
+    @epsCoagulation                 2.2;
+
+    @DebugMode                      false;
+}
+```
+
+### Required Dictionary Keywords
+
+These keys are marked as compulsory by the OpenSMOKE++ grammar for the dictionary path.
+
+| Keyword | Type / units | Accepted values | C++ default | Effect |
+|---|---:|---|---:|---|
+| `@ThreeEquations` | `bool` | `true`, `false` | `true` | Enables or disables the ThreeEquations variant. |
+| `@PAH` | `string` | Mechanism species name | `C2H2` | PAH precursor used for dimerization nucleation and condensation. The species must exist in the thermodynamic map. |
+| `@GasConsumption` | `bool` | `true`, `false` | `false` | Enables gas-phase source terms associated with soot processes. |
+| `@GasClosureDummySpecies` | `string` | Mechanism species name or `none` | `none` | Optional dummy species used to close gas-phase mass balance. It cannot be the PAH species and cannot be `H`, `H2`, `O2`, `OH`, `H2O`, or `C2H2`. |
+
+### Process Switches
+
+| Keyword | Type | Accepted values | Default | Effect |
+|---|---:|---|---:|---|
+| `@NucleationModel` | `int` | `0`, `1` | `1` | Enables PAH dimerization nucleation when `1`. |
+| `@SurfaceGrowthModel` | `int` | `0`, `1` | `1` | Enables soot surface growth when `1`. |
+| `@OxidationModel` | `int` | `0`, `1` | `1` | Enables soot oxidation when `1`. |
+| `@CondensationModel` | `int` | `0`, `1` | `1` | Enables PAH condensation on existing soot particles when `1`. |
+| `@CoagulationModel` | `int` | `0`, `1` | `1` | Enables soot coagulation when `1`. |
+| `@ThermophoreticModel` | `int` | `0`, `1` | `1` | Enables thermophoretic drift contribution when `1`. |
+
+### PAH, Dimer, and Surface-Chemistry Models
+
+| Keyword | Type | Accepted values | Default | Effect |
+|---|---:|---|---:|---|
+| `@DimerModel` | `string` | `qssa-rodrigues` | `qssa-rodrigues` | Selects the PAH dimer concentration closure. This is currently the only accepted model. |
+| `@SurfaceChemistryModel` | `string` | `RC-PAH`, `rc-pah`, `RCPAH`, `rcpah`, `HMOM`, `hmom` | `rcpah` | Selects the surface-growth and oxidation chemistry formulation. |
+| `@SimplifiedPAHMass` | `bool` | `true`, `false` | `false` | If enabled, the PAH molecular weight is computed as `nC * WC`, ignoring hydrogen atoms. |
+| `@CorrectionCoefficientPAHPAH` | `double` | Scalar | `4.4` | Multiplicative correction applied to the PAH-PAH nucleation collision kernel. |
+| `@StickingCoefficientModel` | `string` | `constant`, `pah-dependent` | `constant` | Selects the PAH sticking-coefficient model used in dimerization. |
+| `@StickingCoefficientConstant` | `double` | Scalar | `2e-3` | Base sticking coefficient. For `pah-dependent`, the implementation multiplies this value by `mwpah^4`. |
+
+### Collision Enhancement Factors
+
+| Keyword | Type | Default | Effect |
+|---|---:|---:|---|
+| `@epsNucleation` | `double` | `2.5` | Collision enhancement factor for PAH dimerization nucleation. |
+| `@epsCondensation` | `double` | `1.3` | Collision enhancement factor for PAH condensation. |
+| `@epsCoagulation` | `double` | `2.2` | Collision enhancement factor for soot coagulation. |
+
+### Material, Transport, Radiation, and Numerical Floors
+
+| Keyword | Type / units | Accepted values | Default | Effect |
+|---|---:|---|---:|---|
+| `@SootDensity` | measure | `kg/m3`, `g/cm3` | `1800 kg/m3` | Soot material density used for PAH-derived geometry, soot volume fraction, particle diameter, and surface-area closure. |
+| `@MinimumNs` | measure | `#/m3`, `#/cm3` | `1e6 #/m3` | Minimum soot number density used by regularized property calculations and initial transported values. |
+| `@RadiativeHeatTransfer` | `bool` | `true`, `false` | `true` | Enables soot contribution to radiative heat transfer. |
+| `@PlanckCoefficient` | `string` | `Smooke`, `Kent`, `Sazhin`, `none` | `Smooke` | Selects the soot Planck mean absorption coefficient model. Unrecognized labels map to `none` in the current helper. |
+| `@SchmidtNumber` | `double` | Positive scalar expected | `50` | Schmidt number used by the particle diffusion coefficient. |
+| `@DebugMode` | `bool` | `true`, `false` | `false` | Enables verbose diagnostic output. |
+
+### Additional notes
+
+- When using `pah-dependent`, provide an explicit calibrated `@StickingCoefficientConstant`. In case of `pah-dependent` sticking coefficient must be set to `1.5e-11`. The current default is always `2e-3`. 
+
+---
+
+## MetalOxide Dictionary Configuration
+
+`MetalOxide` is a three-equation solid-oxide nanoparticle model. The transported variables are solid mass fraction `Ysolid`, scaled particle number density `NsolidN = N / 1e15`, and total particle surface area `Ssolid`. The model supports precursor-driven nucleation, condensation, coagulation, sintering, thermophoresis, explicit gas stoichiometry, and optional gas-phase mass closure.
+
+```cpp
+Dictionary MetalOxide
+{
+    @MetalOxide                     true;
+
+    @NucleationModel                binary;
+    @SinteringModel                 1;
+    @CondensationModel              1;
+    @CoagulationModel               1;
+    @ThermophoreticModel            0;
+
+    @Precursor                      H4O4TI;
+    @GasClosureDummySpecies         TIO2RU;
+    @GasConsumption                 false;
+
+    // Required only when @GasConsumption true.
+    // Coefficients are per precursor molecule: negative = reactant, positive = product.
+    // @GasStoichiometry              H4O4TI:-1,H2O:2;
+    // @GasStoichiometryMassTolerance 1e-3;
+
+    // TiO2 defaults shown explicitly for clarity.
+    @SolidName                      TiO2;
+    @SolidMolecularWeight           79.866 kg/kmol;
+    @SolidDensity                   4230 kg/m3;
+    @SolidFormulaUnitsPerPrecursor  1;
+
+    @MinimumFormulaUnits            2;
+    @NucleatedParticleFormulaUnits  5;
+
+    @SinteringDeferred              false;
+    @SinteringDpMinimum             2e-9 m;
+    @SinteringTauMinimum            1e-8 s;
+    @SinteringKMaximum              1e5 1/s;
+
+    // Sintering law: tau_s = As * T^ns * dp^4 * exp(Ts/T)
+    // @As                           7.44e16 s,K,m;
+    // @ns                           1;
+    // @Ts                           31000 K;
+
+    @SchmidtNumber                  50;
+
+    // Optional numerical floors for property reconstruction.
+    // @MinimumNs                    1e3 #/m3;
+    // @MinimumFv                    1e-16;
+
+    @DebugMode                      false;
+}
+```
+
+### Required Dictionary Keywords
+
+| Keyword | Type / units | Accepted values | C++ default | Effect |
+|---|---:|---|---:|---|
+| `@Precursor` | `string` | Mechanism species name or `none` | `none` | Gas-phase precursor used by nucleation and condensation. If not `none`, the species must exist in the thermodynamic map. |
+| `@GasClosureDummySpecies` | `string` | Mechanism species name or `none` | `none` | Optional dummy species used to close the gas-phase mass balance. It must exist when not `none` and cannot be the precursor species. |
+| `@GasConsumption` | `bool` | `true`, `false` | `false` | Enables gas-phase source terms from solid formation. If `true`, explicit gas stoichiometry must be provided and mass-balanced. |
+
+### Activation and Process Switches
+
+| Keyword | Type | Accepted values | Default | Effect |
+|---|---:|---|---:|---|
+| `@MetalOxide` | `bool` | `true`, `false` | `true` | Enables or disables the MetalOxide variant. |
+| `@NucleationModel` | `string` | `0`, `none`, `1`, `binary`, `2`, `fixed-cluster` | `binary` | Selects the nucleation model. `binary` uses precursor-precursor collisions; `fixed-cluster` nucleates a cluster with `@NucleatedParticleFormulaUnits` formula units. |
+| `@SinteringModel` | `int` | `0`, `1` | `1` | Enables sintering source terms when `1`. |
+| `@CondensationModel` | `int` | `0`, `1` | `1` | Enables precursor condensation on existing particles when `1`. |
+| `@CoagulationModel` | `int` | `0`, `1` | `1` | Enables particle coagulation when `1`. |
+| `@ThermophoreticModel` | `int` | `0`, `1` | `1` | Enables thermophoretic drift contribution when `1`. |
+
+### Material and Stoichiometry
+
+| Keyword | Type / units | Accepted values | Default | Effect |
+|---|---:|---|---:|---|
+| `@SolidName` | `string` | Label | `TiO2` | Solid product label used in summaries and diagnostics. |
+| `@SolidMolecularWeight` | measure | `kg/kmol` | `79.866 kg/kmol` | Molecular weight of one solid formula unit. |
+| `@SolidDensity` | measure | `kg/m3`, `g/cm3` | `4230 kg/m3` | Solid material density used for particle volume, diameter, collision kernels, and sintering. |
+| `@SolidFormulaUnitsPerPrecursor` | `double` | Positive scalar | `1` | Number of solid formula units produced per precursor molecule. |
+| `@GasStoichiometry` | `string` | `Species:coeff` or `Species=coeff` entries | empty | Explicit gas stoichiometry per precursor molecule. Negative coefficients consume gas species; positive coefficients produce gas species. Entries may be comma-separated, e.g. `H4O4TI:-1,H2O:2`. |
+| `@GasStoichiometryMassTolerance` | `double` | Non-negative scalar | `1e-3` | Relative tolerance used to validate gas/solid mass balance when gas stoichiometry is supplied. |
+
+When `@GasConsumption true;`, `@GasStoichiometry` must include the precursor with coefficient `-1`. The parser validates that gas stoichiometry plus `@SolidFormulaUnitsPerPrecursor * @SolidMolecularWeight` is mass-balanced within `@GasStoichiometryMassTolerance`.
+
+### Cluster Size and Numerical Floors
+
+| Keyword | Type / units | Accepted values | Default | Effect |
+|---|---:|---|---:|---|
+| `@MinimumFormulaUnits` | `int` | Positive integer | `2` | Minimum number of solid formula units used by regularized particle geometry. |
+| `@NucleatedParticleFormulaUnits` | `int` | Positive integer | `5` | Number of solid formula units in a newly nucleated particle for the fixed-cluster nucleation path. |
+| `@MinimumNs` | measure | `#/m3`, `#/cm3` | `1e3 #/m3` | Minimum particle number density used by regularized property reconstruction. |
+| `@MinimumFv` | `double` | Non-negative scalar expected | `1e-16` | Minimum solid volume fraction used by regularized property reconstruction. |
+
+### Sintering Controls
+
+| Keyword | Type / units | Accepted values | Default | Effect |
+|---|---:|---|---:|---|
+| `@SinteringDeferred` | `bool` | `true`, `false` | `false` | If enabled, sintering is removed from the direct source vector and handled through `SinteringDeferredUpdate(dt)`. |
+| `@SinteringDpMinimum` | measure | `m`, `mm`, `nm` | `2e-9 m` | Minimum primary particle diameter for active sintering. |
+| `@SinteringTauMinimum` | measure | `s` | `1e-10 s` | Lower bound for the sintering time scale. |
+| `@SinteringKMaximum` | measure | `1/s` | `1e6 1/s` | Configured maximum sintering rate. Stored in the model configuration. |
+| `@As` | measure | `s,K,m` | `7.44e16 s,K,m` | Sintering pre-exponential factor in `tau_s = As * T^ns * dp^4 * exp(Ts/T)`. |
+| `@ns` | `double` | Scalar | `1` | Temperature exponent in the sintering time-scale law. |
+| `@Ts` | measure | `K` | `31000 K` | Sintering activation temperature used as `exp(Ts/T)`. |
+
+### Transport and Diagnostics
+
+| Keyword | Type | Accepted values | Default | Effect |
+|---|---:|---|---:|---|
+| `@SchmidtNumber` | `double` | Positive scalar expected | `50` | Schmidt number used by the particle diffusion coefficient. |
+| `@DebugMode` | `bool` | `true`, `false` | `false` | Enables verbose diagnostic output. |
+
+### Code-Alignment Notes
+
+- `@epsNucleation`, `@epsCondensation`, and `@epsCoagulation` are not currently registered by `MetalOxide_Grammar.cpp` and are not parsed by `MetalOxide::ParseConfig()`. The model has internal enhancement-factor defaults `2.5`, `1.3`, and `2.2`, but they are not dictionary-configurable in the current implementation.
+- MetalOxide radiation is disabled by construction: the constructor sets the Planck model to `none`, and the dictionary does not expose `@RadiativeHeatTransfer` or `@PlanckCoefficient` for this variant.
 
 ---
 
