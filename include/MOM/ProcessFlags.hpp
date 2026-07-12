@@ -191,12 +191,13 @@ enum class PlanckCoeffModel : int
  * @{
  */
 
-[[nodiscard]] constexpr bool IsActive(NucleationModel   m) noexcept { return m != NucleationModel::Off;   }
-[[nodiscard]] constexpr bool IsActive(CoagulationModel  m) noexcept { return m != CoagulationModel::Off;  }
-[[nodiscard]] constexpr bool IsActive(SurfaceGrowthModel m) noexcept { return m != SurfaceGrowthModel::Off; }
-[[nodiscard]] constexpr bool IsActive(OxidationModel    m) noexcept { return m != OxidationModel::Off;    }
-[[nodiscard]] constexpr bool IsActive(CondensationModel m) noexcept { return m != CondensationModel::Off; }
-[[nodiscard]] constexpr bool IsActive(SinteringModel    m) noexcept { return m != SinteringModel::Off;    }
+[[nodiscard]] constexpr bool IsActive(NucleationModel    m) noexcept { return m != NucleationModel::Off;    }
+[[nodiscard]] constexpr bool IsActive(CoagulationModel   m) noexcept { return m != CoagulationModel::Off;   }
+[[nodiscard]] constexpr bool IsActive(SurfaceGrowthModel m) noexcept { return m != SurfaceGrowthModel::Off;  }
+[[nodiscard]] constexpr bool IsActive(OxidationModel     m) noexcept { return m != OxidationModel::Off;     }
+[[nodiscard]] constexpr bool IsActive(CondensationModel  m) noexcept { return m != CondensationModel::Off;  }
+[[nodiscard]] constexpr bool IsActive(SinteringModel     m) noexcept { return m != SinteringModel::Off;     }
+[[nodiscard]] constexpr bool IsActive(ThermophoreticModel m) noexcept { return m != ThermophoreticModel::Off; }
 
 /** @} */
 

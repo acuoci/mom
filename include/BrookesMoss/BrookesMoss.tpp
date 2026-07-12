@@ -981,7 +981,7 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::PrintSummary() const
         << "\n"
         << " [Transport & radiation]\n"
         << "    + Schmidt number (-):       " << this->schmidt_number_ << "\n"
-        << "    + Thermophoretic model:     " << this->thermophoretic_model() << "  (" << thermo_str(this->thermophoretic_model_) << ")\n"
+        << "    + Thermophoretic model:     " << static_cast<int>(this->thermophoretic_model()) << "  (" << thermo_str(this->thermophoretic_model_) << ")\n"
         << "    + Gas consumption:          " << (this->gas_consumption_ ? "yes" : "no") << "\n"
         << "    + Radiative heat transfer:  " << (this->radiative_heat_transfer_ ? "yes" : "no") << "\n"
         << "    + Planck coeff. model:      " << static_cast<int>(this->planck_model_) << "  (" << planck_str(this->planck_model_) << ")\n"

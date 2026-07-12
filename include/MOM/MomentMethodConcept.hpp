@@ -40,6 +40,8 @@
 #include <span>
 #include <string_view>
 
+#include "ProcessFlags.hpp"
+
 namespace MOM
 {
 
@@ -99,7 +101,7 @@ namespace MOM
  * **Transport:**
  * - `schmidt_number()` — particle Schmidt number [-]
  * - `diffusion_coefficient()` — effective diffusion coefficient [kg/m/s]
- * - `thermophoretic_model()` — thermophoretic model flag (int, 0 = off)
+ * - `thermophoretic_model()` — thermophoretic model flag (ThermophoreticModel enum class)
  *
  * **Status / control:**
  * - `is_active()` — true if the method is configured and active
@@ -173,7 +175,7 @@ concept MomentMethod =
         // -- Transport ------------------------------------------------------
         { cm.schmidt_number() } -> std::same_as<double>;
         { cm.diffusion_coefficient() } -> std::same_as<double>;
-        { cm.thermophoretic_model() } -> std::same_as<int>;
+        { cm.thermophoretic_model() } -> std::same_as<ThermophoreticModel>;
 
         // -- Status / control -----------------------------------------------
         { cm.is_active() } -> std::same_as<bool>;

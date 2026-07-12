@@ -48,11 +48,11 @@
  * @par Functions provided
  *
  * **Status / control**
- * - `GetIsActive`                  — true if model is configured and active
- * - `GetGasConsumption`            — true if gas-phase consumption is enabled
- * - `GetThermophoreticModel`       — thermophoretic model flag (0 = off)
- * - `GetRadiativeHeatTransfer`     — true if particles contribute to radiation
- * - `GetClosureDummySpeciesIsActive` — true if a dummy closure species is set
+ * - `IsActive`                     — true if model is configured and active
+ * - `HasGasConsumption`            — true if gas-phase consumption is enabled
+ * - `GetThermophoreticModel`       — ThermophoreticModel enum (Off or Standard)
+ * - `HasRadiativeHeatTransfer`     — true if particles contribute to radiation
+ * - `HasClosureDummySpecies`       — true if a dummy closure species is set
  * - `GetClosureDummyIndex`         — 0-based index of the dummy closure species
  * - `GetPrecursorIndex`            — 0-based index of the precursor species
  * - `GetInitialMoments`            — initialisation values for moment transport
@@ -62,6 +62,7 @@
  * - `GetParticleDiameter`          — primary particle diameter [m]
  * - `GetParticleNumberDensity`     — total number density [#/m³]
  * - `GetMassFraction`              — particle mass fraction [-]
+ * - `GetParticleDensity`           — particle material density [kg/m³]
  * - `GetSpecificSurfaceArea`       — surface area per unit volume [m²/m³]
  * - `GetCollisionDiameter`         — aggregate collision diameter [m]
  * - `GetNumberPrimaryParticles`    — mean primary particles per aggregate [-]
@@ -86,28 +87,28 @@ namespace MOM
 
 /** @brief Returns `true` if the object is active. */
 template <ThermoMap Thermo>
-[[nodiscard]] inline bool GetIsActive(const AnyMomentMethod<Thermo>& m) noexcept
+[[nodiscard]] inline bool IsActive(const AnyMomentMethod<Thermo>& m) noexcept
 {
     return std::visit([](const auto& mm) { return mm.is_active(); }, m);
 }
 
 /** @brief Returns `true` if gas-phase precursor consumption is enabled. */
 template <ThermoMap Thermo>
-[[nodiscard]] inline bool GetGasConsumption(const AnyMomentMethod<Thermo>& m) noexcept
+[[nodiscard]] inline bool HasGasConsumption(const AnyMomentMethod<Thermo>& m) noexcept
 {
     return std::visit([](const auto& mm) { return mm.gas_consumption(); }, m);
 }
 
-/** @brief Returns the thermophoretic model flag (0 = off, 1 = standard). */
+/** @brief Returns the thermophoretic model flag (ThermophoreticModel::Off or ::Standard). */
 template <ThermoMap Thermo>
-[[nodiscard]] inline int GetThermophoreticModel(const AnyMomentMethod<Thermo>& m) noexcept
+[[nodiscard]] inline ThermophoreticModel GetThermophoreticModel(const AnyMomentMethod<Thermo>& m) noexcept
 {
     return std::visit([](const auto& mm) { return mm.thermophoretic_model(); }, m);
 }
 
 /** @brief Returns `true` if a gas-closure dummy species has been configured. */
 template <ThermoMap Thermo>
-[[nodiscard]] inline bool GetClosureDummySpeciesIsActive(const AnyMomentMethod<Thermo>& m) noexcept
+[[nodiscard]] inline bool HasClosureDummySpecies(const AnyMomentMethod<Thermo>& m) noexcept
 {
     return std::visit([](const auto& mm) { return mm.is_closure_dummy_species(); }, m);
 }
@@ -171,6 +172,13 @@ template <ThermoMap Thermo>
     return std::visit([](const auto& mm) { return mm.mass_fraction(); }, m);
 }
 
+/** @brief Returns the particle material density [kg/m³]. */
+template <ThermoMap Thermo>
+[[nodiscard]] inline double GetParticleDensity(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.particle_density(); }, m);
+}
+
 /** @brief Returns the specific surface area [m²/m³]. */
 template <ThermoMap Thermo>
 [[nodiscard]] inline double GetSpecificSurfaceArea(const AnyMomentMethod<Thermo>& m) noexcept
@@ -222,7 +230,7 @@ template <ThermoMap Thermo>
 
 /** @brief Returns `true` if the Planck absorption coefficient should be included in radiation. */
 template <ThermoMap Thermo>
-[[nodiscard]] inline bool GetRadiativeHeatTransfer(const AnyMomentMethod<Thermo>& m) noexcept
+[[nodiscard]] inline bool HasRadiativeHeatTransfer(const AnyMomentMethod<Thermo>& m) noexcept
 {
     return std::visit([](const auto& mm) { return mm.radiative_heat_transfer(); }, m);
 }

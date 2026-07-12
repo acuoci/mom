@@ -119,9 +119,9 @@ template <template <typename> class... Variants> struct TypeList
     {
         static_assert((MomentMethod<Variants<TestThermo>> && ...),
                       "[MOM] One or more registered variants in AllVariants do not satisfy "
-                      "the MomentMethod concept. Check: SetMoments(span), "
-                      "ComputeSources() noexcept, DiffusionCoefficient() const, "
-                      "CollisionDiameter(), SpecificSurface(), PrintSummary().");
+                      "the MomentMethod concept. Check: SetState(T,P,Y), SetMoments(span), "
+                      "ComputeSources(), diffusion_coefficient(), collision_diameter(), "
+                      "specific_surface_area(), particle_density(), PrintSummary().");
     };
 };
 

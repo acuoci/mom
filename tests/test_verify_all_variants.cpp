@@ -429,7 +429,7 @@ static bool validateAnyMomentMethodAccessors(const MOM::BasicThermoData& th)
     auto model = MOM::MakeAnyMomentMethod<MOM::BasicThermoData>(th, "ThreeEquations");
 
     const auto initial = MOM::GetInitialMoments(model);
-    const bool closure_active = MOM::GetClosureDummySpeciesIsActive(model);
+    const bool closure_active = MOM::HasClosureDummySpecies(model);
     const int closure_index = MOM::GetClosureDummyIndex(model);
     const int precursor_index = MOM::GetPrecursorIndex(model);
 

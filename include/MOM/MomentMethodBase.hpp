@@ -265,12 +265,12 @@ public:
     [[nodiscard]] bool radiative_heat_transfer() const noexcept { return radiative_heat_transfer_; }
 
     /**
-     * @brief Returns the thermophoretic model flag as `int` (for CFD solver interop).
-     * @return 0 = off, 1 = standard.
+     * @brief Returns the thermophoretic model flag as a strongly-typed enum.
+     * @return `ThermophoreticModel::Off` (0) or `ThermophoreticModel::Standard` (1).
      */
-    [[nodiscard]] int thermophoretic_model() const noexcept
+    [[nodiscard]] ThermophoreticModel thermophoretic_model() const noexcept
     {
-        return static_cast<int>(thermophoretic_model_);
+        return thermophoretic_model_;
     }
 
     /** @brief Returns `true` if a dummy closure species has been configured. */
