@@ -39,49 +39,15 @@
  * @file Sources.hpp
  * @brief Source term accessors and process activation queries for AnyMomentMethod.
  *
- * Provides:
- * - The total moment source vector and total gas-phase consumption vector.
- * - Zero-copy per-process source spans (nucleation, growth, coagulation,
- *   condensation, sintering).  For models that do not implement a given
- *   process, the CRTP base class returns a static zero span of size
- *   `n_equations` — the caller never needs to check for model type.
- * - Process activation flag queries — return the integer model flag
- *   (0 = off, >0 = active variant index) for each physical process.
- * - Process capability queries — return a `bool` constant for whether the
- *   active variant TYPE can ever model the process, regardless of configuration.
+ * Provides zero-copy access to total, gas-phase, and per-process source terms.
+ * Per-process getters return a static zero span of size `n_equations` when the
+ * active variant does not implement the requested process.
  *
  * Included automatically by `MOM/MOM.hpp`.
  *
- * @par Two distinct questions per process
- *
- * Every physical process can be interrogated at two orthogonal levels:
- *
- * **Type capability** — answers "can this model TYPE ever produce X sources?"
- * - Compile-time property of the concrete variant, not the instance.
- * - `MOM::ModelsOxidation<M>` concept (when static type is known).
- * - `MOM::GetOxidationCapability(m)` free function (for `AnyMomentMethod`).
- * - Wraps the same `requires(sources_oxidation_impl)` detection as `sources_X()`.
- * - Never changes; MetalOxide will always return `false` for `capability_oxidation()`.
- *
- * **Instance activation** — answers "is X currently enabled in this instance?"
- * - Runtime property; reads the integer model flag set by the user's input file.
- * - `MOM::GetOxidationModel(m) > 0` free function.
- * - A model with oxidation capability may still return 0 if the user wrote
- *   `oxidation_model 0` in their dictionary.
- *
- * @par Which to use
- * | Use case | Question | API |
- * |---|---|---|
- * | Output column layout, `[ZF]` tagging | Does the type model X? | `GetXxxCapability()` |
- * | Operator splitting decision in CFD loop | Is X enabled now? | `IsActive(GetXxxModel())` |
- * | `static_assert`, concept check | Structural | `ModelsOxidation<M>` |
- * | Debug log, diagnostic print | Both | both, with clear labels |
- *
- * @par Operator-splitting source functions
- * The oxidation-specific splitting functions (`GetOxidationSources`,
- * `GetSourcesWithoutOxidation`, `GetOxidationRateCoefficients`, etc.) are
- * in `Splitting.hpp`, not here, because they carry additional semantics
- * (stiffness removal, analytical sub-step) beyond simple source retrieval.
+ * @note Capability queries answer whether a variant type implements a process.
+ *       Activation queries answer whether that process is enabled in the current
+ *       configured instance. Use `IsActive(GetXxxModel(m))` in runtime logic.
  */
 
 #include "AnyMomentMethod.hpp"
@@ -121,8 +87,8 @@ template <ThermoMap Thermo>
  * fallback returns a span over a `static constexpr` zero array — no runtime
  * branch, no allocation, span size equals `n_equations`.
  *
- * Always check `IsActive(GetXxxModel())` before consuming these values if you need
- * to distinguish "process is off" from "process is on but rate happens to be zero".
+ * Check `IsActive(GetXxxModel())` when the caller must distinguish a disabled
+ * process from an active process whose instantaneous rate is zero.
  * @{
  */
 
@@ -239,34 +205,10 @@ template <ThermoMap Thermo>
 /** @} */
 
 /**
- * @name Process capability queries (type-level, constexpr per variant)
+ * @name Process capability queries
  *
- * These functions answer the STRUCTURAL question about the active variant TYPE:
- * "can this model type EVER produce X sources?"
- *
- * The result is `constexpr bool` for each concrete variant — resolved at compile
- * time inside the `std::visit` lambda, then "lowered" to a runtime `bool` only
- * because `AnyMomentMethod` hides the concrete type behind a `std::variant`.
- *
- * @par Difference from `GetXxxModel()` (activation)
- *
- * | Function | Question | Return | Example |
- * |---|---|---|---|
- * | `GetOxidationCapability(m)` | "type capable?" | `bool` | always `false` for MetalOxide |
- * | `GetOxidationModel(m)` | "instance enabled?" | `int` | `0` if user disabled it |
- *
- * MetalOxide always returns `false` for `GetOxidationCapability` — oxidation is
- * structurally absent from that model type.  HMOM always returns `true` —
- * oxidation is structurally present even if `GetOxidationModel` returns `0`
- * because the user wrote `oxidation_model 0` in the input file.
- *
- * @par Recommended use
- * - **Output / reporting**: use capability to decide whether to register `[ZF]`
- *   columns.  `MomentMethodReporter` already uses `ModelsOxidation<M>` for this;
- *   these functions provide the same information through `AnyMomentMethod`.
- * - **CFD hot path**: use `IsActive(GetXxxModel())` — it reflects the user's actual
- *   configuration and avoids wasting compute on a disabled process.
- * - **Static known type**: prefer `MOM::ModelsOxidation<MyModel>` directly.
+ * These functions return whether the active variant type implements each
+ * process, independent of the instance's enabled/disabled model flag.
  * @{
  */
 

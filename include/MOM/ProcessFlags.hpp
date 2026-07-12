@@ -41,14 +41,15 @@ namespace MOM
 {
 
 /**
+ * @file ProcessFlags.hpp
+ * @brief Strongly typed process-model selectors and parsing helpers.
+ */
+
+/**
  * @brief Strongly-typed flags for all physical sub-process models.
  *
- * Using `enum class` (rather than raw `int`) gives type safety at call sites
- * and clear compiler diagnostics when an invalid value is passed.
- *
- * All concrete moment method classes accept both the enum class and a plain
- * `int` (via implicit converting constructors) for backward compatibility with
- * existing CFD codes that use integer flags.
+ * Concrete variants expose these flags through their getters and accept integer
+ * values in configuration paths where input files use numeric model selectors.
  *
  * @par Convention
  * - `Off = 0` — process disabled; corresponding source terms are zero.

@@ -33,85 +33,50 @@
 |                                                                         |
 \*-----------------------------------------------------------------------*/
 
-/*-----------------------------------------------------------------------*\
-|   MOM Library — Method of Moments for particle population dynamics      |
-|   CRECK Modeling Group, Politecnico di Milano                           |
-|                                                                         |
-|   Master include. In most cases, including only this header is enough.  |
-|                                                                         |
-|   USAGE (compile-time method selection — zero overhead):                |
-|                                                                         |
-|     #include "MOM/MOM.hpp"                                              |
-|                                                                         |
-|     using ParticleModel = MOM::ThreeEquations<MOM::Thermo>;             |
-|     // ↑ change this one line to switch to HMOM, BrookesMoss, or MetalOxide  |
-|     static_assert(MOM::MomentMethod<ParticleModel>);                   |
-|                                                                         |
-|   USAGE (runtime method selection — one indirect branch per call):      |
-|                                                                         |
-|     auto model = MOM::MakeAnyMomentMethod(thermo, "HMOM");             |
-|     MOM::ComputeCell(model, T, P, Y, mu, moments_span);  // preferred  |
-|     auto src = MOM::GetSources(model);                                  |
-|                                                                         |
-\*-----------------------------------------------------------------------*/
+/**
+ * @file MOM.hpp
+ * @brief Umbrella header for the Method of Moments particle source-term library.
+ *
+ * Include this header when a translation unit needs the complete public API:
+ * concrete variants, compile-time concepts, runtime factory, per-cell dispatch,
+ * source accessors, particle properties, splitting utilities, and reporting.
+ *
+ * @par Compile-time selection
+ * @code
+ *   #include "MOM/MOM.hpp"
+ *
+ *   using ParticleModel = MOM::ThreeEquations<MyThermo>;
+ *   static_assert(MOM::MomentMethod<ParticleModel>);
+ * @endcode
+ *
+ * @par Runtime selection
+ * @code
+ *   auto model = MOM::MakeAnyMomentMethod(thermo, "HMOM");
+ *   MOM::ComputeCell(model, T, P, Y, mu, moments);
+ *   auto sources = MOM::GetSources(model);
+ * @endcode
+ */
 
 #pragma once
 
 // -- Core infrastructure -------------------------------------------------------
-#include "ThermoProxy.hpp"         // ThermoMap concept + Thermo adapter
-#include "ProcessFlags.hpp"        // Shared process model enum classes
-#include "MomentMethodBase.hpp"    // CRTP base: shared state, Planck, zero sources
-#include "MomentMethodConcept.hpp" // MomentMethod C++20 concept (the contract)
+#include "ThermoProxy.hpp"
+#include "ProcessFlags.hpp"
+#include "MomentMethodBase.hpp"
+#include "MomentMethodConcept.hpp"
 
-// -- Variant registry + concrete implementations -------------------------------
-//
-// AnyMomentMethod.hpp includes MomVariantList.hpp, which is the single
-// authoritative registry of all concrete variants.  Adding a new variant
-// requires only editing MomVariantList.hpp — no changes here.
-#include "AnyMomentMethod.hpp"      // AnyMomentMethod<T>, MakeAnyMomentMethod, ForEachCell
-#include "MomentMethodReporter.hpp" // Observer: formats output via concept interface only
+// -- Variant registry, runtime wrapper, and reporter ---------------------------
+#include "AnyMomentMethod.hpp"
+#include "MomentMethodReporter.hpp"
 
 // -- Free-function dispatch API -----------------------------------------------
-//
-// Each header below has a single responsibility and depends only on
-// AnyMomentMethod.hpp (no cross-dependencies between them).  They are all
-// gathered here so that including "MOM/MOM.hpp" is sufficient for all callers.
-//
-//  Dispatch.hpp   — SetState, Compute, ComputeCell, PrintSummary, …
-//  Properties.hpp — GetVolumeFraction, GetParticleDiameter, GetSchmidtNumber, …
-//  Sources.hpp    — GetSources, GetNucleationSources, GetOxidationModel, …
-//  Splitting.hpp  — GetSourcesWithoutOxidation, GetOxidationRateCoefficients, …
 #include "Dispatch.hpp"
 #include "Properties.hpp"
 #include "Sources.hpp"
 #include "Splitting.hpp"
 
-// ============================================================================
-// Compile-time concept satisfaction check — auto-covers all registered variants
-// ============================================================================
-//
-// This explicit instantiation forces MOM::AllVariants::ConceptCheck to be
-// instantiated with BasicThermoData, triggering a static_assert fold over
-// every type registered in AllVariants (MomVariantList.hpp).
-//
-// Effect: if any registered variant fails the MomentMethod concept, the build
-// fails here with a clear error pointing at the offending type.
-//
-// To see which variant broke the concept: the fold expression fires
-// individually for each type, so the compiler error includes the concrete
-// type name in the template instantiation backtrace.
-// ============================================================================
-
+/** @brief Checks every registered variant against the public MomentMethod concept. */
 template struct MOM::AllVariants::ConceptCheck<MOM::BasicThermoData>;
-
-// ============================================================================
-// [T1] Compile-time HasReconstructedNDF concept matrix — fires in every TU
-// ============================================================================
-//
-// Mirrors the matrix documented in MomentMethodConcept.hpp.  If a variant's
-// NDF reconstruction status changes (added or removed), the build will fail
-// here with a clear message pointing at the offending type.
-// ============================================================================
 
 static_assert( MOM::HasReconstructedNDF<MOM::HMOM<MOM::BasicThermoData>>,
                "[MOM] HMOM must satisfy HasReconstructedNDF.");

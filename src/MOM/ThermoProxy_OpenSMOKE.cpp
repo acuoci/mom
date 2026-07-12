@@ -33,11 +33,14 @@
 |                                                                         |
 \*-----------------------------------------------------------------------*/
 
-// External parameters
+/**
+ * @file ThermoProxy_OpenSMOKE.cpp
+ * @brief Translation unit reserved for OpenSMOKE++ thermodynamics adapters.
+ */
+
 #include <iostream>
 #include <numeric>
 
-//MOM adapter declaration
 #include "MOM/ThermoProxy.hpp"
 
 namespace MOM
