@@ -114,7 +114,7 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::MemoryAllocation()
 template <ThermoMap Thermo> void MetalOxide<Thermo>::Precalculations()
 {
     v0_ = static_cast<double>(n_formula_units_min_) * solid_formula_unit_volume_m3_;
-    d0_ = std::pow(6. * v0_ / this->pi_, 1. / 3.); // Pattern B (6*v/π): NOT SphereDiameter
+    d0_ = this->SphereDiameter(v0_);
     s0_ = this->SphereSurface(d0_);
 
     v_min_ = v0_;
@@ -266,7 +266,7 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::SetPrecursor(std::string_vi
     m_precursor_   = W_precursor_ / this->Nav_kmol_;
 
     v_precursor_ = m_precursor_ / solid_density_kg_m3_;
-    d_precursor_ = std::pow(6. * v_precursor_ / this->pi_, 1. / 3.);
+    d_precursor_ = this->SphereDiameter(v_precursor_);
 
     // Effective collision geometry used by nucleation/condensation kernels:
     // volume contribution = configured solid formula units per precursor.
@@ -443,7 +443,7 @@ void MetalOxide<Thermo>::Properties(double& fv,
 
     // Sphere-equivalent aggregate diameter [m]
     // (diameter of a sphere whose volume equals the aggregate volume)
-    da = std::pow(6. * vs / this->pi_, 1. / 3.);
+    da = this->SphereDiameter(vs);
     da = std::max(da, d0_);
 
     // Primary particle diameter [m]
@@ -612,7 +612,7 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::NucleationSourceTerms_Fixed
         return;
 
     const double v_cluster = static_cast<double>(n0_) * solid_formula_unit_volume_m3_;
-    const double d_cluster    = std::pow(6. * v_cluster / this->pi_, 1. / 3.);
+    const double d_cluster = this->SphereDiameter(v_cluster);
 
     // Precursor number density [#/m3]
     const double Nprec = c_precursor_ * this->Nav_kmol_;

@@ -850,7 +850,8 @@ template <ThermoMap Thermo> double BrookesMoss<Thermo>::particle_diameter() cons
     if (N <= 0. || M <= 0.)
         return 0.;
 
-    return std::pow(6. * M / (this->pi_ * this->rho_particle_ * N), 1. / 3.);
+    const double v_particle = M / (this->rho_particle_ * N); // mean particle volume [m3]
+    return this->SphereDiameter(v_particle);
 }
 
 template <ThermoMap Thermo> double BrookesMoss<Thermo>::collision_diameter() const noexcept

@@ -863,20 +863,20 @@ template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousM4()
 {
     double lambda = 8.2057e-5 / this->sqrt2_ / std::pow(200.e-12, 2.) / this->Nav_mol_;
     lambda        = 1.257 * lambda * this->T_ / (this->P_Pa_ / 101325.);
+    const double betai0 = 2. * this->kB_ * this->T_ / 3. / this->mu_;
 
-    SootCoagulationContinuousSmallSmallM4(lambda);
-    SootCoagulationContinuousSmallLargeM4(lambda);
-    SootCoagulationContinuousLargeLargeM4(lambda);
+    SootCoagulationContinuousSmallSmallM4(lambda, betai0);
+    SootCoagulationContinuousSmallLargeM4(lambda, betai0);
+    SootCoagulationContinuousLargeLargeM4(lambda, betai0);
 }
 
-template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousSmallSmallM4(double lambda)
+template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousSmallSmallM4(double lambda, double betai0)
 {
     const double K_diam = K_diam_HMOM(this->pi_);
     const double DcNUCL = K_diam * std::pow(V0_, 1. / 3.);
     const double S00    = this->SphereSurfaceFromVolume(2. * V0_);
     const double CC0    = 1. + lambda / DcNUCL;
-    const double beta00 =
-        2. * this->kB_ * this->T_ / 3. / this->mu_ * (2. * CC0 / DcNUCL) * (2. * DcNUCL);
+    const double beta00 = betai0 * (2. * CC0 / DcNUCL) * (2. * DcNUCL);
 
     source_coagulation_cont_ss_(0) = -0.5 * beta00 * N0_ * N0_ / this->Nav_mol_;
     source_coagulation_cont_ss_(1) = 0.;
@@ -885,11 +885,10 @@ template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousSmallSma
     source_coagulation_cont_ss_(3) = 2. * source_coagulation_cont_ss_(0);
 }
 
-template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousSmallLargeM4(double lambda)
+template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousSmallLargeM4(double lambda, double betai0)
 {
     const double K_diam = K_diam_HMOM(this->pi_);
     const double DcNUCL = K_diam * std::pow(V0_, 1. / 3.);
-    const double betai0 = 2. * this->kB_ * this->T_ / 3. / this->mu_;
 
     source_coagulation_cont_sl_(0) =
         (2. + lambda / DcNUCL) * GetMissingMoment(0., 0.) +
@@ -918,9 +917,8 @@ template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousSmallLar
     source_coagulation_cont_sl_(3) = source_coagulation_cont_sl_(0);
 }
 
-template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousLargeLargeM4(double lambda)
+template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousLargeLargeM4(double lambda, double betai0)
 {
-    const double betai0 = 2. * this->kB_ * this->T_ / 3. / this->mu_;
 
     const double val =
         GetMissingMoment(0., 0.) * GetMissingMoment(0., 0.) +

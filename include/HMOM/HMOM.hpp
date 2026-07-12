@@ -789,9 +789,9 @@ public:
     void ndf_extra_output(CB&& cb) const
     {
         const auto   d       = ReconstructedNDFData();
-        const double dp0_nm  = std::pow(6. * d.V0 / this->pi_, 1. / 3.) * 1.e9;
+        const double dp0_nm  = this->SphereDiameter(d.V0) * 1.e9;
         const double dpL_nm  = (d.NL > kSootNumberFloor && d.VL > 0.)
-                                   ? std::pow(6. * d.VL / this->pi_, 1. / 3.) * 1.e9
+                                   ? this->SphereDiameter(d.VL) * 1.e9
                                    : 0.;
         cb("N0[#/m3]",     d.N0);
         cb("V0[m3/#]",     d.V0);
@@ -1018,9 +1018,9 @@ private:
     void SootCoagulationSmallLargeM4();
     void SootCoagulationLargeLargeM4();
     void SootCoagulationContinuousM4();
-    void SootCoagulationContinuousSmallSmallM4(double lambda);
-    void SootCoagulationContinuousSmallLargeM4(double lambda);
-    void SootCoagulationContinuousLargeLargeM4(double lambda);
+    void SootCoagulationContinuousSmallSmallM4(double lambda, double betai0);
+    void SootCoagulationContinuousSmallLargeM4(double lambda, double betai0);
+    void SootCoagulationContinuousLargeLargeM4(double lambda, double betai0);
     void CalculateAlphaCoefficient();
 
     [[nodiscard]] double GetMoment(double i, double j) const noexcept;
