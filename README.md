@@ -374,6 +374,108 @@ MOM::SetupFromDictionary(model, dict);
 
 ---
 
+## BrookesMoss Dictionary Configuration
+
+The `BrookesMoss` dictionary configures the two-equation soot model based on soot mass fraction and normalized soot number density. The model supports the original Brookes-Moss kinetics and the extended Brookes-Moss-Hall nucleation/oxidation paths.
+
+```cpp
+Dictionary BrookesMoss
+{
+    @BrookesMoss                    true;
+
+    @Precursors                     A2;
+    @SurfaceGrowthSpecies           C2H2;
+    @GasClosureDummySpecies         CSOOT;
+
+    @NucleationModel                BrookesMoss;
+    @SurfaceGrowthModel             1;
+    @OxidationModel                 0;
+    @CoagulationModel               1;
+    @ThermophoreticModel            1;
+
+    @GasConsumption                 false;
+
+    @SootParticleDiameter           1 nm;
+    @SootParticleMolecularWeight    144 kg/kmol;
+
+    @Calpha                         54 1/s;
+    @Talpha                         21000 K;
+    @Cbeta                          1.;
+    @Cgamma                         11700 kg*m/kmol/s;
+    @Tgamma                         12100 K;
+    @Comega                         105.8125 kg*m/kmol/sqrt(K)/s;
+    @EtaColl                        0.04;
+    @Coxid                          0.015;
+    @NucleationExponent             1;
+    @SurfaceGrowthExponent1         1;
+    @SurfaceGrowthExponent2         1;
+}
+```
+
+### Required Keywords
+
+| Keyword | Type / units | Accepted values | Default in C++ config | Effect |
+|---|---:|---|---:|---|
+| `@BrookesMoss` | `bool` | `true`, `false` | `true` | Enables or disables the BrookesMoss variant. |
+| `@Precursors` | `string` | Mechanism species name | `C2H2` | Species used by original Brookes-Moss nucleation. The species must exist and contain carbon. |
+| `@SurfaceGrowthSpecies` | `string` | Mechanism species name | `C2H2` | Gas species consumed by surface growth. The species must exist and contain carbon. |
+| `@GasClosureDummySpecies` | `string` | Mechanism species name or `none` | `none` | Optional dummy gas species used to close the gas-phase mass balance. |
+| `@NucleationModel` | `string` | `0`, `none`, `1`, `BrookesMoss`, `2`, `BrookesMossHall` | `1` | Selects nucleation kinetics. BM-Hall requires `@Benzene` and `@PhenylRadical`. |
+| `@SurfaceGrowthModel` | `int` | `0`, `1` | `1` | Enables surface growth when `1`. |
+| `@OxidationModel` | `string` | `0`, `none`, `1`, `BrookesMoss`, `2`, `BrookesMossHall` | `1` | Selects oxidation kinetics. BM-Hall requires `@Benzene` and `@PhenylRadical`. |
+| `@CoagulationModel` | `int` | `0`, `1` | `1` | Enables free-molecular coagulation when `1`. |
+| `@ThermophoreticModel` | `int` | `0`, `1` | `0` | Enables thermophoretic drift contribution when `1`. |
+| `@GasConsumption` | `bool` | `true`, `false` | `false` | If enabled, computes gas-phase source terms from soot nucleation, growth, and oxidation. |
+| `@SootParticleDiameter` | measure | `m`, `mm`, `nm` | `1e-9 m` | Stored soot particle diameter. Current kernels use the dynamic diameter reconstructed from soot mass and number density. |
+| `@SootParticleMolecularWeight` | measure | `kg/kmol`, `g/mol` | `144 kg/kmol` | Molecular weight assigned to the soot inception particle. BM-Hall defaults to `1200 kg/kmol` if this key keeps the default value. |
+
+### Optional Physical, Transport, and Diagnostic Keywords
+
+| Keyword | Type / units | Accepted values | Default | Effect |
+|---|---:|---|---:|---|
+| `@SootDensity` | measure | `kg/m3`, `g/cm3` | `1800 kg/m3` | Soot material density used in volume, diameter, surface-area, and coagulation calculations. |
+| `@NsNorm` | measure | `#/m3`, `#/cm3` | `1e15 #/m3` | Normalization factor for the transported soot number-density variable. |
+| `@RadiativeHeatTransfer` | `bool` | `true`, `false` | `true` | Enables particle contribution to optically thin radiation coupling. |
+| `@PlanckCoefficient` | `string` | `Smooke`, `Kent`, `Sazhin`, `none` | `Smooke` | Selects the soot Planck mean absorption coefficient correlation. |
+| `@SchmidtNumber` | `double` | Positive scalar expected | `50` | Particle Schmidt number used by `diffusion_coefficient() = mu / Sc`. |
+| `@DebugMode` | `bool` | `true`, `false` | `false` | Enables verbose diagnostics. |
+
+### Original Brookes-Moss Kinetic Constants
+
+| Keyword | Type / units | Default | Kernel role |
+|---|---:|---:|---|
+| `@Calpha` | measure, `1/s` | `54 1/s` | Nucleation pre-exponential factor. |
+| `@Talpha` | measure, `K` | `21000 K` | Nucleation activation temperature. |
+| `@Cbeta` | `double` | `1` | Coagulation scaling coefficient. |
+| `@Cgamma` | measure, `kg*m/kmol/s` | `11700 kg*m/kmol/s` | Surface-growth pre-exponential factor. |
+| `@Tgamma` | measure, `K` | `12100 K` | Surface-growth activation temperature. |
+| `@Comega` | measure, `kg*m/kmol/sqrt(K)/s` | `105.8125 kg*m/kmol/sqrt(K)/s` | OH oxidation pre-exponential factor. |
+| `@EtaColl` | `double` | `0.04` | Collision efficiency in the OH oxidation rate. |
+| `@Coxid` | `double` | `0.015` | Oxidation rate multiplier. |
+| `@NucleationExponent` | `double` | `1` | Reaction-order exponent applied to precursor concentration in original BM nucleation. |
+| `@SurfaceGrowthExponent1` | `double` | `1` | Reaction-order exponent applied to surface-growth species concentration. |
+| `@SurfaceGrowthExponent2` | `double` | `1` | Exponent applied to particle surface area in the surface-growth rate. |
+
+### Brookes-Moss-Hall Extension Keywords
+
+These keys are only needed when `@NucleationModel BrookesMossHall;`, `@NucleationModel 2;`, `@OxidationModel BrookesMossHall;`, or `@OxidationModel 2;` is used.
+
+| Keyword | Type / units | Default | Effect |
+|---|---:|---:|---|
+| `@Benzene` | `string` | `C6H6` | Benzene species for BM-Hall channel 2. Required by the parser when BM-Hall is active. Must have composition C6H6. |
+| `@PhenylRadical` | `string` | `C6H5` | Phenyl radical species for BM-Hall inception. Required by the parser when BM-Hall is active. Must have composition C6H5. |
+| `@Calpha1` | measure, `kg*m3/kmol2/s` | `127*10^8.88` | BM-Hall channel-1 nucleation pre-exponential factor. |
+| `@Talpha1` | measure, `K` | `4378 K` | BM-Hall channel-1 activation temperature. |
+| `@Calpha2` | measure, `kg*m3/kmol2/s` | `178*10^9.50` | BM-Hall channel-2 nucleation pre-exponential factor. |
+| `@Talpha2` | measure, `K` | `6390 K` | BM-Hall channel-2 activation temperature. |
+| `@Comega2` | measure, `kg*m/kmol/s/sqrt(K)` | `8903.51 kg*m/kmol/s/sqrt(K)` | BM-Hall O2 oxidation pre-exponential factor. |
+| `@Tomega2` | measure, `K` | `19778 K` | BM-Hall O2 oxidation activation temperature. |
+
+When BM-Hall is selected, the C++ configuration also applies BM-Hall-specific defaults unless the user explicitly overrides them: the soot particle molecular weight becomes `1200 kg/kmol`, the surface-growth coefficient becomes `9000.6 kg*m/kmol/s`, and the OH collision efficiency becomes `0.13`.
+
+
+---
+
 ## API Reference
 
 ### Variant Setup
