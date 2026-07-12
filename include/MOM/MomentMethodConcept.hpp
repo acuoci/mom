@@ -35,8 +35,10 @@
 
 #pragma once
 
+#include <array>
 #include <concepts>
 #include <span>
+#include <string_view>
 
 namespace MOM
 {
@@ -62,6 +64,8 @@ namespace MOM
  *
  * **Compile-time:**
  * - `M::n_equations` — unsigned, number of transported moment equations
+ * - `M::variant_labels` — iterable range of `string_view` keys for factory dispatch
+ *                         (`MakeAnyMomentMethod` uses this to map label → type)
  *
  * **State injection** (call before CalculateSourceMoments each cell/time-step):
  * - `SetStatus(T, P, Y[])` — thermodynamic state (T [K], P [Pa], Y mass fractions)
@@ -69,8 +73,9 @@ namespace MOM
  * - `SetViscosity(mu)` — mixture dynamic viscosity [kg/m/s]
  *
  * **Core computation:**
- * - `CalculateSourceMoments()` — evaluates all source terms (noexcept)
- * - `CalculateOmegaGas()` — evaluates gas-phase consumption terms only (noexcept)
+ * - `CalculateSourceMoments()` — evaluates all source terms, including gas-phase
+ *                                consumption (noexcept); this is the only method
+ *                                a CFD solver's inner loop needs to call
  *
  * **Source output** (zero-copy spans into internal fixed-size storage):
  * - `sources()` — total source vector, size = n_equations
@@ -118,9 +123,15 @@ namespace MOM
 template <typename M>
 concept MomentMethod =
 
-    // Compile-time constant: number of transported equations
+    // Compile-time constants / static members
     requires {
+        // Number of transported moment equations
         { M::n_equations } -> std::convertible_to<unsigned>;
+        // Factory label array — used by MakeAnyMomentMethod for runtime variant selection.
+        // Must be a non-empty, iterable range whose elements are convertible to string_view.
+        // Concrete variants declare this as:
+        //   static constexpr std::array<std::string_view, N> variant_labels{"Name", "alias"};
+        { M::variant_labels[0] } -> std::convertible_to<std::string_view>;
     }
 
     &&
@@ -133,10 +144,11 @@ concept MomentMethod =
         { m.SetViscosity(scalar) } noexcept;
 
         // -- Core computation -----------------------------------------------
-        // noexcept is part of the contract: these run in the CFD inner loop
+        // noexcept is part of the contract: this runs in the CFD inner loop
         // and must not carry exception-handling overhead or prevent hoisting.
+        // CalculateSourceMoments() subsumes gas-phase coupling internally —
+        // callers never need to invoke CalculateOmegaGas() directly.
         { m.CalculateSourceMoments() } noexcept;
-        { m.CalculateOmegaGas() } noexcept;
 
         // -- Source output (zero-copy spans) --------------------------------
         { cm.sources() } -> std::convertible_to<std::span<const double>>;
