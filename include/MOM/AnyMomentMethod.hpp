@@ -227,10 +227,10 @@ AnyMomentMethod<Thermo> MakeAnyMomentMethod(const Thermo&&, std::string_view) = 
  *   MOM::ForEachCell(model, [&](auto& m) {
  *       // typeof(m) is, e.g., ThreeEquations<Thermo>&
  *       for (int i = 0; i < n_cells; ++i) {
- *           m.SetStatus(T[i], P[i], Y + i*ns);
+ *           m.SetState(T[i], P[i], Y + i*ns);
  *           m.SetMoments({M + i*neq, neq});
  *           m.SetViscosity(mu[i]);
- *           m.CalculateSourceMoments();
+ *           m.ComputeSources();
  *           auto src = m.sources();
  *           std::copy(src.begin(), src.end(), Src + i*neq);
  *       }

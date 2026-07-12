@@ -175,7 +175,7 @@ template <ThermoMap Thermo>
 template <ThermoMap Thermo>
 [[nodiscard]] inline double GetSpecificSurfaceArea(const AnyMomentMethod<Thermo>& m) noexcept
 {
-    return std::visit([](const auto& mm) { return mm.specific_surface(); }, m);
+    return std::visit([](const auto& mm) { return mm.specific_surface_area(); }, m);
 }
 
 /** @brief Returns the aggregate collision diameter [m]. */

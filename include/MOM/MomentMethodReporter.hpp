@@ -49,8 +49,8 @@
 // • Variant-specific columns are provided BY THE VARIANT, not detected here.
 //   The reporter is fully closed to modification when new variants are added.
 // • Owns no model and performs no numerical computation.
-// • The caller (CFD code) is responsible for calling SetStatus,
-//   SetMoments, and CalculateSourceMoments before every WriteRow.
+// • The caller (CFD code) is responsible for calling SetState,
+//   SetMoments, and ComputeSources before every WriteRow.
 //   The reporter only observes — it never mutates the model.
 //
 // Extensibility protocol — variant_output hooks
@@ -82,9 +82,9 @@
 //   file.Complete();
 //
 //   for (auto& cell : grid) {
-//       model.SetStatus(cell.T, cell.P, cell.Y.data());
+//       model.SetState(cell.T, cell.P, cell.Y.data());
 //       model.SetMoments(cell.M);
-//       model.CalculateSourceMoments();
+//       model.ComputeSources();
 //       // ... apply sources to CFD residuals ...
 //       if (output_step)
 //           reporter.WriteRow(model);  // pure observer — never mutates model
@@ -146,9 +146,9 @@ public:
     template <MomentMethod Model> void WriteHeader(const Model& model, unsigned precision = 8);
 
     /// Write one output row from the current model state.
-    /// Precondition: CalculateSourceMoments() has been called by the CFD code.
-    /// This method is a pure observer — it never calls SetStatus/SetMoments
-    /// or CalculateSourceMoments on the model.
+    /// Precondition: ComputeSources() has been called by the CFD code.
+    /// This method is a pure observer — it never calls SetState/SetMoments
+    /// or ComputeSources on the model.
     template <MomentMethod Model> void WriteRow(const Model& model);
 
     // -- Runtime-dispatch API (AnyMomentMethod) --------------------------------
@@ -405,7 +405,7 @@ template <MomentMethod Model> void MomentMethodReporter::WriteRow(const Model& m
     // -- Block 1: Core particle state (concept-mandated) -----------------------
     *out_ << model.mass_fraction();
     *out_ << model.particle_number_density();
-    *out_ << model.specific_surface();
+    *out_ << model.specific_surface_area();
     *out_ << model.volume_fraction();
     *out_ << model.particle_diameter() * 1.e9;  // m → nm
     *out_ << model.collision_diameter() * 1.e9; // m → nm

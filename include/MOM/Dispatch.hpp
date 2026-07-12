@@ -92,7 +92,7 @@ template <ThermoMap Thermo>
 template <ThermoMap Thermo>
 inline void SetState(AnyMomentMethod<Thermo>& m, double T, double P_Pa, const double* Y) noexcept
 {
-    std::visit([&](auto& mm) { mm.SetStatus(T, P_Pa, Y); }, m);
+    std::visit([&](auto& mm) { mm.SetState(T, P_Pa, Y); }, m);
 }
 
 /** @brief Sets the mixture dynamic viscosity [kg/m/s]. */
@@ -113,7 +113,7 @@ inline void SetMoments(AnyMomentMethod<Thermo>& m, std::span<const double> momen
 template <ThermoMap Thermo>
 inline void Compute(AnyMomentMethod<Thermo>& m)
 {
-    std::visit([](auto& mm) { mm.CalculateSourceMoments(); }, m);
+    std::visit([](auto& mm) { mm.ComputeSources(); }, m);
 }
 
 /**
@@ -137,10 +137,10 @@ inline void ComputeCell(AnyMomentMethod<Thermo>& m,
     std::visit(
         [T, P_Pa, Y, mu, moments](auto& mm) noexcept
         {
-            mm.SetStatus(T, P_Pa, Y);
+            mm.SetState(T, P_Pa, Y);
             mm.SetMoments(moments);
             mm.SetViscosity(mu);
-            mm.CalculateSourceMoments();
+            mm.ComputeSources();
         },
         m);
 }

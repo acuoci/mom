@@ -193,11 +193,11 @@ void MetalOxide<Thermo>::SetMinimumNumberOfFormulaUnits(unsigned n)
 }
 
 // ============================================================================
-// SetStatus  — injects thermodynamic state from the CFD solver
+// SetState  — injects thermodynamic state from the CFD solver
 // ============================================================================
 
 template <ThermoMap Thermo>
-void MetalOxide<Thermo>::SetStatus(double T, double P_Pa, const double* Y) noexcept
+void MetalOxide<Thermo>::SetState(double T, double P_Pa, const double* Y) noexcept
 {
     const double cTot = this->template UpdateMixtureState<>(T, P_Pa, Y, thermo_);
 
@@ -484,7 +484,7 @@ template <ThermoMap Thermo> double MetalOxide<Thermo>::particle_number_density()
     return std::max(scaled_number_density_ * N0_scaling_, 0.);
 }
 
-template <ThermoMap Thermo> double MetalOxide<Thermo>::specific_surface() const noexcept
+template <ThermoMap Thermo> double MetalOxide<Thermo>::specific_surface_area() const noexcept
 {
     return std::max(surface_area_concentration_, 0.);
 }
@@ -819,10 +819,10 @@ template <ThermoMap Thermo> double MetalOxide<Thermo>::SinteringDeferredUpdate(d
 }
 
 // ============================================================================
-// CalculateSourceMoments  — master entry point
+// ComputeSources  — master entry point
 // ============================================================================
 
-template <ThermoMap Thermo> void MetalOxide<Thermo>::CalculateSourceMoments() noexcept
+template <ThermoMap Thermo> void MetalOxide<Thermo>::ComputeSources() noexcept
 {
     this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by MetalOxide — must be zeroed before early return

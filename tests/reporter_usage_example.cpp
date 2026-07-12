@@ -84,10 +84,10 @@ static void runStaticDispatch(Model& model,
     for (int cell = 0; cell < N_CELLS; ++cell)
     {
         // --- Every cell: compute source terms (pure numerics) ---
-        model.SetStatus(T, P, Y.data());
+        model.SetState(T, P, Y.data());
         model.SetMoments(ic);
         model.SetViscosity(mu);
-        model.CalculateSourceMoments();
+        model.ComputeSources();
 
         // --- Copy sources into CFD residuals (schematic) ---
         // for (unsigned j = 0; j < Model::n_equations; ++j)
@@ -113,7 +113,7 @@ static void runStaticDispatch(Model& model,
 // per WriteRow call, NOT once per cell.
 //
 // For maximum throughput, move the write out of the inner loop (same as A):
-// call model.CalculateSourceMoments() per cell in a bare loop, and only call
+// call model.ComputeSources() per cell in a bare loop, and only call
 // reporter.WriteRow() on output steps.
 
 static void runRuntimeDispatch(const std::string& variant_name,
@@ -157,10 +157,10 @@ static void runRuntimeDispatch(const std::string& variant_name,
                      {
                          for (int cell = 0; cell < N_CELLS; ++cell)
                          {
-                             concrete.SetStatus(T, P, Y.data());
+                             concrete.SetState(T, P, Y.data());
                              concrete.SetMoments(std::span<const double>(ic_buf));
                              concrete.SetViscosity(mu);
-                             concrete.CalculateSourceMoments();
+                             concrete.ComputeSources();
 
                              if (cell % OUTPUT_FREQ == 0)
                              {

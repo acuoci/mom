@@ -51,7 +51,7 @@ namespace MOM
 
 template <ThermoMap Thermo> BrookesMoss<Thermo>::BrookesMoss(const Thermo& thermo) : thermo_(thermo)
 {
-    // -- Species indices for SetStatus / gas-coupling ----------------------
+    // -- Species indices for SetState / gas-coupling ----------------------
     // These are mechanism lookups, not user-configurable parameters.
     // index_C6H5_ and index_C6H6_ stay at their in-class default of -1
     // until SetBenzeneSpecies / SetPhenylRadicalSpecies are called.
@@ -95,11 +95,11 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::MemoryAllocation()
 }
 
 // ============================================================================
-// SetStatus
+// SetState
 // ============================================================================
 
 template <ThermoMap Thermo>
-void BrookesMoss<Thermo>::SetStatus(double T, double P_Pa, const double* Y) noexcept
+void BrookesMoss<Thermo>::SetState(double T, double P_Pa, const double* Y) noexcept
 {
     const double cTot = this->template UpdateMixtureState<>(T, P_Pa, Y, thermo_);
 
@@ -324,10 +324,10 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::CheckBrookesMossHallSpecie
 }
 
 // ============================================================================
-// CalculateSourceMoments
+// ComputeSources
 // ============================================================================
 
-template <ThermoMap Thermo> void BrookesMoss<Thermo>::CalculateSourceMoments() noexcept
+template <ThermoMap Thermo> void BrookesMoss<Thermo>::ComputeSources() noexcept
 {
     this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by BrookesMoss — zeroed explicitly
@@ -859,7 +859,7 @@ template <ThermoMap Thermo> double BrookesMoss<Thermo>::collision_diameter() con
     return particle_diameter();
 }
 
-template <ThermoMap Thermo> double BrookesMoss<Thermo>::specific_surface() const noexcept
+template <ThermoMap Thermo> double BrookesMoss<Thermo>::specific_surface_area() const noexcept
 {
     const double dp = particle_diameter();
     const double N  = particle_number_density();

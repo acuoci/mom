@@ -67,13 +67,13 @@ namespace MOM
  * - `M::variant_labels` — iterable range of `string_view` keys for factory dispatch
  *                         (`MakeAnyMomentMethod` uses this to map label → type)
  *
- * **State injection** (call before CalculateSourceMoments each cell/time-step):
- * - `SetStatus(T, P, Y[])` — thermodynamic state (T [K], P [Pa], Y mass fractions)
+ * **State injection** (call before ComputeSources each cell/time-step):
+ * - `SetState(T, P, Y[])` — thermodynamic state (T [K], P [Pa], Y mass fractions)
  * - `SetMoments(span)` — current moment values
  * - `SetViscosity(mu)` — mixture dynamic viscosity [kg/m/s]
  *
  * **Core computation:**
- * - `CalculateSourceMoments()` — evaluates all source terms, including gas-phase
+ * - `ComputeSources()` — evaluates all source terms, including gas-phase
  *                                consumption (noexcept); this is the only method
  *                                a CFD solver's inner loop needs to call
  *
@@ -94,7 +94,7 @@ namespace MOM
  * - `particle_number_density()` — number density [#/m3]
  * - `mass_fraction()` — particle mass fraction [-]
  * - `ParticleDensity()` — material density [kg/m3]
- * - `specific_surface()` — surface area per unit volume [m2/m3]
+ * - `specific_surface_area()` — specific surface area per unit volume [m2/m3]
  *
  * **Transport:**
  * - `schmidt_number()` — particle Schmidt number [-]
@@ -139,16 +139,16 @@ concept MomentMethod =
         // -- State injection ------------------------------------------------
         // Y_ptr is a properly-typed local variable; no null-pointer cast needed.
         // noexcept is required: these setters run every cell iteration.
-        { m.SetStatus(scalar, scalar, Y_ptr) } noexcept; // T [K], P [Pa], Y[]
+        { m.SetState(scalar, scalar, Y_ptr) } noexcept; // T [K], P [Pa], Y[]
         { m.SetMoments(moments_in) } noexcept;
         { m.SetViscosity(scalar) } noexcept;
 
         // -- Core computation -----------------------------------------------
         // noexcept is part of the contract: this runs in the CFD inner loop
         // and must not carry exception-handling overhead or prevent hoisting.
-        // CalculateSourceMoments() subsumes gas-phase coupling internally —
+        // ComputeSources() subsumes gas-phase coupling internally —
         // callers never need to invoke CalculateOmegaGas() directly.
-        { m.CalculateSourceMoments() } noexcept;
+        { m.ComputeSources() } noexcept;
 
         // -- Source output (zero-copy spans) --------------------------------
         { cm.sources() } -> std::convertible_to<std::span<const double>>;
@@ -168,7 +168,7 @@ concept MomentMethod =
         { cm.number_primary_particles() } -> std::same_as<double>;
         { cm.mass_fraction() } -> std::same_as<double>;
         { cm.particle_density() } -> std::same_as<double>;
-        { cm.specific_surface() } -> std::same_as<double>;
+        { cm.specific_surface_area() } -> std::same_as<double>;
 
         // -- Transport ------------------------------------------------------
         { cm.schmidt_number() } -> std::same_as<double>;
@@ -453,8 +453,8 @@ concept HasNDFExtraOutput =
 /**
  * @brief Single-call per-cell entry point for moment source computation.
  *
- * Preferred over calling SetStatus / SetMoments / SetViscosity /
- * CalculateSourceMoments individually. Bundling all four into one call lets the
+ * Preferred over calling SetState / SetMoments / SetViscosity /
+ * ComputeSources individually. Bundling all four into one call lets the
  * compiler keep the object layout in registers across the full per-cell
  * computation without reloading `this` at each function boundary.
  *
@@ -486,10 +486,10 @@ template <MomentMethod M>
 inline void ComputeCell(
     M& model, double T, double P_Pa, const double* Y, double mu, std::span<const double> moments) noexcept
 {
-    model.SetStatus(T, P_Pa, Y);
+    model.SetState(T, P_Pa, Y);
     model.SetMoments(moments);
     model.SetViscosity(mu);
-    model.CalculateSourceMoments();
+    model.ComputeSources();
 }
 
 } // namespace MOM

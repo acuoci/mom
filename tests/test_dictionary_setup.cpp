@@ -490,8 +490,8 @@ void checkMetalOxideGasStoichiometrySetup()
     require(metaloxide.gas_consumption(), "MetalOxide explicit gas-consumption flag was not applied");
 
     const double Y[] = {0.10, 0.0, 0.90};
-    metaloxide.SetStatus(1500.0, 101325.0, Y);
-    metaloxide.CalculateSourceMoments();
+    metaloxide.SetState(1500.0, 101325.0, Y);
+    metaloxide.ComputeSources();
 
     const auto omega = metaloxide.omega_gas();
     require(omega.size() == 3u, "MetalOxide omega_gas size is wrong");

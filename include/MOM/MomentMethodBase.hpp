@@ -146,7 +146,7 @@ namespace MOM
  * **One instance per thread — never shared across threads.**
  *
  * Each concrete instance holds mutable internal state that is overwritten on
- * every call to `CalculateSourceMoments()` (moment values, intermediate species
+ * every call to `ComputeSources()` (moment values, intermediate species
  * concentrations, source vectors).  Concurrent access to the same instance from
  * multiple threads is undefined behaviour.
  *
@@ -187,7 +187,7 @@ public:
     /**
      * @brief Sets the mixture dynamic viscosity.
      *
-     * Must be called before each `CalculateSourceMoments()` call if viscosity
+     * Must be called before each `ComputeSources()` call if viscosity
      * changes between time steps (e.g. in a variable-property flow).
      * @param mu Dynamic viscosity [kg/m/s].
      */
@@ -295,7 +295,7 @@ public:
      *
      * Returns a non-owning, zero-copy view into the internal fixed-size storage.
      * The span remains valid as long as the model object is alive and
-     * `CalculateSourceMoments()` has not been called again.
+     * `ComputeSources()` has not been called again.
      *
      * @return Span of size `n_equations` [mol/m3/s or variant-specific units].
      */
@@ -605,7 +605,7 @@ protected:
     MomentMethodBase& operator=(MomentMethodBase&&) = default;
 
     // -- Shared thermodynamic state -----------------------------------------
-    // Updated by each concrete class's SetStatus() implementation.
+    // Updated by each concrete class's SetState() implementation.
 
     double T_    = 0.; //!< Gas temperature [K].
     double P_Pa_ = 0.; //!< Gas pressure [Pa].
@@ -718,7 +718,7 @@ protected:
     /**
      * @brief Zeroes the base-class-owned source accumulators.
      *
-     * Each `Derived::CalculateSourceMoments()` implementation must call this
+     * Each `Derived::ComputeSources()` implementation must call this
      * first, then zero its own per-process vectors (`source_nucleation_`, etc.)
      * before accumulating new source terms.  This deliberately does not clear
      * `omega_gas_`; gas source vectors can be large and are reset only when gas

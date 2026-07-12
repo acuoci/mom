@@ -120,7 +120,7 @@ template <template <typename> class... Variants> struct TypeList
         static_assert((MomentMethod<Variants<TestThermo>> && ...),
                       "[MOM] One or more registered variants in AllVariants do not satisfy "
                       "the MomentMethod concept. Check: SetMoments(span), "
-                      "CalculateSourceMoments() noexcept, DiffusionCoefficient() const, "
+                      "ComputeSources() noexcept, DiffusionCoefficient() const, "
                       "CollisionDiameter(), SpecificSurface(), PrintSummary().");
     };
 };

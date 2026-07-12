@@ -96,7 +96,7 @@ namespace MOM
 
 /**
  * @brief Returns a zero-copy span over the total source vector [model-specific units].
- * @return Span of size `n_equations`; valid until next `CalculateSourceMoments()`.
+ * @return Span of size `n_equations`; valid until next `ComputeSources()`.
  */
 template <ThermoMap Thermo>
 [[nodiscard]] inline std::span<const double> GetSources(const AnyMomentMethod<Thermo>& m) noexcept

@@ -248,7 +248,7 @@ public:
     /// @param T    Temperature [K]
     /// @param P_Pa Pressure [Pa]
     /// @param Y    Mass fractions, size = n_species
-    void SetStatus(double T, double P_Pa, const double* Y) noexcept;
+    void SetState(double T, double P_Pa, const double* Y) noexcept;
 
     /// Generic span setter. Order: [Ysolid, NsolidN, Ssolid].
     /// Ysolid [-], NsolidN [-], Ssolid [m2/m3].
@@ -262,7 +262,7 @@ public:
     // -- MomentMethod concept — core computation -------------------------------
 
     /// Computes all source terms for the current cell state.
-    void CalculateSourceMoments() noexcept;
+    void ComputeSources() noexcept;
 
     void CalculateOmegaGas() noexcept;
 
@@ -270,7 +270,7 @@ public:
     //
     // When sintering is stiff relative to the main transport time step,
     // it can be integrated separately using an ODE solver. Call this method
-    // after CalculateSourceMoments to update surface area with a sub-step.
+    // after ComputeSources to update surface area with a sub-step.
     //
     // Returns the sintering time scale [s].
 
@@ -284,7 +284,7 @@ public:
     [[nodiscard]] double AggregateDiameter() const noexcept; //!< mobility aggregate diameter [m]
     [[nodiscard]] double particle_number_density() const noexcept;    //!< [#/m3]
     [[nodiscard]] double mass_fraction() const noexcept;             //!< solid mass fraction [-]
-    [[nodiscard]] double specific_surface() const noexcept;          //!< total surface area [m2/m3]
+    [[nodiscard]] double specific_surface_area() const noexcept;          //!< total surface area [m2/m3]
     [[nodiscard]] double number_primary_particles() const noexcept; //!< np [-]
     [[nodiscard]] double diffusion_coefficient() const noexcept;     //!< [kg/m/s]
 

@@ -91,7 +91,7 @@ int RequireSpeciesIndexThreeEquations(const Thermo& thermo,
 template <ThermoMap Thermo>
 ThreeEquations<Thermo>::ThreeEquations(const Thermo& thermo) : thermo_(thermo)
 {
-    // -- Species indices for SetStatus / HACA kinetics ---------------------
+    // -- Species indices for SetState / HACA kinetics ---------------------
     // Required species: throws at construction if absent (ThreeEquations
     // cannot function without H, OH, O2, H2, H2O, C2H2).
     index_H_    = RequireSpeciesIndexThreeEquations(thermo_, "H",    "constructor");
@@ -260,11 +260,11 @@ void ThreeEquations<Thermo>::SetStickingCoefficientModel(std::string_view label)
 }
 
 // ============================================================================
-// SetStatus  — injects thermodynamic state from the CFD solver
+// SetState  — injects thermodynamic state from the CFD solver
 // ============================================================================
 
 template <ThermoMap Thermo>
-void ThreeEquations<Thermo>::SetStatus(double T, double P_Pa, const double* Y) noexcept
+void ThreeEquations<Thermo>::SetState(double T, double P_Pa, const double* Y) noexcept
 {
     // Gas constant: R [J/kmol/K] = kB * Nav_kmol
     const double R_J_kmol = this->kB_ * this->Nav_kmol_;
@@ -362,7 +362,7 @@ template <ThermoMap Thermo> double ThreeEquations<Thermo>::particle_number_densi
     return std::max(NsNorm_ * N0_scaling_, 0.);
 }
 
-template <ThermoMap Thermo> double ThreeEquations<Thermo>::specific_surface() const noexcept
+template <ThermoMap Thermo> double ThreeEquations<Thermo>::specific_surface_area() const noexcept
 {
     return std::max(Ss_, 0.);
 }
@@ -908,10 +908,10 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::OxidationSourceTerms()
 }
 
 // ============================================================================
-// CalculateSourceMoments  — master entry point
+// ComputeSources  — master entry point
 // ============================================================================
 
-template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateSourceMoments() noexcept
+template <ThermoMap Thermo> void ThreeEquations<Thermo>::ComputeSources() noexcept
 {
     this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by ThreeEquations — zeroed explicitly

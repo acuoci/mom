@@ -118,7 +118,7 @@ inline std::array<double, 4> CollisionGeometry(int model, double pi) noexcept
 
 template <ThermoMap Thermo> HMOM<Thermo>::HMOM(const Thermo& thermo) : thermo_(thermo)
 {
-    // -- Species indices for SetStatus / HACA kinetics (soft lookup: -1 if absent) --
+    // -- Species indices for SetState / HACA kinetics (soft lookup: -1 if absent) --
     index_H_    = thermo_.IndexOfSpecies("H");
     index_OH_   = thermo_.IndexOfSpecies("OH");
     index_O2_   = thermo_.IndexOfSpecies("O2");
@@ -131,7 +131,7 @@ template <ThermoMap Thermo> HMOM<Thermo>::HMOM(const Thermo& thermo) : thermo_(t
     // Config{} is the single source of truth for every numerical constant.
     // ApplyConfig calls Precalculations() after setting rho_particle_ and the
     // geometry-model enums, so Cfm_, betaN_TV_, and K_collisional_ (etc.) are
-    // correctly computed before CalculateSourceMoments() is ever called.
+    // correctly computed before ComputeSources() is ever called.
     ApplyConfig(Config{});
 
     // -- Memory allocation (size depends on thermo_.NumberOfSpecies()) -----
@@ -299,11 +299,11 @@ template <ThermoMap Thermo> void HMOM<Thermo>::SetStickingCoefficientModel(std::
 }
 
 // ============================================================================
-// SetStatus
+// SetState
 // ============================================================================
 
 template <ThermoMap Thermo>
-void HMOM<Thermo>::SetStatus(double T, double P_Pa, const double* Y) noexcept
+void HMOM<Thermo>::SetState(double T, double P_Pa, const double* Y) noexcept
 {
     const double cTot = this->template UpdateMixtureState<>(
         T, P_Pa, Y, thermo_);
@@ -945,10 +945,10 @@ template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousLargeLar
 }
 
 // ============================================================================
-// CalculateSourceMoments
+// ComputeSources
 // ============================================================================
 
-template <ThermoMap Thermo> void HMOM<Thermo>::CalculateSourceMoments() noexcept
+template <ThermoMap Thermo> void HMOM<Thermo>::ComputeSources() noexcept
 {
     this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by HMOM — must be zeroed explicitly
@@ -1204,7 +1204,7 @@ template <ThermoMap Thermo> double HMOM<Thermo>::mass_fraction() const noexcept
     return this->rho_particle_ / this->rho_ * volume_fraction();
 }
 
-template <ThermoMap Thermo> double HMOM<Thermo>::specific_surface() const noexcept
+template <ThermoMap Thermo> double HMOM<Thermo>::specific_surface_area() const noexcept
 {
     const double Ss = GetMoment(0., 1.);
     return (!std::isfinite(Ss) || Ss <= 0.) ? 0. : Ss;
@@ -1574,7 +1574,7 @@ template <ThermoMap Thermo> double HMOM<Thermo>::soot_d63() const noexcept
 //   The log value is clamped to [ln(DBL_MIN), ln(DBL_MAX)] before exp().
 //   Values outside this range produce 0 (deep tail → effectively zero density).
 //
-// - All methods require GetMoments() (called by CalculateSourceMoments()) to
+// - All methods require GetMoments() (called by ComputeSources()) to
 //   have been invoked so that N0_, NL_, NLVL_ hold up-to-date values.
 
 template <ThermoMap Thermo>
@@ -1585,7 +1585,7 @@ HMOM<Thermo>::ReconstructedNDFData(bool use_regularized_moments) const
     d.valid = false;
 
     // -- Retrieve node weights from cached state -------------------------------
-    // N0_ and NL_ are updated by GetMoments() inside CalculateSourceMoments().
+    // N0_ and NL_ are updated by GetMoments() inside ComputeSources().
     double N0 = N0_;   // small-mode number density [#/m³]
     double NL = NL_;   // large-mode number density [#/m³]
 
