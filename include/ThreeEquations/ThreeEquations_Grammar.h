@@ -41,12 +41,23 @@
 #include "DictionaryGrammar.h"
 #include "DictionaryKeyWord.h"
 
+/**
+ * @file ThreeEquations_Grammar.h
+ * @brief OpenSMOKE++ dictionary grammar for ThreeEquations configuration.
+ */
+
 namespace MOM
 {
+
+/**
+ * @class ThreeEquations_Grammar
+ * @brief Defines dictionary keywords accepted by the ThreeEquations variant.
+ */
 class ThreeEquations_Grammar : public OpenSMOKEpp::DictionaryGrammar
 {
 protected:
 
+    /** @brief Registers ThreeEquations dictionary keywords and value types. */
     virtual void DefineRules();
 };
 } // namespace MOM

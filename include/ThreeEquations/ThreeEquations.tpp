@@ -43,12 +43,15 @@
 #include <limits>
 #include <numeric>
 
+/**
+ * @file ThreeEquations.tpp
+ * @brief Template implementation for the ThreeEquations soot source-term model.
+ */
+
 namespace MOM
 {
 
-// ============================================================================
-// File-local helpers  (anonymous namespace — not exported)
-// ============================================================================
+// File-local numerical helpers.
 namespace
 {
 
@@ -63,11 +66,10 @@ inline double SmoothHeaviside(double x, double eps) noexcept
     return 0.5 * (1.0 + std::tanh(x / epsSafe));
 }
 
-// Gas constant [J/mol/K] — equals MomentMethodBase::Rgas_mol_ (= Rgas_ / 1000).
-// Used here by the non-member Arrhenius_cgs helper; member functions access this->Rgas_mol_.
+// Gas constant used by the non-member Arrhenius helper [J/mol/K].
 static constexpr double kRgas_mol = 8.31446261815324;
 
-/// Arrhenius rate in CGS: A in [cm3/mol/s] or [1/s], E in [J/mol].
+/** @brief Arrhenius rate with A in CGS units and E in [J/mol]. */
 inline double Arrhenius_cgs(double A, double n, double E_J_mol, double T) noexcept
 {
     return A * std::pow(T, n) * std::exp(-E_J_mol / (kRgas_mol * T));
@@ -87,67 +89,48 @@ int RequireSpeciesIndexThreeEquations(const Thermo& thermo,
 
 } // anonymous namespace
 
-// ============================================================================
-// Constructor
-// ============================================================================
-
 template <ThermoMap Thermo>
 ThreeEquations<Thermo>::ThreeEquations(const Thermo& thermo) : thermo_(thermo)
 {
-    // -- Species indices for SetState / HACA kinetics ---------------------
-    // Required species: throws at construction if absent (ThreeEquations
-    // cannot function without H, OH, O2, H2, H2O, C2H2).
+    // Required gas species for state injection and surface kinetics.
     index_H_    = RequireSpeciesIndexThreeEquations(thermo_, "H",    "constructor");
     index_OH_   = RequireSpeciesIndexThreeEquations(thermo_, "OH",   "constructor");
     index_O2_   = RequireSpeciesIndexThreeEquations(thermo_, "O2",   "constructor");
     index_H2_   = RequireSpeciesIndexThreeEquations(thermo_, "H2",   "constructor");
     index_H2O_  = RequireSpeciesIndexThreeEquations(thermo_, "H2O",  "constructor");
-    index_CO_   = thermo_.IndexOfSpecies("CO");   // optional — not present in all mechanisms
+    index_CO_   = thermo_.IndexOfSpecies("CO");
     index_C2H2_ = RequireSpeciesIndexThreeEquations(thermo_, "C2H2", "constructor");
 
-    // -- Apply all tunable parameter defaults from Config{} ----------------
-    // Config{} is the single source of truth for every numerical constant.
-    // NOTE: ApplyConfig sets rho_particle_ via SetParticleDensity BEFORE
-    //       calling SetPAH, so Precalculations() uses the correct density.
+    // Apply default configuration before cell-level calls are possible.
     ApplyConfig(Config{});
 
-    // -- Memory allocation (size depends on thermo_.NumberOfSpecies()) -----
     MemoryAllocation();
 }
 
-// ============================================================================
-// MemoryAllocation
-// ============================================================================
-
 template <ThermoMap Thermo> void ThreeEquations<Thermo>::MemoryAllocation()
 {
-    this->ZeroSources();          // zeros source_all_ (base class)
-    source_nucleation_.setZero(); // owned by ThreeEquations — zeroed explicitly
+    this->ZeroSources();
+    source_nucleation_.setZero();
     source_coagulation_.setZero();
     source_condensation_.setZero();
     source_growth_.setZero();
     source_oxidation_.setZero();
 
-    // Gas source vector — dynamic size (depends on mechanism).
     this->omega_gas_     = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(thermo_.NumberOfSpecies()));
     omega_gas_oxidation_ = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(thermo_.NumberOfSpecies()));
 }
-
-// ============================================================================
-// Precalculations  (call whenever rho_soot, PAH species, or Ns_min changes)
-// ============================================================================
 
 template <ThermoMap Thermo> void ThreeEquations<Thermo>::Precalculations()
 {
     const double rho_soot = this->rho_particle_;
 
-    // -- PAH identification ------------------------------------------------
+    // PAH identity and molecular composition.
     pah_index_ = RequireSpeciesIndexThreeEquations(thermo_, pah_species_, "Precalculations");
     const auto pah_index_u = static_cast<unsigned>(pah_index_);
     ncpah_     = static_cast<double>(thermo_.NumberOfCarbonAtoms(pah_index_u));
     nhpah_     = static_cast<double>(thermo_.NumberOfHydrogenAtoms(pah_index_u));
 
-    // -- PAH mass and geometry ---------------------------------------------
+    // PAH mass and sphere-equivalent geometry.
     mwpah_ = thermo_.MolecularWeight(pah_index_u); // [kg/kmol]
     if (is_simplified_pah_mass_)
         mwpah_ = ncpah_ * this->WC_;
@@ -157,27 +140,26 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::Precalculations()
     spah_ = this->SphereSurface(dpah_);                // [m2]
     mpah_ = mwpah_ / this->Nav_kmol_;                  // [kg/#]
 
-    // -- Dimer geometry ----------------------------------------------------
+    // Dimer and nucleus geometry.
     vdim_ = 2. * vpah_;
     ddim_ = this->SphereDiameter(vdim_);
     sdim_ = this->SphereSurface(ddim_);
 
-    // -- Nucleus geometry  (dimer + dimer) ---------------------------------
     vnucl_ = 2. * vdim_;
     dnucl_ = this->SphereDiameter(vnucl_);
     snucl_ = this->SphereSurface(dnucl_);
 
-    // -- C2 pair geometry --------------------------------------------------
+    // C2 pair geometry.
     vc2_ = (this->WC_ / rho_soot / this->Nav_kmol_) * 2.;
     dc2_ = this->SphereDiameter(vc2_);
     sc2_ = this->SphereSurface(dc2_);
 
-    // -- Numerical floors --------------------------------------------------
+    // Numerical floors for regularized properties.
     vs_min_ = vnucl_;
     Ss_min_ = Ns_min_ * snucl_;
     Ys_min_ = (Ns_min_ * vnucl_) * rho_soot / 1.0; // reference gas density 1 kg/m3
 
-    // -- Initial moments cache ---------------------------------------------
+    // Initial transported variables for solver startup.
     {
         const double Ns0          = Ns_min_;
         const double Ys0          = rho_soot / 1. * Ns0 * vnucl_;
@@ -188,17 +170,12 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::Precalculations()
     }
 }
 
-// ============================================================================
-// Setters that trigger recalculation
-// ============================================================================
-
 template <ThermoMap Thermo> void ThreeEquations<Thermo>::SetNsMinimum(double v) noexcept
 {
     Ns_min_ = v;
     Ss_min_ = Ns_min_ * snucl_;
     Ys_min_ = (Ns_min_ * vnucl_) * this->rho_particle_ / 1.0;
     vs_min_ = vnucl_;
-    // Update initial moments cache to reflect new floor
     initial_moments_cache_(0) = Ys_min_;
     initial_moments_cache_(1) = Ns_min_ / N0_scaling_;
     initial_moments_cache_(2) = Ss_min_;
@@ -262,18 +239,13 @@ void ThreeEquations<Thermo>::SetStickingCoefficientModel(std::string_view label)
             "[ThreeEquations] @StickingCoefficientModel: allowed: constant | pah-dependent");
 }
 
-// ============================================================================
-// SetState  — injects thermodynamic state from the CFD solver
-// ============================================================================
-
 template <ThermoMap Thermo>
 void ThreeEquations<Thermo>::SetState(double T, double P_Pa, const double* Y) noexcept
 {
-    // Gas constant: R [J/kmol/K] = kB * Nav_kmol
     const double R_J_kmol = this->kB_ * this->Nav_kmol_;
     const double cTot = this->template UpdateMixtureState<>(T, P_Pa, Y, thermo_, R_J_kmol);
 
-    // Mass fractions of HACA-relevant species (for active-site cutoff)
+    // Mass fractions used by active-site limiting logic.
     mass_fraction_OH_ = std::max(Y[index_OH_], 0.);
     mass_fraction_H_  = std::max(Y[index_H_], 0.);
 
@@ -307,10 +279,6 @@ void ThreeEquations<Thermo>::SetState(double T, double P_Pa, const double* Y) no
     }
 }
 
-// ============================================================================
-// SetMoments
-// ============================================================================
-
 template <ThermoMap Thermo>
 void ThreeEquations<Thermo>::SetMoments(std::span<const double> m) noexcept
 {
@@ -327,15 +295,11 @@ void ThreeEquations<Thermo>::SetMoments(double Ys, double NsNorm, double Ss) noe
     Ss_     = std::max(Ss, 0.);
 }
 
-// ============================================================================
-// Particle properties
-// ============================================================================
-
 template <ThermoMap Thermo>
 void ThreeEquations<Thermo>::Properties(
     double& fv, double& dp, double& dc, double& np, double& ss, double& vs) const noexcept
 {
-    // Regularize to floor values for property calculation
+    // Regularize to floor values for property calculation.
     const double YsStar = std::max(Ys_, Ys_min_);
     const double NsStar = std::max(NsNorm_ * N0_scaling_, Ns_min_);
     const double SsStar = std::max(Ss_, Ss_min_);
@@ -402,10 +366,6 @@ template <ThermoMap Thermo> double ThreeEquations<Thermo>::diffusion_coefficient
     return std::max(GammaBrownian, GammaSc);
 }
 
-// ============================================================================
-// Planck absorption coefficient — ThreeEquations-specific constants
-// ============================================================================
-
 template <ThermoMap Thermo>
 double ThreeEquations<Thermo>::planck_coefficient(double T, double fv) const noexcept
 {
@@ -424,10 +384,6 @@ double ThreeEquations<Thermo>::planck_coefficient(double T, double fv) const noe
             return 0.;
     }
 }
-
-// ============================================================================
-// Surface geometry utilities
-// ============================================================================
 
 template <ThermoMap Thermo>
 double ThreeEquations<Thermo>::DeltaSurfaceSpherical(double deltaV, double V, double S) noexcept
@@ -451,8 +407,8 @@ double ThreeEquations<Thermo>::DeltaSurfaceFractal(double deltaV, double V, doub
         return std::max(deltaS, deltaSph);
     }
 
-    // Fractal scaling factor
-    constexpr double Df      = 1.8; // same as Df_ — static helper, so hardcode
+    // Fractal scaling factor.
+    constexpr double Df      = 1.8;
     const double numerator   = 1. - std::pow(np, -1. / Df) - 2. / Df;
     const double denominator = 1. - std::pow(np, -1. / Df) - 3. / Df;
 
@@ -466,20 +422,12 @@ double ThreeEquations<Thermo>::DeltaSurfaceFractal(double deltaV, double V, doub
     return std::max(deltaS, deltaSph);
 }
 
-// ============================================================================
-// Surface site density
-// ============================================================================
-
 template <ThermoMap Thermo> double ThreeEquations<Thermo>::SurfaceSiteDensity() const noexcept
 {
     if (surface_chem_model_ == SurfaceChemistryModel::HMOM)
         return 1.7e19; // [#/m2], HMOM-consistent
     return 1. / sc2_;  // [#/m2], RC-PAH geometric default
 }
-
-// ============================================================================
-// Surface kinetics
-// ============================================================================
 
 template <ThermoMap Thermo>
 typename ThreeEquations<Thermo>::SurfaceKineticsRates ThreeEquations<Thermo>::SurfaceKinetics() const noexcept
@@ -489,9 +437,6 @@ typename ThreeEquations<Thermo>::SurfaceKineticsRates ThreeEquations<Thermo>::Su
     return Kinetics_RCPAH();
 }
 
-// ----------------------------------------------------------------------------
-// RC-PAH kinetics (Franzelli et al. 2019)
-// ----------------------------------------------------------------------------
 template <ThermoMap Thermo>
 typename ThreeEquations<Thermo>::SurfaceKineticsRates ThreeEquations<Thermo>::Kinetics_RCPAH() const noexcept
 {
@@ -577,9 +522,6 @@ typename ThreeEquations<Thermo>::SurfaceKineticsRates ThreeEquations<Thermo>::Ki
     return r;
 }
 
-// ----------------------------------------------------------------------------
-// HMOM HACA kinetics
-// ----------------------------------------------------------------------------
 template <ThermoMap Thermo>
 typename ThreeEquations<Thermo>::SurfaceKineticsRates ThreeEquations<Thermo>::Kinetics_HMOM() const noexcept
 {
@@ -645,10 +587,6 @@ typename ThreeEquations<Thermo>::SurfaceKineticsRates ThreeEquations<Thermo>::Ki
     return r;
 }
 
-// ============================================================================
-// Dimer QSSA concentration
-// ============================================================================
-
 template <ThermoMap Thermo> void ThreeEquations<Thermo>::DimerConcentration()
 {
     c_dimer_           = 0.;
@@ -674,13 +612,13 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::DimerConcentration()
     // PAH thermal velocity [m/s]
     const double vtpah = std::sqrt(4. * this->pi_ * this->kB_ * this->T_ / mpah_);
 
-    // PAH–PAH formation kernel [m3/s]
+    // PAH-PAH formation kernel [m3/s]
     double beta_pp = 0.5 * alpha_s * vtpah * dpah_ * dpah_;
     beta_pp *= correction_coeff_pah_pah_;
 
     double Jpah = beta_pp * Npah * Npah; // [#/m3/s]
 
-    // Low-PAH cutoffs (FORTRAN-compatible)
+    // Low-PAH cutoffs used by the model.
     if (cPAH_mol < 2.e-7)
         Jpah = 0.;
     if (cPAH_mol < 1.e-10)
@@ -688,7 +626,7 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::DimerConcentration()
     if (Jpah <= 0.)
         return;
 
-    // Dimer–dimer kernel [m3/s]
+    // Dimer-dimer kernel [m3/s]
     const double beta_dd = epsilon_nucleation_ *
                            std::sqrt(this->pi_ * this->kB_ * this->T_ / (2. * this->rho_particle_)) *
                            std::sqrt(2. / vdim_) * std::pow(2. * ddim_, 2.);
@@ -743,10 +681,6 @@ template <ThermoMap Thermo> double ThreeEquations<Thermo>::PAHDimerizationRate()
     return 2. * dimerization_rate_ / this->Nav_kmol_; // [kmol/m3/s]
 }
 
-// ============================================================================
-// Source term sub-routines
-// ============================================================================
-
 template <ThermoMap Thermo> void ThreeEquations<Thermo>::NucleationSourceTerms()
 {
     const double Ndim   = c_dimer_ * this->Nav_kmol_;
@@ -757,7 +691,7 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::NucleationSourceTerms()
 
     const double Omegafv = vdim_ * Betafm_N2;
     const double OmegaNs = 0.5 * Betafm_N2;
-    const double OmegaSs = 0.5 * snucl_ * Betafm_N2; // nucleus surface, FORTRAN-compatible
+    const double OmegaSs = 0.5 * snucl_ * Betafm_N2;
 
     this->source_nucleation_(0) = this->rho_particle_ / this->rho_ * Omegafv;
     this->source_nucleation_(1) = OmegaNs / N0_scaling_;
@@ -811,14 +745,7 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::CoagulationSourceTerms(
     const double Beta2  = 8. * this->kB_ * this->T_ / 3. / this->mu_ * Cu;
     const double Betavs = Beta1 * Beta2 / (Beta1 + Beta2);
 
-    // Smooth activation at the FORTRAN-heritage threshold (100 #/cm3 = 1e8 #/m3).
-    // The original hard step (Heaviside) created a Dirac-delta-like discontinuity
-    // in the ODE Jacobian as Ns crossed the threshold, forcing the stiff solver to
-    // bracket the crossing and shrink dt drastically.  Replacing it with a tanh
-    // transition of width 20 % of the threshold makes the source C¹-continuous
-    // while preserving the correct asymptotic behaviour (zero well below, full
-    // -½βNs² well above).  This also prevents unbounded Ns accumulation in
-    // nucleation-onset cells where Ns < threshold and no other sink is active.
+    // Smooth activation at the low-number-density coagulation threshold.
     static constexpr double Ns_coag_threshold = 1.e8;   // #/m3  (100 #/cm3)
     static constexpr double Ns_coag_width     = 2.e7;   // #/m3  (20 % transition)
     const double smooth_coag =
@@ -887,9 +814,7 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::OxidationSourceTerms()
 
     if (smooth_heaviside_oxidation_)
     {
-        // Wider bandwidth (50 % of vc2_) compared to the original 10 %.
-        // The narrower band produced a near-discontinuous ∂OmegaNs/∂vs that
-        // contributed to stiffness when the average particle volume hovered near vc2_.
+        // Smooth particle-destruction transition around the C2-pair volume.
         const double eps_v = 0.5 * vc2_;
         const double H     = SmoothHeaviside(vs_oxid - vc2_, eps_v);
         double destroy_sw  = 1. - H;
@@ -903,14 +828,10 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::OxidationSourceTerms()
     this->source_oxidation_(2) = OmegaSs;
 }
 
-// ============================================================================
-// ComputeSources  — master entry point
-// ============================================================================
-
 template <ThermoMap Thermo> void ThreeEquations<Thermo>::ComputeSources() noexcept
 {
-    this->ZeroSources();          // zeros source_all_ (base class)
-    source_nucleation_.setZero(); // owned by ThreeEquations — zeroed explicitly
+    this->ZeroSources();
+    source_nucleation_.setZero();
     source_coagulation_.setZero();
     source_condensation_.setZero();
     source_growth_.setZero();
@@ -929,7 +850,7 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::ComputeSources() noexce
     if (coagulation_model_ > 0)
         CoagulationSourceTerms();
 
-    // Sanitise and accumulate total source
+    // Sanitize per-process sources and combine the total source vector.
     for (unsigned i = 0; i < 3u; ++i)
     {
         if (!std::isfinite(this->source_nucleation_(i)))
@@ -952,10 +873,6 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::ComputeSources() noexce
         CalculateOmegaGas();
 }
 
-// ============================================================================
-// CalculateOmegaGas  — gas-phase consumption (kg/m3/s)
-// ============================================================================
-
 template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateOmegaGas() noexcept
 {
     this->omega_gas_.setZero();
@@ -965,7 +882,7 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateOmegaGas() noe
 
     const int nsp = thermo_.NumberOfSpecies();
 
-    // Helper: add molar source [kmol/m3/s] for species idx, convert to [kg/m3/s]
+    // Adds a molar source [kmol/m3/s] and converts it to [kg/m3/s].
     auto AddMolar = [&](int idx, double omega_kmol_m3_s)
     {
         if (idx < 0 || idx >= nsp || !std::isfinite(omega_kmol_m3_s))
@@ -974,13 +891,13 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateOmegaGas() noe
             omega_kmol_m3_s * thermo_.MolecularWeight(static_cast<unsigned>(idx));
     };
 
-    // 1. PAH consumed by dimerization (2 PAH per event)
+    // PAH consumed by dimerization.
     if (nucleation_model_ > 0 && dimerization_rate_ > 0. && std::isfinite(dimerization_rate_))
     {
         AddMolar(pah_index_, -2. * dimerization_rate_ / this->Nav_kmol_);
     }
 
-    // 2 & 3. Surface-related consumption (requires soot)
+    // Surface-related gas coupling.
     const double Ns = std::max(NsNorm_ * N0_scaling_, 0.);
     const double Ss = std::max(Ss_, 0.);
     if (Ns > 0. && Ss > 0.)
@@ -990,33 +907,26 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateOmegaGas() noe
         {
             const SurfaceKineticsRates r = SurfaceKinetics();
 
-            // C2H2 net consumption by surface growth.
-            // Net reaction: C2H2 → 2 C_soot + H2  (one H2 released per C2H2 added).
+            // C2H2 consumption by surface growth.
             if (surface_growth_model_ > 0)
             {
                 const double rate_c2h2 = lambda * r.ksg * Ss; // [#/m3/s]
                 if (std::isfinite(rate_c2h2) && !(rate_c2h2 > 0. && conc_C2H2_ <= 0.))
                 {
-                    // C2H2 consumed
                     AddMolar(index_C2H2_, -rate_c2h2 / this->Nav_kmol_);
-                    // H2 produced: 1 mol H2 per mol C2H2
                     if (index_H2_ >= 0)
                         AddMolar(index_H2_, +rate_c2h2 / this->Nav_kmol_);
                 }
             }
 
             // O2 and OH consumption by oxidation, with gaseous products.
-            // Conventions (same as BrookesMoss):
-            //   O2 channel: C + ½O2 → CO  (net per C2 pair: C2 + O2 → 2CO)
-            //   OH channel: C + OH  → CO + ½H2
             if (oxidation_model_ > 0 && Ys_ > 0.)
             {
-                // Snapshot for oxidation-only extraction (operator splitting support).
                 const Eigen::VectorXd omega_snap_before_ox = this->omega_gas_;
                 const double R_O2 = lambda * std::max(r.ko2, 0.) * Ss; // [#/m3/s]
                 const double R_OH = lambda * std::max(r.koh, 0.) * Ss; // [#/m3/s]
 
-                // O2 channel: 1 O2 consumed per C2 pair, 2 CO produced
+                // O2 channel: C2 + O2 -> 2CO.
                 if (conc_O2_ > 0. && R_O2 > 0. && std::isfinite(R_O2))
                 {
                     AddMolar(index_O2_, -R_O2 / this->Nav_kmol_);
@@ -1024,7 +934,7 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateOmegaGas() noe
                         AddMolar(index_CO_, +2. * R_O2 / this->Nav_kmol_);
                 }
 
-                // OH channel: 1 OH consumed per C atom, 1 CO + ½ H2 produced
+                // OH channel gas coupling follows the model's carbon-removal rate.
                 if (conc_OH_ > 0. && R_OH > 0. && std::isfinite(R_OH))
                 {
                     AddMolar(index_OH_, -R_OH / this->Nav_kmol_);
@@ -1034,16 +944,14 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateOmegaGas() noe
                         AddMolar(index_H2_, +0.5 * R_OH / this->Nav_kmol_);
                 }
 
-                // Capture oxidation-only gas contribution (before closure).
                 omega_gas_oxidation_ = this->omega_gas_ - omega_snap_before_ox;
             }
         }
     }
 
-    // 4. Dummy species closure (mass-fraction conservation)
+    // Dummy species closure for gas-phase mass conservation.
     if (this->is_closure_dummy_species_)
     {
-        // dummy_index_ must be set during setup — a negative value is a programming error.
         assert(this->closure_dummy_index_ >= 0 && "[ThreeEquations::CalculateOmegaGas] dummy_index_ not set.");
         double sum = 0.;
         for (int i = 0; i < nsp; ++i)
@@ -1068,12 +976,8 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateOmegaGas() noe
     }
 }
 
-// ============================================================================
-// PrintSummary
-// ============================================================================
 template <ThermoMap Thermo> void ThreeEquations<Thermo>::PrintSummary() const
 {
-    // Helper lambdas — no heap allocation, resolved at compile time
     const auto surf_chem_str = [](SurfaceChemistryModel m) -> const char* {
         switch (m) {
             case SurfaceChemistryModel::RCPAH: return "RCPAH (Franzelli 2019)";
@@ -1182,26 +1086,19 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::PrintSummary() const
         << "------------------------------------------------------------------------------------------\n";
 }
 
-// ============================================================================
-// ApplyConfig  (private — all parameter assignments, no I/O)
-// ============================================================================
-
 template <ThermoMap Thermo>
 void ThreeEquations<Thermo>::ApplyConfig(const Config& cfg)
 {
     this->is_active_ = cfg.is_active;
 
-    // -- Particle properties (set BEFORE SetPAH so Precalculations() uses  --
-    //    the correct density when computing PAH geometry)  ------------------
+    // Density must be set before PAH-derived geometry is computed.
     this->SetParticleDensity(cfg.soot_density_kg_m3);
 
-    // -- PAH / gas setup ---------------------------------------------------
     this->is_simplified_pah_mass_ = cfg.simplified_pah_mass;
-    SetPAH(cfg.pah_species);  // calls Precalculations() — needs rho_particle_ set above
+    SetPAH(cfg.pah_species);
     this->SetGasConsumption(cfg.gas_consumption);
     this->SetGasClosureDummySpecies(cfg.gas_closure_dummy_species);
 
-    // -- Process models ----------------------------------------------------
     SetNucleation(cfg.nucleation_model);
     SetSurfaceGrowth(cfg.surface_growth_model);
     SetOxidation(cfg.oxidation_model);
@@ -1210,13 +1107,11 @@ void ThreeEquations<Thermo>::ApplyConfig(const Config& cfg)
     this->SetThermophoreticModel(cfg.thermophoretic_model);
     SetSurfaceChemistryModel(cfg.surface_chemistry_model);
 
-    // -- Collision enhancement factors -------------------------------------
     SetNucleationCollisionEnhancementFactor(cfg.eps_nucleation);
     SetCondensationCollisionEnhancementFactor(cfg.eps_condensation);
     SetCoagulationCollisionEnhancementFactor(cfg.eps_coagulation);
     SetCorrectionCoefficientPAHPAH(cfg.correction_coeff_pah_pah);
 
-    // -- Dimer model -------------------------------------------------------
     if (cfg.dimer_model == "qssa-rodrigues")
         dimer_concentration_model_ = DimerModel::QSSA_Rodrigues;
     else
@@ -1224,25 +1119,17 @@ void ThreeEquations<Thermo>::ApplyConfig(const Config& cfg)
             "ThreeEquations::ApplyConfig: unknown dimer_model \"" + cfg.dimer_model +
             "\" — allowed: qssa-rodrigues");
 
-    // -- Numerical floor ---------------------------------------------------
     SetNsMinimum(cfg.ns_minimum_per_m3);
 
-    // -- Sticking coefficient ----------------------------------------------
     SetStickingCoefficientModel(cfg.sticking_model);
     SetStickingCoefficientConstant(cfg.sticking_coeff_constant);
 
-    // -- Radiation / transport ---------------------------------------------
     this->SetRadiativeHeatTransfer(cfg.radiative_heat_transfer);
     this->SetPlanckAbsorptionCoefficient(cfg.planck_coefficient);
     this->SetSchmidtNumber(cfg.schmidt_number);
 
-    // -- Debug mode --------------------------------------------------------
     this->is_debug_mode_ = cfg.debug_mode;
 }
-
-// ============================================================================
-// SetupFromConfig  (public — delegates to ApplyConfig, then prints summary)
-// ============================================================================
 
 template <ThermoMap Thermo>
 void ThreeEquations<Thermo>::SetupFromConfig(const Config& cfg)
@@ -1250,10 +1137,6 @@ void ThreeEquations<Thermo>::SetupFromConfig(const Config& cfg)
     ApplyConfig(cfg);
     PrintSummary();
 }
-
-// ============================================================================
-// NDF reconstruction  (Franzelli et al. 2019: Pareto + log-normal)
-// ============================================================================
 
 template <ThermoMap Thermo>
 typename ThreeEquations<Thermo>::NDFReconstructionData ThreeEquations<Thermo>::ReconstructedNDFData(
@@ -1394,22 +1277,11 @@ void ThreeEquations<Thermo>::ReconstructedNDF(const Eigen::VectorXd& nu,
 }
 
 #if defined(MOM_USE_DICTIONARY)
-// ============================================================================
-// ParseConfig — OpenSMOKE++ dictionary → ThreeEquations::Config
-// ============================================================================
-
 template <ThermoMap Thermo>
 template <typename DictType>
 std::expected<typename ThreeEquations<Thermo>::Config, std::string>
 ThreeEquations<Thermo>::ParseConfig(DictType& dict)
 {
-    // SetGrammar validates the dictionary against the grammar rules defined in
-    // ThreeEquations_Grammar::DefineRules().  On any violation (missing
-    // mandatory keyword, unknown keyword, duplicate, conflicting keyword) it
-    // calls Dictionary::ErrorMessage() which throws std::runtime_error.
-    // That exception is intentionally NOT caught here so it propagates to the
-    // caller and stops the simulation — silently continuing with default values
-    // when the input file is malformed is never acceptable.
     ThreeEquations_Grammar grammar;
     dict.SetGrammar(grammar);
 

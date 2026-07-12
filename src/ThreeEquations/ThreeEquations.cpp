@@ -33,5 +33,7 @@
 |                                                                         |
 \*-----------------------------------------------------------------------*/
 
-// Superseded by ThreeEquations_BasicThermoData.cpp and ThreeEquations_OpenSMOKEThermo.cpp
-// This file is intentionally empty. Do not add to CMakeLists sources.
+/**
+ * @file ThreeEquations.cpp
+ * @brief Reserved translation unit for optional non-template ThreeEquations definitions.
+ */

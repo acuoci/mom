@@ -35,20 +35,21 @@
 
 #include "ThreeEquations/ThreeEquations_Grammar.h"
 
+/**
+ * @file ThreeEquations_Grammar.cpp
+ * @brief Dictionary keyword registration for ThreeEquations configuration.
+ */
+
 namespace MOM
 {
 void ThreeEquations_Grammar::DefineRules()
 {
-
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord("@ThreeEquations",
                                               OpenSMOKEpp::SINGLE_BOOL,
                                               "Three equations model: on/off (default: true)",
                                               true));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // Soot models
-    // ----------------------------------------------------------------------------------------------------------- //
-
+    // Process and transport model switches.
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord("@NucleationModel",
                                               OpenSMOKEpp::SINGLE_INT,
                                               "Nucleation model: 0=off, 1=on (default: 1)",
@@ -84,10 +85,7 @@ void ThreeEquations_Grammar::DefineRules()
                                               "Surface chemistry model (RC-PAH (default) | HMOM)",
                                               false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // PAHs
-    // ----------------------------------------------------------------------------------------------------------- //
-
+    // PAH precursor and gas coupling.
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord("@PAH",
                                               OpenSMOKEpp::SINGLE_STRING,
                                               "Species to be assumed as PAH (example: @PAH C10H8;)",
@@ -105,10 +103,7 @@ void ThreeEquations_Grammar::DefineRules()
                                        "Consumption of gaseous species is accounted for (default: true)",
                                        true));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // Additional sub-models
-    // ----------------------------------------------------------------------------------------------------------- //
-
+    // Radiation and transport options.
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord("@RadiativeHeatTransfer",
                                               OpenSMOKEpp::SINGLE_BOOL,
                                               "Radiative heat transfer (default: true)",
@@ -123,10 +118,7 @@ void ThreeEquations_Grammar::DefineRules()
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@SchmidtNumber", OpenSMOKEpp::SINGLE_DOUBLE, "Schmidt number (default: 50)", false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // Soot properties
-    // ----------------------------------------------------------------------------------------------------------- //
-
+    // Soot material properties.
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord("@SootDensity",
                                               OpenSMOKEpp::SINGLE_MEASURE,
                                               "Density of soot particles (default: 1800 kg/m3)",
@@ -138,10 +130,7 @@ void ThreeEquations_Grammar::DefineRules()
         "Simplified calculation of PAH mass, based on C atoms only (default: false)",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // Collision enhancement factors
-    // ----------------------------------------------------------------------------------------------------------- //
-
+    // Collision enhancement factors.
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord("@epsNucleation",
                                               OpenSMOKEpp::SINGLE_DOUBLE,
                                               "Collision enhancement factor for nucleation",
@@ -163,29 +152,20 @@ void ThreeEquations_Grammar::DefineRules()
         "Correction coefficient for PAH-PAH nucleation kernel (from HMOM, default: 4.4)",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // Minimum values for properties calculation
-    // ----------------------------------------------------------------------------------------------------------- //
-
+    // Numerical floor for regularized property calculation.
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@MinimumNs",
         OpenSMOKEpp::SINGLE_MEASURE,
         "Minimum Ns for the calculation of soot properties (default: 1e6 #/m3)",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // Dimer model
-    // ----------------------------------------------------------------------------------------------------------- //
-
+    // Dimer concentration model.
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord("@DimerModel",
                                               OpenSMOKEpp::SINGLE_STRING,
                                               "Dimer concentration model (qssa-rodrigues)",
                                               false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // Sticking coefficient
-    // ----------------------------------------------------------------------------------------------------------- //
-
+    // Sticking coefficient.
     AddKeyWord(
         OpenSMOKEpp::DictionaryKeyWord("@StickingCoefficientModel",
                                        OpenSMOKEpp::SINGLE_STRING,
@@ -198,10 +178,7 @@ void ThreeEquations_Grammar::DefineRules()
         "Sticking coefficient constant, dimensionless in case of constant (default 2e-3), in kmol4/kg4 in case of pah-dependent (default 1.5e-11)",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // Debug mode
-    // ----------------------------------------------------------------------------------------------------------- //
-
+    // Diagnostics.
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@DebugMode", OpenSMOKEpp::SINGLE_BOOL, "Debug mode (default: false)", false));
 }
