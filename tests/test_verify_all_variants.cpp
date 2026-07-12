@@ -217,7 +217,7 @@ static bool verifyVariant(Model& model,
     bool ok                = true;
     std::vector<CheckResult> results;
 
-    model.CalculateSourceMoments();
+    model.ComputeSources();
 
     auto src_all = model.sources();
     auto src_nuc = model.sources_nucleation();
@@ -429,7 +429,7 @@ static bool validateAnyMomentMethodAccessors(const MOM::BasicThermoData& th)
     auto model = MOM::MakeAnyMomentMethod<MOM::BasicThermoData>(th, "ThreeEquations");
 
     const auto initial = MOM::GetInitialMoments(model);
-    const bool closure_active = MOM::GetClosureDummySpeciesIsActive(model);
+    const bool closure_active = MOM::HasClosureDummySpecies(model);
     const int closure_index = MOM::GetClosureDummyIndex(model);
     const int precursor_index = MOM::GetPrecursorIndex(model);
 
@@ -509,7 +509,8 @@ static bool validateBrookesMossHallSpeciesValidation()
         MOM::BrookesMoss<MOM::BasicThermoData> model(th);
         model.SetNucleation("BrookesMossHall");
         model.SetOxidation("BrookesMossHall");
-        configured_names_ok = model.nucleation_model() == 2 && model.oxidation_model() == 2;
+        configured_names_ok = model.nucleation_model() == MOM::NucleationModel::Extended
+                           && model.oxidation_model() == MOM::OxidationModel::Extended;
     }
     catch (const std::runtime_error&)
     {
@@ -623,16 +624,16 @@ static bool validateBrookesMossHallConfigDefaults()
 
         MOM::BrookesMoss<MOM::BasicThermoData> from_config(th);
         from_config.SetupFromConfig(cfg);
-        from_config.SetStatus(1800., 101325., Y.data());
+        from_config.SetState(1800., 101325., Y.data());
         from_config.SetMoments(1.e-11, 1.e-2);
-        from_config.CalculateSourceMoments();
+        from_config.ComputeSources();
 
         MOM::BrookesMoss<MOM::BasicThermoData> from_setters(th);
         from_setters.SetNucleation("BrookesMossHall");
         from_setters.SetOxidation("BrookesMossHall");
-        from_setters.SetStatus(1800., 101325., Y.data());
+        from_setters.SetState(1800., 101325., Y.data());
         from_setters.SetMoments(1.e-11, 1.e-2);
-        from_setters.CalculateSourceMoments();
+        from_setters.ComputeSources();
 
         const auto a = from_config.sources();
         const auto b = from_setters.sources();
@@ -831,9 +832,9 @@ static bool validateHMOMGasConsumptionDisableClearsOutput()
         model.SetCondensation(1);
         model.SetSurfaceGrowth(1);
         model.SetOxidation(1);
-        model.SetStatus(1800., 101325., Y.data());
+        model.SetState(1800., 101325., Y.data());
         model.SetMoments(model.initial_moments());
-        model.CalculateSourceMoments();
+        model.ComputeSources();
 
         const auto gas_enabled = model.omega_gas();
         produced_gas_sources =
@@ -844,7 +845,7 @@ static bool validateHMOMGasConsumptionDisableClearsOutput()
         cleared_on_disable = std::all_of(
             gas_disabled.begin(), gas_disabled.end(), [](double v) { return v == 0.; });
 
-        model.CalculateSourceMoments();
+        model.ComputeSources();
         const auto gas_after_calculation = model.omega_gas();
         stayed_clear_after_calculation =
             std::all_of(gas_after_calculation.begin(),
@@ -919,7 +920,7 @@ int main()
         model.SetSurfaceGrowth(1);
         model.SetOxidation(1);
         model.SetViscosity(mu);
-        model.SetStatus(T_soot, P_atm, Y_soot.data());
+        model.SetState(T_soot, P_atm, Y_soot.data());
         // Use initial_moments() so all floors are satisfied
         auto ic = model.initial_moments();
         model.SetMoments(ic);
@@ -954,7 +955,7 @@ int main()
         model.SetSurfaceGrowth(1);
         model.SetOxidation(1);
         model.SetViscosity(mu);
-        model.SetStatus(T_soot, P_atm, Y_soot.data());
+        model.SetState(T_soot, P_atm, Y_soot.data());
         auto ic = model.initial_moments();
         // Scale up from floor so all processes are active
         model.SetMoments(ic[0] * 1e5, ic[1] * 1e5, ic[2] * 1e5);
@@ -988,7 +989,7 @@ int main()
         model.SetSurfaceGrowth(1);
         model.SetOxidation(1);
         model.SetViscosity(mu);
-        model.SetStatus(T_soot, P_atm, Y_soot.data());
+        model.SetState(T_soot, P_atm, Y_soot.data());
         auto ic = model.initial_moments();
         model.SetMoments(ic[0] * 1e10, ic[1] * 1e10);
 
@@ -1027,7 +1028,7 @@ int main()
         model.SetCondensation(1);
         model.SetSintering(1);
         model.SetViscosity(mu);
-        model.SetStatus(T_metaloxide, P_atm, Y_metaloxide.data());
+        model.SetState(T_metaloxide, P_atm, Y_metaloxide.data());
         auto ic = model.initial_moments();
         // Use well-above-floor values: 1e12 #/m3 particles, fv~1e-6
         model.SetMoments(ic[0] * 1e6, ic[1] * 1e6, ic[2] * 1e6);

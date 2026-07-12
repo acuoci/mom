@@ -114,8 +114,8 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::MemoryAllocation()
 template <ThermoMap Thermo> void MetalOxide<Thermo>::Precalculations()
 {
     v0_ = static_cast<double>(n_formula_units_min_) * solid_formula_unit_volume_m3_;
-    d0_ = std::pow(6. * v0_ / this->pi_, 1. / 3.);
-    s0_ = this->pi_ * d0_ * d0_;
+    d0_ = this->SphereDiameter(v0_);
+    s0_ = this->SphereSurface(d0_);
 
     v_min_ = v0_;
     S_min_ = N_min_ * s0_;
@@ -193,11 +193,11 @@ void MetalOxide<Thermo>::SetMinimumNumberOfFormulaUnits(unsigned n)
 }
 
 // ============================================================================
-// SetStatus  — injects thermodynamic state from the CFD solver
+// SetState  — injects thermodynamic state from the CFD solver
 // ============================================================================
 
 template <ThermoMap Thermo>
-void MetalOxide<Thermo>::SetStatus(double T, double P_Pa, const double* Y) noexcept
+void MetalOxide<Thermo>::SetState(double T, double P_Pa, const double* Y) noexcept
 {
     const double cTot = this->template UpdateMixtureState<>(T, P_Pa, Y, thermo_);
 
@@ -266,7 +266,7 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::SetPrecursor(std::string_vi
     m_precursor_   = W_precursor_ / this->Nav_kmol_;
 
     v_precursor_ = m_precursor_ / solid_density_kg_m3_;
-    d_precursor_ = std::pow(6. * v_precursor_ / this->pi_, 1. / 3.);
+    d_precursor_ = this->SphereDiameter(v_precursor_);
 
     // Effective collision geometry used by nucleation/condensation kernels:
     // volume contribution = configured solid formula units per precursor.
@@ -435,7 +435,7 @@ void MetalOxide<Thermo>::Properties(double& fv,
     vs = std::max(fvStar / NStar, v_min_);
 
     // Spherical surface area for a particle of volume vs [m2]
-    ssph = std::pow(36. * this->pi_, 1. / 3.) * std::pow(vs, 2. / 3.);
+    ssph = this->SphereSurfaceFromVolume(vs);
 
     // Specific surface per particle [m2]
     const double SStar = std::max(S, S_min_);
@@ -443,7 +443,7 @@ void MetalOxide<Thermo>::Properties(double& fv,
 
     // Sphere-equivalent aggregate diameter [m]
     // (diameter of a sphere whose volume equals the aggregate volume)
-    da = std::pow(6. * vs / this->pi_, 1. / 3.);
+    da = this->SphereDiameter(vs);
     da = std::max(da, d0_);
 
     // Primary particle diameter [m]
@@ -452,7 +452,7 @@ void MetalOxide<Thermo>::Properties(double& fv,
     dp = std::max(dp, d0_);
 
     // Number of primary particles per aggregate [-]
-    np = std::max(std::pow(ss, 3.) / std::pow(vs, 2.) / (36. * this->pi_), 1.);
+    np = this->NumberPrimaryParticles(ss, vs);
 
     // Collision diameter — fractal aggregate (Df = 1.8) [m]
     // dc = dp * np^(1/Df). For np = 1 (sphere) this reduces to dc = dp.
@@ -484,7 +484,7 @@ template <ThermoMap Thermo> double MetalOxide<Thermo>::particle_number_density()
     return std::max(scaled_number_density_ * N0_scaling_, 0.);
 }
 
-template <ThermoMap Thermo> double MetalOxide<Thermo>::specific_surface() const noexcept
+template <ThermoMap Thermo> double MetalOxide<Thermo>::specific_surface_area() const noexcept
 {
     return std::max(surface_area_concentration_, 0.);
 }
@@ -531,13 +531,8 @@ template <ThermoMap Thermo> double MetalOxide<Thermo>::diffusion_coefficient() c
     double fv, dp, dc, da, np, ss, vs, ssph, tauS;
     Properties(fv, dp, dc, da, np, ss, vs, ssph, tauS);
 
-    const double dcSafe = std::max(dc, d0_);
-    const double mGas   = this->rho_ * this->kB_ * this->T_ / this->P_Pa_;
-    const double lambdaGas =
-        this->mu_ / this->rho_ * std::sqrt(this->pi_ * mGas / (2. * this->kB_ * this->T_));
-    const double Cu            = 1. + 2.154 * lambdaGas / dcSafe;
-    const double D             = this->kB_ * this->T_ * Cu / (3. * this->pi_ * this->mu_ * dcSafe);
-    const double GammaBrownian = this->rho_ * D;
+    const double dc_safe       = std::max(dc, d0_);    // d0_: nucleation cluster diameter
+    const double GammaBrownian = this->CunninghamDiffusionCoeff(dc_safe); // [kg/m/s]
     const double GammaSc       = this->mu_ / this->schmidt_number_;
     return std::max(GammaBrownian, GammaSc);
 }
@@ -617,7 +612,7 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::NucleationSourceTerms_Fixed
         return;
 
     const double v_cluster = static_cast<double>(n0_) * solid_formula_unit_volume_m3_;
-    const double d_cluster    = std::pow(6. * v_cluster / this->pi_, 1. / 3.);
+    const double d_cluster = this->SphereDiameter(v_cluster);
 
     // Precursor number density [#/m3]
     const double Nprec = c_precursor_ * this->Nav_kmol_;
@@ -819,10 +814,10 @@ template <ThermoMap Thermo> double MetalOxide<Thermo>::SinteringDeferredUpdate(d
 }
 
 // ============================================================================
-// CalculateSourceMoments  — master entry point
+// ComputeSources  — master entry point
 // ============================================================================
 
-template <ThermoMap Thermo> void MetalOxide<Thermo>::CalculateSourceMoments() noexcept
+template <ThermoMap Thermo> void MetalOxide<Thermo>::ComputeSources() noexcept
 {
     this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by MetalOxide — must be zeroed before early return
@@ -1038,7 +1033,7 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::PrintSummary() const
         << "\n"
         << " [Transport & radiation]\n"
         << "    + Schmidt number (-):            " << this->schmidt_number_ << "\n"
-        << "    + Thermophoretic model:          " << this->thermophoretic_model() << "  (" << thermo_str(this->thermophoretic_model_) << ")\n"
+        << "    + Thermophoretic model:          " << static_cast<int>(this->thermophoretic_model()) << "  (" << thermo_str(this->thermophoretic_model_) << ")\n"
         << "    + Gas consumption:               " << (this->gas_consumption_ ? "yes" : "no") << "\n"
         << "    + Radiative heat transfer:       " << (this->radiative_heat_transfer_ ? "yes" : "no") << "\n"
         << "    + Planck coeff. model:           " << static_cast<int>(this->planck_model_) << "  (" << planck_str(this->planck_model_) << ")\n"

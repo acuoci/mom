@@ -264,7 +264,7 @@ public:
      * @brief Constructs HMOM bound to the given thermodynamics map.
      *
      * Does not allocate computational memory.  Call `SetupFromConfig()` or
-     * the individual `Set*` methods, then call `CalculateSourceMoments()` each
+     * the individual `Set*` methods, then call `ComputeSources()` each
      * cell iteration.
      *
      * @param thermo  Const reference to the thermodynamics map (must outlive this object).
@@ -322,7 +322,7 @@ public:
      * @param P_Pa Gas pressure [Pa].
      * @param Y    Species mass fractions (pointer, size = `thermo.NumberOfSpecies()`).
      */
-    void SetStatus(double T, double P_Pa, const double* Y) noexcept;
+    void SetState(double T, double P_Pa, const double* Y) noexcept;
 
     /**
      * @brief Set moment values via a generic span (satisfies MomentMethod concept).
@@ -350,15 +350,15 @@ public:
      *
      * Updates `source_all_`, `source_nucleation_`, `source_growth_`,
      * `source_oxidation_`, `source_condensation_`, the nine coagulation
-     * sub-vectors, and `omega_gas_`.  Must be called after `SetStatus()`
+     * sub-vectors, and `omega_gas_`.  Must be called after `SetState()`
      * and `SetMoments()` each cell iteration.
      */
-    void CalculateSourceMoments() noexcept;
+    void ComputeSources() noexcept;
 
     /**
      * @brief Compute only the gas-phase consumption terms (`omega_gas_`).
      *
-     * Called internally by `CalculateSourceMoments()`.  Exposed separately for
+     * Called internally by `ComputeSources()`.  Exposed separately for
      * operator-split solvers where source terms are already known and only gas
      * coupling needs to be updated.
      */
@@ -382,7 +382,7 @@ public:
     [[nodiscard]] double mass_fraction() const noexcept;
 
     /** @brief Soot specific surface area Ss = M01 [m2/m3]. */
-    [[nodiscard]] double specific_surface() const noexcept;
+    [[nodiscard]] double specific_surface_area() const noexcept;
 
     /** @brief Mean number of primary particles per aggregate np [-]. */
     [[nodiscard]] double number_primary_particles() const noexcept;
@@ -483,7 +483,7 @@ public:
      * Detailed decomposition of coagulation into discrete (small–small,
      * small–large, large–large) and continuous contributions.
      * All returned spans have size = n_equations and are valid after
-     * `CalculateSourceMoments()`.
+     * `ComputeSources()`.
      * @{
      */
 
@@ -521,7 +521,7 @@ public:
      * Node 0 = small (nucleation) mode; Node 1 = large (growth/coagulation) mode.
      * See Mueller et al. (2009), §3.2.
      *
-     * @return Array of two NDFNode structs, valid after `CalculateSourceMoments()`.
+     * @return Array of two NDFNode structs, valid after `ComputeSources()`.
      */
     [[nodiscard]] std::array<NDFNode, 2> NumberDensityFunctionNodes() const;
 
@@ -536,7 +536,7 @@ public:
      * mathematical specification.
      *
      * @par Precondition
-     * Should be called after CalculateSourceMoments() so that N0_, NL_, NLVL_
+     * Should be called after ComputeSources() so that N0_, NL_, NLVL_
      * reflect the current transported moments.
      *
      * @param use_regularized_moments  If true, applies a floor @c kTinyNumberDensity
@@ -673,7 +673,7 @@ public:
      * private member access.
      *
      * All spans have size = `n_equations` and are valid after
-     * `CalculateSourceMoments()` has been called.
+     * `ComputeSources()` has been called.
      */
     struct CoagulationDetail
     {
@@ -691,7 +691,7 @@ public:
     /**
      * @brief Returns zero-copy spans into all nine HMOM coagulation sub-vectors.
      *
-     * @note Valid only after `CalculateSourceMoments()` has been called.
+     * @note Valid only after `ComputeSources()` has been called.
      * @return CoagulationDetail bundle; all spans have size = `n_equations`.
      */
     [[nodiscard]] CoagulationDetail coagulation_detail() const noexcept
@@ -789,9 +789,9 @@ public:
     void ndf_extra_output(CB&& cb) const
     {
         const auto   d       = ReconstructedNDFData();
-        const double dp0_nm  = std::pow(6. * d.V0 / this->pi_, 1. / 3.) * 1.e9;
+        const double dp0_nm  = this->SphereDiameter(d.V0) * 1.e9;
         const double dpL_nm  = (d.NL > kSootNumberFloor && d.VL > 0.)
-                                   ? std::pow(6. * d.VL / this->pi_, 1. / 3.) * 1.e9
+                                   ? this->SphereDiameter(d.VL) * 1.e9
                                    : 0.;
         cb("N0[#/m3]",     d.N0);
         cb("V0[m3/#]",     d.V0);
@@ -978,15 +978,15 @@ public:
 
     // -- Model state queries ---------------------------------------------------
 
-    [[nodiscard]] int nucleation_model() const noexcept { return nucleation_model_; }
+    [[nodiscard]] NucleationModel    nucleation_model()    const noexcept { return static_cast<NucleationModel>(nucleation_model_);         }
 
-    [[nodiscard]] int surface_growth_model() const noexcept { return surface_growth_model_; }
+    [[nodiscard]] SurfaceGrowthModel surface_growth_model() const noexcept { return static_cast<SurfaceGrowthModel>(surface_growth_model_); }
 
-    [[nodiscard]] int condensation_model() const noexcept { return condensation_model_; }
+    [[nodiscard]] CondensationModel  condensation_model()  const noexcept { return static_cast<CondensationModel>(condensation_model_);     }
 
-    [[nodiscard]] int oxidation_model() const noexcept { return oxidation_model_; }
+    [[nodiscard]] OxidationModel     oxidation_model()     const noexcept { return static_cast<OxidationModel>(oxidation_model_);           }
 
-    [[nodiscard]] int coagulation_model() const noexcept { return coagulation_model_; }
+    [[nodiscard]] CoagulationModel   coagulation_model()   const noexcept { return static_cast<CoagulationModel>(coagulation_model_);       }
 
     [[nodiscard]] int continuous_coagulation_model() const noexcept
     {
@@ -1018,9 +1018,9 @@ private:
     void SootCoagulationSmallLargeM4();
     void SootCoagulationLargeLargeM4();
     void SootCoagulationContinuousM4();
-    void SootCoagulationContinuousSmallSmallM4(double lambda);
-    void SootCoagulationContinuousSmallLargeM4(double lambda);
-    void SootCoagulationContinuousLargeLargeM4(double lambda);
+    void SootCoagulationContinuousSmallSmallM4(double lambda, double betai0);
+    void SootCoagulationContinuousSmallLargeM4(double lambda, double betai0);
+    void SootCoagulationContinuousLargeLargeM4(double lambda, double betai0);
     void CalculateAlphaCoefficient();
 
     [[nodiscard]] double GetMoment(double i, double j) const noexcept;

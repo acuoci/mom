@@ -63,11 +63,14 @@ inline double SmoothHeaviside(double x, double eps) noexcept
     return 0.5 * (1.0 + std::tanh(x / epsSafe));
 }
 
+// Gas constant [J/mol/K] — equals MomentMethodBase::Rgas_mol_ (= Rgas_ / 1000).
+// Used here by the non-member Arrhenius_cgs helper; member functions access this->Rgas_mol_.
+static constexpr double kRgas_mol = 8.31446261815324;
+
 /// Arrhenius rate in CGS: A in [cm3/mol/s] or [1/s], E in [J/mol].
 inline double Arrhenius_cgs(double A, double n, double E_J_mol, double T) noexcept
 {
-    static constexpr double R_J_mol = 8.31446261815324;
-    return A * std::pow(T, n) * std::exp(-E_J_mol / (R_J_mol * T));
+    return A * std::pow(T, n) * std::exp(-E_J_mol / (kRgas_mol * T));
 }
 
 template <ThermoMap Thermo>
@@ -91,7 +94,7 @@ int RequireSpeciesIndexThreeEquations(const Thermo& thermo,
 template <ThermoMap Thermo>
 ThreeEquations<Thermo>::ThreeEquations(const Thermo& thermo) : thermo_(thermo)
 {
-    // -- Species indices for SetStatus / HACA kinetics ---------------------
+    // -- Species indices for SetState / HACA kinetics ---------------------
     // Required species: throws at construction if absent (ThreeEquations
     // cannot function without H, OH, O2, H2, H2O, C2H2).
     index_H_    = RequireSpeciesIndexThreeEquations(thermo_, "H",    "constructor");
@@ -150,24 +153,24 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::Precalculations()
         mwpah_ = ncpah_ * this->WC_;
 
     vpah_ = mwpah_ / rho_soot / this->Nav_kmol_;       // [m3]
-    dpah_ = std::pow(6. / this->pi_ * vpah_, 1. / 3.); // [m]
-    spah_ = this->pi_ * dpah_ * dpah_;                 // [m2]
+    dpah_ = this->SphereDiameter(vpah_);               // [m]
+    spah_ = this->SphereSurface(dpah_);                // [m2]
     mpah_ = mwpah_ / this->Nav_kmol_;                  // [kg/#]
 
     // -- Dimer geometry ----------------------------------------------------
     vdim_ = 2. * vpah_;
-    ddim_ = std::pow(6. / this->pi_ * vdim_, 1. / 3.);
-    sdim_ = this->pi_ * ddim_ * ddim_;
+    ddim_ = this->SphereDiameter(vdim_);
+    sdim_ = this->SphereSurface(ddim_);
 
     // -- Nucleus geometry  (dimer + dimer) ---------------------------------
     vnucl_ = 2. * vdim_;
-    dnucl_ = std::pow(6. / this->pi_ * vnucl_, 1. / 3.);
-    snucl_ = this->pi_ * dnucl_ * dnucl_;
+    dnucl_ = this->SphereDiameter(vnucl_);
+    snucl_ = this->SphereSurface(dnucl_);
 
     // -- C2 pair geometry --------------------------------------------------
     vc2_ = (this->WC_ / rho_soot / this->Nav_kmol_) * 2.;
-    dc2_ = std::pow(6. / this->pi_ * vc2_, 1. / 3.);
-    sc2_ = this->pi_ * dc2_ * dc2_;
+    dc2_ = this->SphereDiameter(vc2_);
+    sc2_ = this->SphereSurface(dc2_);
 
     // -- Numerical floors --------------------------------------------------
     vs_min_ = vnucl_;
@@ -260,11 +263,11 @@ void ThreeEquations<Thermo>::SetStickingCoefficientModel(std::string_view label)
 }
 
 // ============================================================================
-// SetStatus  — injects thermodynamic state from the CFD solver
+// SetState  — injects thermodynamic state from the CFD solver
 // ============================================================================
 
 template <ThermoMap Thermo>
-void ThreeEquations<Thermo>::SetStatus(double T, double P_Pa, const double* Y) noexcept
+void ThreeEquations<Thermo>::SetState(double T, double P_Pa, const double* Y) noexcept
 {
     // Gas constant: R [J/kmol/K] = kB * Nav_kmol
     const double R_J_kmol = this->kB_ * this->Nav_kmol_;
@@ -340,10 +343,10 @@ void ThreeEquations<Thermo>::Properties(
     fv = this->rho_ / this->rho_particle_ * YsStar; // [-]
     vs = std::max(fv / NsStar, vs_min_);            // [m3]
 
-    const double s_sphere = std::pow(36.0 * this->pi_, 1.0 / 3.0) * std::pow(vs, 2.0 / 3.0); // [m2]
+    const double s_sphere = this->SphereSurfaceFromVolume(vs);                              // [m2]
     ss                    = std::max(SsStar / NsStar, s_sphere);                             // [m2]
     dp                    = 6. * vs / ss;                                                    // [m]
-    np = std::max(std::pow(ss, 3.) / std::pow(vs, 2.) / (36. * this->pi_), 1.);              // [-]
+    np                    = this->NumberPrimaryParticles(ss, vs);                            // [-]
     dc = dp * std::pow(np, 1. / Df_);                                                        // [m]
 }
 
@@ -362,7 +365,7 @@ template <ThermoMap Thermo> double ThreeEquations<Thermo>::particle_number_densi
     return std::max(NsNorm_ * N0_scaling_, 0.);
 }
 
-template <ThermoMap Thermo> double ThreeEquations<Thermo>::specific_surface() const noexcept
+template <ThermoMap Thermo> double ThreeEquations<Thermo>::specific_surface_area() const noexcept
 {
     return std::max(Ss_, 0.);
 }
@@ -393,16 +396,10 @@ template <ThermoMap Thermo> double ThreeEquations<Thermo>::diffusion_coefficient
     double fv, dp, dc, np, ss, vs;
     Properties(fv, dp, dc, np, ss, vs);
 
-    const double m_mol = this->rho_ * this->kB_ * this->T_ / this->P_Pa_; // [kg] mean molecule mass
-    const double lambdaGas =
-        this->mu_ / this->rho_ * std::sqrt(this->pi_ * m_mol / (2. * this->kB_ * this->T_)); // [m]
-    const double dcSafe = std::max(dc, 1.e-12);
-    const double Cu     = 1. + 2.154 * lambdaGas / dcSafe;
-
-    const double D = this->kB_ * this->T_ * Cu / (3. * this->pi_ * this->mu_ * dcSafe); // [m2/s]
-    const double GammaBrownian = this->rho_ * D;
+    const double dc_safe       = std::max(dc, 1.e-12);
+    const double GammaBrownian = this->CunninghamDiffusionCoeff(dc_safe); // [kg/m/s]
     const double GammaSc       = this->mu_ / this->schmidt_number_;
-    return std::max(GammaBrownian, GammaSc); // [kg/m/s]
+    return std::max(GammaBrownian, GammaSc);
 }
 
 // ============================================================================
@@ -540,8 +537,7 @@ typename ThreeEquations<Thermo>::SurfaceKineticsRates ThreeEquations<Thermo>::Ki
     // OH oxidation collision rate [1/s]
     const double surface_c2_cm2 = sc2_ * 1.e4;
     const double MW_OH_kg_mol   = thermo_.MolecularWeight(static_cast<unsigned>(index_OH_)) / 1000.;
-    const double R_J_mol        = 8.31446261815324;
-    const double mean_OH_m_s    = std::sqrt(8. * R_J_mol * this->T_ / (this->pi_ * MW_OH_kg_mol));
+    const double mean_OH_m_s    = std::sqrt(8. * this->Rgas_mol_ * this->T_ / (this->pi_ * MW_OH_kg_mol));
     const double r07f =
         std::max(small, 0.25 * this->Nav_mol_ * surface_c2_cm2 * 0.13 * (mean_OH_m_s * 100.) * cOH);
 
@@ -908,10 +904,10 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::OxidationSourceTerms()
 }
 
 // ============================================================================
-// CalculateSourceMoments  — master entry point
+// ComputeSources  — master entry point
 // ============================================================================
 
-template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateSourceMoments() noexcept
+template <ThermoMap Thermo> void ThreeEquations<Thermo>::ComputeSources() noexcept
 {
     this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by ThreeEquations — zeroed explicitly
@@ -1168,7 +1164,7 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::PrintSummary() const
         << "\n"
         << " [Transport & radiation]\n"
         << "    + Schmidt number (-):      " << this->schmidt_number_ << "\n"
-        << "    + Thermophoretic model:    " << this->thermophoretic_model() << "  (" << thermo_str(this->thermophoretic_model_) << ")\n"
+        << "    + Thermophoretic model:    " << static_cast<int>(this->thermophoretic_model()) << "  (" << thermo_str(this->thermophoretic_model_) << ")\n"
         << "    + Gas consumption:         " << (this->gas_consumption_ ? "yes" : "no") << "\n"
         << "    + Radiative heat transfer: " << (this->radiative_heat_transfer_ ? "yes" : "no") << "\n"
         << "    + Planck coeff. model:     " << static_cast<int>(this->planck_model_) << "  (" << planck_str(this->planck_model_) << ")\n"

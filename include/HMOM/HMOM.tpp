@@ -52,9 +52,6 @@ namespace MOM
 // ============================================================================
 namespace
 {
-// HMOM uses R in [J/mol/K] for HACA kinetics (stored E are in [K] = E_kJ/mol * 1e3 / R_J_mol)
-constexpr double R_J_mol_HMOM = 8.31446261815324;
-
 // K_diam = (6/pi)^(1/3), K_spher = (36*pi)^(1/3)
 inline double K_diam_HMOM(double pi) noexcept
 {
@@ -118,7 +115,7 @@ inline std::array<double, 4> CollisionGeometry(int model, double pi) noexcept
 
 template <ThermoMap Thermo> HMOM<Thermo>::HMOM(const Thermo& thermo) : thermo_(thermo)
 {
-    // -- Species indices for SetStatus / HACA kinetics (soft lookup: -1 if absent) --
+    // -- Species indices for SetState / HACA kinetics (soft lookup: -1 if absent) --
     index_H_    = thermo_.IndexOfSpecies("H");
     index_OH_   = thermo_.IndexOfSpecies("OH");
     index_O2_   = thermo_.IndexOfSpecies("O2");
@@ -131,7 +128,7 @@ template <ThermoMap Thermo> HMOM<Thermo>::HMOM(const Thermo& thermo) : thermo_(t
     // Config{} is the single source of truth for every numerical constant.
     // ApplyConfig calls Precalculations() after setting rho_particle_ and the
     // geometry-model enums, so Cfm_, betaN_TV_, and K_collisional_ (etc.) are
-    // correctly computed before CalculateSourceMoments() is ever called.
+    // correctly computed before ComputeSources() is ever called.
     ApplyConfig(Config{});
 
     // -- Memory allocation (size depends on thermo_.NumberOfSpecies()) -----
@@ -231,11 +228,9 @@ template <ThermoMap Thermo> void HMOM<Thermo>::SetPAH(std::string_view name)
         mwpah = ncpah * this->WC_;
 
     const auto vpah = mwpah / this->rho_particle_ / this->Nav_kmol_; // [m3]
-    const auto dpah = std::pow(6. / this->pi_ * vpah, 1. / 3.);      // [m]
-    const auto spah = this->pi_ * dpah * dpah;                       // [m2]
+    const auto dpah = this->SphereDiameter(vpah);                    // [m]
+    const auto spah = this->SphereSurface(dpah);                     // [m2]
     const auto mpah = mwpah / this->Nav_kmol_;                       // [kg]
-
-    const double K_spher = K_spher_HMOM(this->pi_);
 
     pah_species_ = std::string(name);
     pah_index_   = pah_index;
@@ -248,9 +243,9 @@ template <ThermoMap Thermo> void HMOM<Thermo>::SetPAH(std::string_view name)
     mpah_        = mpah;
 
     dimer_volume_  = 2. * vpah_;
-    dimer_surface_ = K_spher * std::pow(dimer_volume_, 2. / 3.);
+    dimer_surface_ = this->SphereSurfaceFromVolume(dimer_volume_);
     V0_            = 2. * dimer_volume_;
-    S0_            = K_spher * std::pow(V0_, 2. / 3.);
+    S0_            = this->SphereSurfaceFromVolume(V0_);
     VC2_           = (this->WC_ / this->rho_particle_ / this->Nav_kmol_) * 2.;
 }
 
@@ -299,11 +294,11 @@ template <ThermoMap Thermo> void HMOM<Thermo>::SetStickingCoefficientModel(std::
 }
 
 // ============================================================================
-// SetStatus
+// SetState
 // ============================================================================
 
 template <ThermoMap Thermo>
-void HMOM<Thermo>::SetStatus(double T, double P_Pa, const double* Y) noexcept
+void HMOM<Thermo>::SetState(double T, double P_Pa, const double* Y) noexcept
 {
     const double cTot = this->template UpdateMixtureState<>(
         T, P_Pa, Y, thermo_);
@@ -764,10 +759,9 @@ template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationM4()
 
 template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationSmallSmallM4()
 {
-    const double K_diam  = K_diam_HMOM(this->pi_);
-    const double K_spher = K_spher_HMOM(this->pi_);
-    const double DcNUCL  = K_diam * std::pow(V0_, 1. / 3.);
-    const double S00     = K_spher * std::pow(2. * V0_, 2. / 3.);
+    const double K_diam = K_diam_HMOM(this->pi_);
+    const double DcNUCL = K_diam * std::pow(V0_, 1. / 3.);
+    const double S00    = this->SphereSurfaceFromVolume(2. * V0_);
     const double beta00 =
         2.20 * Cfm_ * std::sqrt(2. / V0_) * std::pow(2. * DcNUCL, 2.) * std::sqrt(this->T_);
 
@@ -869,21 +863,20 @@ template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousM4()
 {
     double lambda = 8.2057e-5 / this->sqrt2_ / std::pow(200.e-12, 2.) / this->Nav_mol_;
     lambda        = 1.257 * lambda * this->T_ / (this->P_Pa_ / 101325.);
+    const double betai0 = 2. * this->kB_ * this->T_ / 3. / this->mu_;
 
-    SootCoagulationContinuousSmallSmallM4(lambda);
-    SootCoagulationContinuousSmallLargeM4(lambda);
-    SootCoagulationContinuousLargeLargeM4(lambda);
+    SootCoagulationContinuousSmallSmallM4(lambda, betai0);
+    SootCoagulationContinuousSmallLargeM4(lambda, betai0);
+    SootCoagulationContinuousLargeLargeM4(lambda, betai0);
 }
 
-template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousSmallSmallM4(double lambda)
+template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousSmallSmallM4(double lambda, double betai0)
 {
-    const double K_diam  = K_diam_HMOM(this->pi_);
-    const double K_spher = K_spher_HMOM(this->pi_);
-    const double DcNUCL  = K_diam * std::pow(V0_, 1. / 3.);
-    const double S00     = K_spher * std::pow(2. * V0_, 2. / 3.);
-    const double CC0     = 1. + lambda / DcNUCL;
-    const double beta00 =
-        2. * this->kB_ * this->T_ / 3. / this->mu_ * (2. * CC0 / DcNUCL) * (2. * DcNUCL);
+    const double K_diam = K_diam_HMOM(this->pi_);
+    const double DcNUCL = K_diam * std::pow(V0_, 1. / 3.);
+    const double S00    = this->SphereSurfaceFromVolume(2. * V0_);
+    const double CC0    = 1. + lambda / DcNUCL;
+    const double beta00 = betai0 * (2. * CC0 / DcNUCL) * (2. * DcNUCL);
 
     source_coagulation_cont_ss_(0) = -0.5 * beta00 * N0_ * N0_ / this->Nav_mol_;
     source_coagulation_cont_ss_(1) = 0.;
@@ -892,11 +885,10 @@ template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousSmallSma
     source_coagulation_cont_ss_(3) = 2. * source_coagulation_cont_ss_(0);
 }
 
-template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousSmallLargeM4(double lambda)
+template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousSmallLargeM4(double lambda, double betai0)
 {
     const double K_diam = K_diam_HMOM(this->pi_);
     const double DcNUCL = K_diam * std::pow(V0_, 1. / 3.);
-    const double betai0 = 2. * this->kB_ * this->T_ / 3. / this->mu_;
 
     source_coagulation_cont_sl_(0) =
         (2. + lambda / DcNUCL) * GetMissingMoment(0., 0.) +
@@ -925,9 +917,8 @@ template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousSmallLar
     source_coagulation_cont_sl_(3) = source_coagulation_cont_sl_(0);
 }
 
-template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousLargeLargeM4(double lambda)
+template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousLargeLargeM4(double lambda, double betai0)
 {
-    const double betai0 = 2. * this->kB_ * this->T_ / 3. / this->mu_;
 
     const double val =
         GetMissingMoment(0., 0.) * GetMissingMoment(0., 0.) +
@@ -945,10 +936,10 @@ template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousLargeLar
 }
 
 // ============================================================================
-// CalculateSourceMoments
+// ComputeSources
 // ============================================================================
 
-template <ThermoMap Thermo> void HMOM<Thermo>::CalculateSourceMoments() noexcept
+template <ThermoMap Thermo> void HMOM<Thermo>::ComputeSources() noexcept
 {
     this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by HMOM — must be zeroed explicitly
@@ -1204,7 +1195,7 @@ template <ThermoMap Thermo> double HMOM<Thermo>::mass_fraction() const noexcept
     return this->rho_particle_ / this->rho_ * volume_fraction();
 }
 
-template <ThermoMap Thermo> double HMOM<Thermo>::specific_surface() const noexcept
+template <ThermoMap Thermo> double HMOM<Thermo>::specific_surface_area() const noexcept
 {
     const double Ss = GetMoment(0., 1.);
     return (!std::isfinite(Ss) || Ss <= 0.) ? 0. : Ss;
@@ -1225,13 +1216,9 @@ template <ThermoMap Thermo> double HMOM<Thermo>::number_primary_particles() cons
 
 template <ThermoMap Thermo> double HMOM<Thermo>::diffusion_coefficient() const noexcept
 {
-    const double m = this->rho_ * this->kB_ * this->T_ / this->P_Pa_;
-    const double lambda =
-        this->mu_ / this->rho_ * std::sqrt(this->pi_ * m / (2. * this->kB_ * this->T_));
-    const double dc = std::max(collision_diameter(), 1.e-12);
-    const double Cu = 1. + 2.154 * lambda / dc;
-    const double D  = this->kB_ * this->T_ * Cu / (3. * this->pi_ * this->mu_ * dc);
-    return std::max(this->rho_ * D, this->mu_ / this->schmidt_number_);
+    const double dc_safe       = std::max(collision_diameter(), 1.e-12);
+    const double GammaBrownian = this->CunninghamDiffusionCoeff(dc_safe);
+    return std::max(GammaBrownian, this->mu_ / this->schmidt_number_);
 }
 
 // ============================================================================
@@ -1574,7 +1561,7 @@ template <ThermoMap Thermo> double HMOM<Thermo>::soot_d63() const noexcept
 //   The log value is clamped to [ln(DBL_MIN), ln(DBL_MAX)] before exp().
 //   Values outside this range produce 0 (deep tail → effectively zero density).
 //
-// - All methods require GetMoments() (called by CalculateSourceMoments()) to
+// - All methods require GetMoments() (called by ComputeSources()) to
 //   have been invoked so that N0_, NL_, NLVL_ hold up-to-date values.
 
 template <ThermoMap Thermo>
@@ -1585,7 +1572,7 @@ HMOM<Thermo>::ReconstructedNDFData(bool use_regularized_moments) const
     d.valid = false;
 
     // -- Retrieve node weights from cached state -------------------------------
-    // N0_ and NL_ are updated by GetMoments() inside CalculateSourceMoments().
+    // N0_ and NL_ are updated by GetMoments() inside ComputeSources().
     double N0 = N0_;   // small-mode number density [#/m³]
     double NL = NL_;   // large-mode number density [#/m³]
 
@@ -1814,42 +1801,42 @@ template <ThermoMap Thermo> void HMOM<Thermo>::SetA5(double v) noexcept
 
 template <ThermoMap Thermo> void HMOM<Thermo>::SetE1f(double kJ) noexcept
 {
-    E1f_ = kJ * 1e3 / R_J_mol_HMOM;
+    E1f_ = kJ * 1e3 / this->Rgas_mol_;
 }
 
 template <ThermoMap Thermo> void HMOM<Thermo>::SetE1b(double kJ) noexcept
 {
-    E1b_ = kJ * 1e3 / R_J_mol_HMOM;
+    E1b_ = kJ * 1e3 / this->Rgas_mol_;
 }
 
 template <ThermoMap Thermo> void HMOM<Thermo>::SetE2f(double kJ) noexcept
 {
-    E2f_ = kJ * 1e3 / R_J_mol_HMOM;
+    E2f_ = kJ * 1e3 / this->Rgas_mol_;
 }
 
 template <ThermoMap Thermo> void HMOM<Thermo>::SetE2b(double kJ) noexcept
 {
-    E2b_ = kJ * 1e3 / R_J_mol_HMOM;
+    E2b_ = kJ * 1e3 / this->Rgas_mol_;
 }
 
 template <ThermoMap Thermo> void HMOM<Thermo>::SetE3f(double kJ) noexcept
 {
-    E3f_ = kJ * 1e3 / R_J_mol_HMOM;
+    E3f_ = kJ * 1e3 / this->Rgas_mol_;
 }
 
 template <ThermoMap Thermo> void HMOM<Thermo>::SetE3b(double kJ) noexcept
 {
-    E3b_ = kJ * 1e3 / R_J_mol_HMOM;
+    E3b_ = kJ * 1e3 / this->Rgas_mol_;
 }
 
 template <ThermoMap Thermo> void HMOM<Thermo>::SetE4(double kJ) noexcept
 {
-    E4_ = kJ * 1e3 / R_J_mol_HMOM;
+    E4_ = kJ * 1e3 / this->Rgas_mol_;
 }
 
 template <ThermoMap Thermo> void HMOM<Thermo>::SetE5(double kJ) noexcept
 {
-    E5_ = kJ * 1e3 / R_J_mol_HMOM;
+    E5_ = kJ * 1e3 / this->Rgas_mol_;
 }
 
 template <ThermoMap Thermo> void HMOM<Thermo>::Setn1f(double v) noexcept
@@ -1967,14 +1954,14 @@ template <ThermoMap Thermo> void HMOM<Thermo>::PrintSummary() const
         << "    + Sticking coeff. (-):           " << sticking_coeff_constant_ << "\n"
         << "\n"
         << " [HACA surface kinetics]  A [cm3/mol/s or 1/s],  n [-],  E [kJ/mol]\n"
-        << "    + R1f (H-abs. fwd):  A=" << A1f_ << "  n=" << n1f_ << "  E=" << E1f_ * R_J_mol_HMOM / 1000. << "\n"
-        << "    + R1b (H-abs. rev):  A=" << A1b_ << "  n=" << n1b_ << "  E=" << E1b_ * R_J_mol_HMOM / 1000. << "\n"
-        << "    + R2f (OH-ox. fwd):  A=" << A2f_ << "  n=" << n2f_ << "  E=" << E2f_ * R_J_mol_HMOM / 1000. << "\n"
-        << "    + R2b (OH-ox. rev):  A=" << A2b_ << "  n=" << n2b_ << "  E=" << E2b_ * R_J_mol_HMOM / 1000. << "\n"
-        << "    + R3f (O2-ox. fwd):  A=" << A3f_ << "  n=" << n3f_ << "  E=" << E3f_ * R_J_mol_HMOM / 1000. << "\n"
-        << "    + R3b (O2-ox. rev):  A=" << A3b_ << "  n=" << n3b_ << "  E=" << E3b_ * R_J_mol_HMOM / 1000. << "\n"
-        << "    + R4  (C2H2 add.):   A=" << A4_  << "  n=" << n4_  << "  E=" << E4_  * R_J_mol_HMOM / 1000. << "\n"
-        << "    + R5  (O-ox.):       A=" << A5_  << "  n=" << n5_  << "  E=" << E5_  * R_J_mol_HMOM / 1000. << "\n"
+        << "    + R1f (H-abs. fwd):  A=" << A1f_ << "  n=" << n1f_ << "  E=" << E1f_ * this->Rgas_mol_ / 1000. << "\n"
+        << "    + R1b (H-abs. rev):  A=" << A1b_ << "  n=" << n1b_ << "  E=" << E1b_ * this->Rgas_mol_ / 1000. << "\n"
+        << "    + R2f (OH-ox. fwd):  A=" << A2f_ << "  n=" << n2f_ << "  E=" << E2f_ * this->Rgas_mol_ / 1000. << "\n"
+        << "    + R2b (OH-ox. rev):  A=" << A2b_ << "  n=" << n2b_ << "  E=" << E2b_ * this->Rgas_mol_ / 1000. << "\n"
+        << "    + R3f (O2-ox. fwd):  A=" << A3f_ << "  n=" << n3f_ << "  E=" << E3f_ * this->Rgas_mol_ / 1000. << "\n"
+        << "    + R3b (O2-ox. rev):  A=" << A3b_ << "  n=" << n3b_ << "  E=" << E3b_ * this->Rgas_mol_ / 1000. << "\n"
+        << "    + R4  (C2H2 add.):   A=" << A4_  << "  n=" << n4_  << "  E=" << E4_  * this->Rgas_mol_ / 1000. << "\n"
+        << "    + R5  (O-ox.):       A=" << A5_  << "  n=" << n5_  << "  E=" << E5_  * this->Rgas_mol_ / 1000. << "\n"
         << "    + eff6 (O-rad.):     " << eff6_ << "\n"
         << "\n"
         << " [Surface density]\n"
@@ -1983,7 +1970,7 @@ template <ThermoMap Thermo> void HMOM<Thermo>::PrintSummary() const
         << "\n"
         << " [Transport & radiation]\n"
         << "    + Schmidt number (-):            " << this->schmidt_number_ << "\n"
-        << "    + Thermophoretic model:          " << this->thermophoretic_model() << "  (" << thermo_str(this->thermophoretic_model_) << ")\n"
+        << "    + Thermophoretic model:          " << static_cast<int>(this->thermophoretic_model()) << "  (" << thermo_str(this->thermophoretic_model_) << ")\n"
         << "    + Gas consumption:               " << (this->gas_consumption_ ? "yes" : "no") << "\n"
         << "    + Radiative heat transfer:       " << (this->radiative_heat_transfer_ ? "yes" : "no") << "\n"
         << "    + Planck coeff. model:           " << static_cast<int>(this->planck_model_) << "  (" << planck_str(this->planck_model_) << ")\n"

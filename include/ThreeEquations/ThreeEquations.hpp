@@ -225,7 +225,7 @@ public:
     /// @param T    Temperature [K]
     /// @param P_Pa Pressure [Pa]
     /// @param Y    Mass fractions, size = n_species
-    void SetStatus(double T, double P_Pa, const double* Y) noexcept;
+    void SetState(double T, double P_Pa, const double* Y) noexcept;
 
     /// Generic span setter. Order: [Ys, NsNorm, Ss].
     /// Ys [-], NsNorm [-], Ss [m2/m3].
@@ -236,7 +236,7 @@ public:
 
     // -- MomentMethod concept — core computation -------------------------------
 
-    void CalculateSourceMoments() noexcept;
+    void ComputeSources() noexcept;
     void CalculateOmegaGas() noexcept;
 
     // -- MomentMethod concept — particle properties ----------------------------
@@ -246,7 +246,7 @@ public:
     [[nodiscard]] double collision_diameter() const noexcept;           //!< aggregate collision diameter [m]
     [[nodiscard]] double particle_number_density() const noexcept;      //!< particle number density [#/m3]
     [[nodiscard]] double mass_fraction() const noexcept;                //!< mass fraction (= Ys_) [-]
-    [[nodiscard]] double specific_surface() const noexcept;             //!< specific surface area [m2/m3]
+    [[nodiscard]] double specific_surface_area() const noexcept;             //!< specific surface area [m2/m3]
     [[nodiscard]] double number_primary_particles() const noexcept;     //!< number of primary particles [-]
     [[nodiscard]] double diffusion_coefficient() const noexcept;        //!< diffusion coefficient [kg/m/s]
 
@@ -405,15 +405,15 @@ public:
 
     // -- Model state queries ----------------------------------------------------
 
-    [[nodiscard]] int nucleation_model() const noexcept { return nucleation_model_; }
+    [[nodiscard]] NucleationModel    nucleation_model()    const noexcept { return static_cast<NucleationModel>(nucleation_model_);         }
 
-    [[nodiscard]] int surface_growth_model() const noexcept { return surface_growth_model_; }
+    [[nodiscard]] SurfaceGrowthModel surface_growth_model() const noexcept { return static_cast<SurfaceGrowthModel>(surface_growth_model_); }
 
-    [[nodiscard]] int condensation_model() const noexcept { return condensation_model_; }
+    [[nodiscard]] CondensationModel  condensation_model()  const noexcept { return static_cast<CondensationModel>(condensation_model_);     }
 
-    [[nodiscard]] int oxidation_model() const noexcept { return oxidation_model_; }
+    [[nodiscard]] OxidationModel     oxidation_model()     const noexcept { return static_cast<OxidationModel>(oxidation_model_);           }
 
-    [[nodiscard]] int coagulation_model() const noexcept { return coagulation_model_; }
+    [[nodiscard]] CoagulationModel   coagulation_model()   const noexcept { return static_cast<CoagulationModel>(coagulation_model_);       }
 
     /**
      * @name CRTP extension points — per-process source storage

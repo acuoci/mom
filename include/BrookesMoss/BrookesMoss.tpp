@@ -51,7 +51,7 @@ namespace MOM
 
 template <ThermoMap Thermo> BrookesMoss<Thermo>::BrookesMoss(const Thermo& thermo) : thermo_(thermo)
 {
-    // -- Species indices for SetStatus / gas-coupling ----------------------
+    // -- Species indices for SetState / gas-coupling ----------------------
     // These are mechanism lookups, not user-configurable parameters.
     // index_C6H5_ and index_C6H6_ stay at their in-class default of -1
     // until SetBenzeneSpecies / SetPhenylRadicalSpecies are called.
@@ -95,11 +95,11 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::MemoryAllocation()
 }
 
 // ============================================================================
-// SetStatus
+// SetState
 // ============================================================================
 
 template <ThermoMap Thermo>
-void BrookesMoss<Thermo>::SetStatus(double T, double P_Pa, const double* Y) noexcept
+void BrookesMoss<Thermo>::SetState(double T, double P_Pa, const double* Y) noexcept
 {
     const double cTot = this->template UpdateMixtureState<>(T, P_Pa, Y, thermo_);
 
@@ -324,10 +324,10 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::CheckBrookesMossHallSpecie
 }
 
 // ============================================================================
-// CalculateSourceMoments
+// ComputeSources
 // ============================================================================
 
-template <ThermoMap Thermo> void BrookesMoss<Thermo>::CalculateSourceMoments() noexcept
+template <ThermoMap Thermo> void BrookesMoss<Thermo>::ComputeSources() noexcept
 {
     this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by BrookesMoss — zeroed explicitly
@@ -850,7 +850,8 @@ template <ThermoMap Thermo> double BrookesMoss<Thermo>::particle_diameter() cons
     if (N <= 0. || M <= 0.)
         return 0.;
 
-    return std::pow(6. * M / (this->pi_ * this->rho_particle_ * N), 1. / 3.);
+    const double v_particle = M / (this->rho_particle_ * N); // mean particle volume [m3]
+    return this->SphereDiameter(v_particle);
 }
 
 template <ThermoMap Thermo> double BrookesMoss<Thermo>::collision_diameter() const noexcept
@@ -859,7 +860,7 @@ template <ThermoMap Thermo> double BrookesMoss<Thermo>::collision_diameter() con
     return particle_diameter();
 }
 
-template <ThermoMap Thermo> double BrookesMoss<Thermo>::specific_surface() const noexcept
+template <ThermoMap Thermo> double BrookesMoss<Thermo>::specific_surface_area() const noexcept
 {
     const double dp = particle_diameter();
     const double N  = particle_number_density();
@@ -981,7 +982,7 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::PrintSummary() const
         << "\n"
         << " [Transport & radiation]\n"
         << "    + Schmidt number (-):       " << this->schmidt_number_ << "\n"
-        << "    + Thermophoretic model:     " << this->thermophoretic_model() << "  (" << thermo_str(this->thermophoretic_model_) << ")\n"
+        << "    + Thermophoretic model:     " << static_cast<int>(this->thermophoretic_model()) << "  (" << thermo_str(this->thermophoretic_model_) << ")\n"
         << "    + Gas consumption:          " << (this->gas_consumption_ ? "yes" : "no") << "\n"
         << "    + Radiative heat transfer:  " << (this->radiative_heat_transfer_ ? "yes" : "no") << "\n"
         << "    + Planck coeff. model:      " << static_cast<int>(this->planck_model_) << "  (" << planck_str(this->planck_model_) << ")\n"

@@ -35,8 +35,12 @@
 
 #pragma once
 
+#include <array>
 #include <concepts>
 #include <span>
+#include <string_view>
+
+#include "ProcessFlags.hpp"
 
 namespace MOM
 {
@@ -62,15 +66,18 @@ namespace MOM
  *
  * **Compile-time:**
  * - `M::n_equations` — unsigned, number of transported moment equations
+ * - `M::variant_labels` — iterable range of `string_view` keys for factory dispatch
+ *                         (`MakeAnyMomentMethod` uses this to map label → type)
  *
- * **State injection** (call before CalculateSourceMoments each cell/time-step):
- * - `SetStatus(T, P, Y[])` — thermodynamic state (T [K], P [Pa], Y mass fractions)
+ * **State injection** (call before ComputeSources each cell/time-step):
+ * - `SetState(T, P, Y[])` — thermodynamic state (T [K], P [Pa], Y mass fractions)
  * - `SetMoments(span)` — current moment values
  * - `SetViscosity(mu)` — mixture dynamic viscosity [kg/m/s]
  *
  * **Core computation:**
- * - `CalculateSourceMoments()` — evaluates all source terms (noexcept)
- * - `CalculateOmegaGas()` — evaluates gas-phase consumption terms only (noexcept)
+ * - `ComputeSources()` — evaluates all source terms, including gas-phase
+ *                                consumption (noexcept); this is the only method
+ *                                a CFD solver's inner loop needs to call
  *
  * **Source output** (zero-copy spans into internal fixed-size storage):
  * - `sources()` — total source vector, size = n_equations
@@ -89,12 +96,12 @@ namespace MOM
  * - `particle_number_density()` — number density [#/m3]
  * - `mass_fraction()` — particle mass fraction [-]
  * - `ParticleDensity()` — material density [kg/m3]
- * - `specific_surface()` — surface area per unit volume [m2/m3]
+ * - `specific_surface_area()` — specific surface area per unit volume [m2/m3]
  *
  * **Transport:**
  * - `schmidt_number()` — particle Schmidt number [-]
  * - `diffusion_coefficient()` — effective diffusion coefficient [kg/m/s]
- * - `thermophoretic_model()` — thermophoretic model flag (int, 0 = off)
+ * - `thermophoretic_model()` — thermophoretic model flag (ThermophoreticModel enum class)
  *
  * **Status / control:**
  * - `is_active()` — true if the method is configured and active
@@ -118,9 +125,15 @@ namespace MOM
 template <typename M>
 concept MomentMethod =
 
-    // Compile-time constant: number of transported equations
+    // Compile-time constants / static members
     requires {
+        // Number of transported moment equations
         { M::n_equations } -> std::convertible_to<unsigned>;
+        // Factory label array — used by MakeAnyMomentMethod for runtime variant selection.
+        // Must be a non-empty, iterable range whose elements are convertible to string_view.
+        // Concrete variants declare this as:
+        //   static constexpr std::array<std::string_view, N> variant_labels{"Name", "alias"};
+        { M::variant_labels[0] } -> std::convertible_to<std::string_view>;
     }
 
     &&
@@ -128,15 +141,16 @@ concept MomentMethod =
         // -- State injection ------------------------------------------------
         // Y_ptr is a properly-typed local variable; no null-pointer cast needed.
         // noexcept is required: these setters run every cell iteration.
-        { m.SetStatus(scalar, scalar, Y_ptr) } noexcept; // T [K], P [Pa], Y[]
+        { m.SetState(scalar, scalar, Y_ptr) } noexcept; // T [K], P [Pa], Y[]
         { m.SetMoments(moments_in) } noexcept;
         { m.SetViscosity(scalar) } noexcept;
 
         // -- Core computation -----------------------------------------------
-        // noexcept is part of the contract: these run in the CFD inner loop
+        // noexcept is part of the contract: this runs in the CFD inner loop
         // and must not carry exception-handling overhead or prevent hoisting.
-        { m.CalculateSourceMoments() } noexcept;
-        { m.CalculateOmegaGas() } noexcept;
+        // ComputeSources() subsumes gas-phase coupling internally —
+        // callers never need to invoke CalculateOmegaGas() directly.
+        { m.ComputeSources() } noexcept;
 
         // -- Source output (zero-copy spans) --------------------------------
         { cm.sources() } -> std::convertible_to<std::span<const double>>;
@@ -156,12 +170,12 @@ concept MomentMethod =
         { cm.number_primary_particles() } -> std::same_as<double>;
         { cm.mass_fraction() } -> std::same_as<double>;
         { cm.particle_density() } -> std::same_as<double>;
-        { cm.specific_surface() } -> std::same_as<double>;
+        { cm.specific_surface_area() } -> std::same_as<double>;
 
         // -- Transport ------------------------------------------------------
         { cm.schmidt_number() } -> std::same_as<double>;
         { cm.diffusion_coefficient() } -> std::same_as<double>;
-        { cm.thermophoretic_model() } -> std::same_as<int>;
+        { cm.thermophoretic_model() } -> std::same_as<ThermophoreticModel>;
 
         // -- Status / control -----------------------------------------------
         { cm.is_active() } -> std::same_as<bool>;
@@ -319,6 +333,110 @@ concept ModelsSintering =
         { cm.sources_sintering_impl() } -> std::convertible_to<std::span<const double>>;
     };
 
+// ============================================================================
+// Reporter output-hook concepts
+// ============================================================================
+//
+// These concepts detect whether a variant provides optional callback-based
+// hooks consumed by MomentMethodReporter.  Each hook uses the same dual-mode
+// callback protocol:
+//
+//   void hook(CB&& cb) const
+//       where CB satisfies: cb(std::string_view label, double value)
+//
+// The reporter supplies different lambdas in header mode (uses only label)
+// and row mode (uses only value); the variant calls cb identically in both.
+//
+// Detection is by checking that the method is callable with a lambda that
+// matches the expected signature.  The lambda is tested with a generic
+// captureless lambda `[](std::string_view, double){}` — chosen because it
+// is the tightest constraint that still allows the template deduction inside
+// each hook to succeed.
+//
+// Concept matrix (as of 2026-07)
+// ---------------------------------------------------------------
+//   Concept                  | HMOM | BrookesMoss | ThreeEq | MetalOxide
+//   HasVariantPrefixOutput   |  Y   |      Y      |    Y    |     Y
+//   HasVariantSuffixOutput   |  Y   |      N      |    N    |     N
+//   HasNDFExtraOutput        |  Y   |      N      |    N    |     N
+// ---------------------------------------------------------------
+//
+// HasVariantPrefixOutput is currently satisfied by ALL four variants.
+// HasVariantSuffixOutput and HasNDFExtraOutput are HMOM-only for now.
+// ---------------------------------------------------------------
+
+/**
+ * @concept HasVariantPrefixOutput
+ * @brief Satisfied by variants that provide extra output columns *before* the
+ *        transport block in MomentMethodReporter::WriteHeader / WriteRow.
+ *
+ * A variant satisfies this concept by implementing:
+ * @code
+ *   template <typename CB>
+ *   void variant_prefix_output(CB&& cb) const;
+ * @endcode
+ * where @p cb is called as `cb(std::string_view label, double value)` once
+ * per extra column.  The reporter supplies either a column-registration lambda
+ * (WriteHeader) or a value-writing lambda (WriteRow) — the variant always
+ * calls cb identically.
+ *
+ * Satisfied by: HMOM, BrookesMoss, ThreeEquations, MetalOxide.
+ */
+template <typename M>
+concept HasVariantPrefixOutput =
+    requires(const M& cm) {
+        cm.variant_prefix_output([](std::string_view, double) {});
+    };
+
+/**
+ * @concept HasVariantSuffixOutput
+ * @brief Satisfied by variants that provide extra output columns *after* the
+ *        per-process source block in MomentMethodReporter::WriteHeader / WriteRow.
+ *
+ * A variant satisfies this concept by implementing:
+ * @code
+ *   template <typename CB>
+ *   void variant_suffix_output(CB&& cb) const;
+ * @endcode
+ * with the same dual-mode callback protocol as `variant_prefix_output`.
+ * HMOM uses this for detailed coagulation sub-process breakdowns.
+ *
+ * Satisfied by: HMOM.
+ * NOT satisfied by: BrookesMoss, ThreeEquations, MetalOxide.
+ */
+template <typename M>
+concept HasVariantSuffixOutput =
+    requires(const M& cm) {
+        cm.variant_suffix_output([](std::string_view, double) {});
+    };
+
+/**
+ * @concept HasNDFExtraOutput
+ * @brief Satisfied by variants that provide extra per-point columns appended
+ *        after the six core NDF columns in WriteReconstructedNDF.
+ *
+ * A variant satisfies this concept by implementing:
+ * @code
+ *   template <typename CB>
+ *   void ndf_extra_output(CB&& cb) const;
+ * @endcode
+ * with the same dual-mode callback protocol.  HMOM uses this to append
+ * bimodal parameters (N₀, V₀, d_p0, N_L, V_L, d̄_pL, σ_NDF) that are
+ * constant across the volume grid but make the NDF file self-contained.
+ *
+ * ThreeEquations and MetalOxide do NOT implement this hook because their
+ * NDF parameters are already written in the main per-timestep output via
+ * `variant_prefix_output`.
+ *
+ * Satisfied by: HMOM.
+ * NOT satisfied by: BrookesMoss, ThreeEquations, MetalOxide.
+ */
+template <typename M>
+concept HasNDFExtraOutput =
+    requires(const M& cm) {
+        cm.ndf_extra_output([](std::string_view, double) {});
+    };
+
 /**
  * @brief Illustrates the "one line to switch" idiom.
  *
@@ -337,8 +455,8 @@ concept ModelsSintering =
 /**
  * @brief Single-call per-cell entry point for moment source computation.
  *
- * Preferred over calling SetStatus / SetMoments / SetViscosity /
- * CalculateSourceMoments individually. Bundling all four into one call lets the
+ * Preferred over calling SetState / SetMoments / SetViscosity /
+ * ComputeSources individually. Bundling all four into one call lets the
  * compiler keep the object layout in registers across the full per-cell
  * computation without reloading `this` at each function boundary.
  *
@@ -370,10 +488,10 @@ template <MomentMethod M>
 inline void ComputeCell(
     M& model, double T, double P_Pa, const double* Y, double mu, std::span<const double> moments) noexcept
 {
-    model.SetStatus(T, P_Pa, Y);
+    model.SetState(T, P_Pa, Y);
     model.SetMoments(moments);
     model.SetViscosity(mu);
-    model.CalculateSourceMoments();
+    model.ComputeSources();
 }
 
 } // namespace MOM

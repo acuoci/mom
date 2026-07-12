@@ -49,8 +49,8 @@
 // • Variant-specific columns are provided BY THE VARIANT, not detected here.
 //   The reporter is fully closed to modification when new variants are added.
 // • Owns no model and performs no numerical computation.
-// • The caller (CFD code) is responsible for calling SetStatus,
-//   SetMoments, and CalculateSourceMoments before every WriteRow.
+// • The caller (CFD code) is responsible for calling SetState,
+//   SetMoments, and ComputeSources before every WriteRow.
 //   The reporter only observes — it never mutates the model.
 //
 // Extensibility protocol — variant_output hooks
@@ -82,9 +82,9 @@
 //   file.Complete();
 //
 //   for (auto& cell : grid) {
-//       model.SetStatus(cell.T, cell.P, cell.Y.data());
+//       model.SetState(cell.T, cell.P, cell.Y.data());
 //       model.SetMoments(cell.M);
-//       model.CalculateSourceMoments();
+//       model.ComputeSources();
 //       // ... apply sources to CFD residuals ...
 //       if (output_step)
 //           reporter.WriteRow(model);  // pure observer — never mutates model
@@ -146,9 +146,9 @@ public:
     template <MomentMethod Model> void WriteHeader(const Model& model, unsigned precision = 8);
 
     /// Write one output row from the current model state.
-    /// Precondition: CalculateSourceMoments() has been called by the CFD code.
-    /// This method is a pure observer — it never calls SetStatus/SetMoments
-    /// or CalculateSourceMoments on the model.
+    /// Precondition: ComputeSources() has been called by the CFD code.
+    /// This method is a pure observer — it never calls SetState/SetMoments
+    /// or ComputeSources on the model.
     template <MomentMethod Model> void WriteRow(const Model& model);
 
     // -- Runtime-dispatch API (AnyMomentMethod) --------------------------------
@@ -184,7 +184,7 @@ public:
     // Variant-specific extra columns (optional, via ndf_extra_output hook):
     //   Variants may implement:
     //     template <typename CB> void ndf_extra_output(CB&&) const;
-    //   which is detected at compile time via if constexpr (requires(...)).
+    //   which is detected at compile time via HasNDFExtraOutput<Model>.
     //   If present, additional model-specific columns are appended after the
     //   six core columns.  Currently only HMOM implements this hook,
     //   adding: N0, V0, dp0, NL, VL, dpL_mean, sigma_ndf.
@@ -354,11 +354,9 @@ void MomentMethodReporter::WriteHeader(const Model& model, unsigned precision)
 
     // -- Variant prefix columns (np, ss, vs, aggregate props, statistics…) -----
     // The variant self-describes its extra columns by implementing
-    // variant_prefix_output(cb).  If the method is absent (e.g. BrookesMoss),
-    // this block is a no-op at compile time.
-    if constexpr (requires(const Model& m) {
-                      m.variant_prefix_output([](std::string_view, double) {});
-                  })
+    // variant_prefix_output(cb).  Detected at compile time via HasVariantPrefixOutput.
+    // Currently satisfied by all four variants; absent variants are a no-op.
+    if constexpr (HasVariantPrefixOutput<Model>)
         model.variant_prefix_output(add_col);
 
 
@@ -385,9 +383,8 @@ void MomentMethodReporter::WriteHeader(const Model& model, unsigned precision)
 
     // -- Variant suffix columns (detailed breakdowns, sub-process vectors…) -----
     // Same protocol as prefix.  HMOM uses this for the coagulation sub-breakdown.
-    if constexpr (requires(const Model& m) {
-                      m.variant_suffix_output([](std::string_view, double) {});
-                  })
+    // Detected via HasVariantSuffixOutput; satisfied by HMOM only.
+    if constexpr (HasVariantSuffixOutput<Model>)
         model.variant_suffix_output(add_col);
 }
 
@@ -408,15 +405,13 @@ template <MomentMethod Model> void MomentMethodReporter::WriteRow(const Model& m
     // -- Block 1: Core particle state (concept-mandated) -----------------------
     *out_ << model.mass_fraction();
     *out_ << model.particle_number_density();
-    *out_ << model.specific_surface();
+    *out_ << model.specific_surface_area();
     *out_ << model.volume_fraction();
     *out_ << model.particle_diameter() * 1.e9;  // m → nm
     *out_ << model.collision_diameter() * 1.e9; // m → nm
 
     // -- Variant prefix values -------------------------------------------------
-    if constexpr (requires(const Model& m) {
-                      m.variant_prefix_output([](std::string_view, double) {});
-                  })
+    if constexpr (HasVariantPrefixOutput<Model>)
         model.variant_prefix_output(add_val);
 
 
@@ -435,9 +430,7 @@ template <MomentMethod Model> void MomentMethodReporter::WriteRow(const Model& m
     writeSpan(model.sources_sintering());
 
     // -- Variant suffix values -------------------------------------------------
-    if constexpr (requires(const Model& m) {
-                      m.variant_suffix_output([](std::string_view, double) {});
-                  })
+    if constexpr (HasVariantSuffixOutput<Model>)
         model.variant_suffix_output(add_val);
 }
 
@@ -466,8 +459,7 @@ template <MomentMethod Model> void MomentMethodReporter::WriteRow(const Model& m
 //
 // ndf_extra_output hook
 // ----------------------
-// If the model satisfies:
-//   requires(const Model& m) { m.ndf_extra_output([](std::string_view,double){}); }
+// If the model satisfies HasNDFExtraOutput<Model> (see MomentMethodConcept.hpp),
 // then in header mode the hook's labels are registered as extra columns, and in
 // row mode the hook's values are written after the six core values.  The hook
 // is called once per row — variant values that do not depend on v (like HMOM's
@@ -490,14 +482,13 @@ void MomentMethodReporter::WriteHeaderLineReconstructedNDF( const Model& model,
     ndf_out.AddColumn("ndbar[1/nm]", precision);  // normalised diameter-space NDF [1/nm]
 
     // Variant-specific extra columns (HMOM: N0, V0, dp0, NL, VL, dpL_mean, sigma_ndf)
+    // Detected via HasNDFExtraOutput; satisfied by HMOM only.
     auto add_col = [&](std::string_view label, double /*value*/)
     {
         ndf_out.AddColumn(std::string(label), precision);
     };
-    if constexpr (requires(const Model& m) {
-                      m.ndf_extra_output([](std::string_view, double) {});
-                  })
-    model.ndf_extra_output(add_col);
+    if constexpr (HasNDFExtraOutput<Model>)
+        model.ndf_extra_output(add_col);
 
     ndf_out.Complete();
 }
@@ -554,9 +545,7 @@ void MomentMethodReporter::WriteReconstructedNDF(   const Model& model,
         ndf_out << ndbar_nm;
 
         // Variant-specific extra values (HMOM: N0, V0, dp0, NL, VL, dpL_mean, sigma_ndf)
-        if constexpr (requires(const Model& m) {
-                          m.ndf_extra_output([](std::string_view, double) {});
-                      })
+        if constexpr (HasNDFExtraOutput<Model>)
             model.ndf_extra_output(add_val);
     }
     // Caller is responsible for ndf_out.Close().

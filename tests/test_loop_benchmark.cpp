@@ -99,7 +99,7 @@ static std::vector<double> X2Y(const std::vector<double>& X, const MOM::BasicThe
 // Pattern A: Template cell loop
 // ============================================================================
 // The variant type M is known at compile time.  Every internal call —
-// ComputeCell → SetStatus/SetMoments/CalculateSourceMoments/sources() —
+// ComputeCell → SetState/SetMoments/ComputeSources/sources() —
 // is monomorphic.  With -O3 -march=native the compiler:
 //   1. Inlines the full ComputeCell chain into the loop body.
 //   2. Resolves all if-constexpr branches (no code for missing processes).
@@ -202,9 +202,9 @@ static bool validateZeroFallbacks(MOM::BasicThermoData& th)
 
         // Activate with minimal state so sources are computed (even if zero soot)
         const std::vector<double> Y = X2Y({0, 0, 0.23, 0, 0.1, 1e-6, 0.67}, th);
-        bm.SetStatus(1800., 101325., Y.data());
+        bm.SetState(1800., 101325., Y.data());
         bm.SetMoments(1e-10, 1e-12);
-        bm.CalculateSourceMoments();
+        bm.ComputeSources();
 
         auto cond = bm.sources_condensation(); // not modelled → kZeroData
         auto sint = bm.sources_sintering();    // not modelled → kZeroData
@@ -235,9 +235,9 @@ static bool validateZeroFallbacks(MOM::BasicThermoData& th)
         te.SetPAH("C2H2");
         te.SetNucleation(1);
         te.SetCoagulation(1);
-        te.SetStatus(1800., 101325., Y.data());
+        te.SetState(1800., 101325., Y.data());
         te.SetMoments(1e-10, 1e-15, 1e-10);
-        te.CalculateSourceMoments();
+        te.ComputeSources();
 
         auto sint = te.sources_sintering(); // not modelled → kZeroData
 

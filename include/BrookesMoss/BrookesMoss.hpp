@@ -207,7 +207,7 @@ public:
     /// @param T    Temperature [K]
     /// @param P_Pa Pressure [Pa]
     /// @param Y    Mass fractions, size = n_species
-    void SetStatus(double T, double P_Pa, const double* Y) noexcept;
+    void SetState(double T, double P_Pa, const double* Y) noexcept;
 
     /// Generic span setter. Order: [Ys, bs].
     /// Ys [-], bs [m3/kg].
@@ -218,7 +218,7 @@ public:
 
     // -- MomentMethod concept — core computation -------------------------------
 
-    void CalculateSourceMoments() noexcept;
+    void ComputeSources() noexcept;
     void CalculateOmegaGas() noexcept;
 
     // -- MomentMethod concept — particle properties ----------------------------
@@ -228,7 +228,7 @@ public:
     [[nodiscard]] double collision_diameter() const noexcept; //!< same as ParticleDiameter for BM
     [[nodiscard]] double particle_number_density() const noexcept; //!< [#/m3]
     [[nodiscard]] double mass_fraction() const noexcept;          //!< = Ys_
-    [[nodiscard]] double specific_surface() const noexcept;       //!< [m2/m3]
+    [[nodiscard]] double specific_surface_area() const noexcept;       //!< [m2/m3]
     [[nodiscard]] double diffusion_coefficient() const noexcept;  //!< [kg/m/s]
     [[nodiscard]] double number_primary_particles() const noexcept;
     
@@ -360,19 +360,25 @@ public:
 
     // -- Model state queries ----------------------------------------------------
 
-    [[nodiscard]] int nucleation_model() const noexcept
+    [[nodiscard]] NucleationModel nucleation_model() const noexcept
     {
-        return static_cast<int>(nucleation_variant_);
+        return static_cast<NucleationModel>(static_cast<int>(nucleation_variant_));
     }
 
-    [[nodiscard]] int surface_growth_model() const noexcept { return surface_growth_model_; }
-
-    [[nodiscard]] int oxidation_model() const noexcept
+    [[nodiscard]] SurfaceGrowthModel surface_growth_model() const noexcept
     {
-        return static_cast<int>(oxidation_variant_);
+        return static_cast<SurfaceGrowthModel>(surface_growth_model_);
     }
 
-    [[nodiscard]] int coagulation_model() const noexcept { return coagulation_model_; }
+    [[nodiscard]] OxidationModel oxidation_model() const noexcept
+    {
+        return static_cast<OxidationModel>(static_cast<int>(oxidation_variant_));
+    }
+
+    [[nodiscard]] CoagulationModel coagulation_model() const noexcept
+    {
+        return static_cast<CoagulationModel>(coagulation_model_);
+    }
 
     [[nodiscard]] const std::string& sg_species() const noexcept { return sg_species_; }
 

@@ -68,8 +68,23 @@
 // AnyMomentMethod.hpp includes MomVariantList.hpp, which is the single
 // authoritative registry of all concrete variants.  Adding a new variant
 // requires only editing MomVariantList.hpp — no changes here.
-#include "AnyMomentMethod.hpp"      // AnyMomentMethod<T>, dispatch helpers, factory
+#include "AnyMomentMethod.hpp"      // AnyMomentMethod<T>, MakeAnyMomentMethod, ForEachCell
 #include "MomentMethodReporter.hpp" // Observer: formats output via concept interface only
+
+// -- Free-function dispatch API -----------------------------------------------
+//
+// Each header below has a single responsibility and depends only on
+// AnyMomentMethod.hpp (no cross-dependencies between them).  They are all
+// gathered here so that including "MOM/MOM.hpp" is sufficient for all callers.
+//
+//  Dispatch.hpp   — SetState, Compute, ComputeCell, PrintSummary, …
+//  Properties.hpp — GetVolumeFraction, GetParticleDiameter, GetSchmidtNumber, …
+//  Sources.hpp    — GetSources, GetNucleationSources, GetOxidationModel, …
+//  Splitting.hpp  — GetSourcesWithoutOxidation, GetOxidationRateCoefficients, …
+#include "Dispatch.hpp"
+#include "Properties.hpp"
+#include "Sources.hpp"
+#include "Splitting.hpp"
 
 // ============================================================================
 // Compile-time concept satisfaction check — auto-covers all registered variants
