@@ -1,5 +1,10 @@
 #include "BrookesMoss/BrookesMoss_Grammar.h"
 
+/**
+ * @file BrookesMoss_Grammar.cpp
+ * @brief OpenSMOKE++ dictionary keyword rules for the BrookesMoss model.
+ */
+
 namespace MOM
 {
 void BrookesMoss_Grammar::DefineRules()
@@ -8,12 +13,10 @@ void BrookesMoss_Grammar::DefineRules()
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@BrookesMoss",
         OpenSMOKEpp::SINGLE_BOOL,
-        "Three equations model: on/off (default: true)",
+        "BrookesMoss model: on/off (default: true)",
         true));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // Soot models
-    // ----------------------------------------------------------------------------------------------------------- //
+    // Process models
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@NucleationModel",
@@ -51,9 +54,7 @@ void BrookesMoss_Grammar::DefineRules()
         "Enable verbose diagnostic output (default: false)",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // PAHs
-    // ----------------------------------------------------------------------------------------------------------- //
+    // Gas species
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@Precursors",
@@ -70,13 +71,13 @@ void BrookesMoss_Grammar::DefineRules()
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@Benzene",
         OpenSMOKEpp::SINGLE_STRING,
-        "Species to be assumed as benzene",
+        "Benzene species used by BrookesMossHall kinetics",
         false));  
         
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@PhenylRadical",
         OpenSMOKEpp::SINGLE_STRING,
-        "Species to be assumed as phenyl radical",
+        "Phenyl radical species used by BrookesMossHall kinetics",
         false));          
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
@@ -103,9 +104,7 @@ void BrookesMoss_Grammar::DefineRules()
         "Consumption of gaseous species is accounted for (default: false)",
         true));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // Additional sub-models
-    // ----------------------------------------------------------------------------------------------------------- //
+    // Transport and radiation
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@RadiativeHeatTransfer",
@@ -116,7 +115,7 @@ void BrookesMoss_Grammar::DefineRules()
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@PlanckCoefficient",
         OpenSMOKEpp::SINGLE_STRING,
-        "Calculation of Planck Coefficient: Smooke (default) | Kent | Sazhin | none",
+        "Planck coefficient model: Smooke (default) | Kent | Sazhin | none",
         false));
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
@@ -125,9 +124,7 @@ void BrookesMoss_Grammar::DefineRules()
         "Schmidt number (default: 50)", 
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
     // Soot properties
-    // ----------------------------------------------------------------------------------------------------------- //
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@SootDensity",
@@ -135,14 +132,12 @@ void BrookesMoss_Grammar::DefineRules()
         "Density of soot particles (default: 1800 kg/m3)",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // Model constants
-    // ----------------------------------------------------------------------------------------------------------- //
+    // Brookes-Moss kinetic constants
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@Calpha",
         OpenSMOKEpp::SINGLE_MEASURE,
-        "Model constant for soot incipent rate (default: 54 1/s)",
+        "Soot inception rate constant (default: 54 1/s)",
         false));
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
@@ -207,9 +202,7 @@ void BrookesMoss_Grammar::DefineRules()
             "Exponent of mass concentration in surface growth (default: 1)",
             false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // Minimum values for properties calculation
-    // ----------------------------------------------------------------------------------------------------------- //
+    // Number-density normalization
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@NsNorm", 
@@ -217,14 +210,12 @@ void BrookesMoss_Grammar::DefineRules()
         "Normalization factor (default: 1e15 #/m3)", 
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // Kinetic parameters for Brookes-Moss-Hall
-    // ----------------------------------------------------------------------------------------------------------- //
+    // Brookes-Moss-Hall kinetic constants
     
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@Calpha1",
         OpenSMOKEpp::SINGLE_MEASURE,
-        "Model constant for soot incipent rate (default: 127*10^8.88 kg*m3/kmol2/s)",
+        "BrookesMossHall channel-1 inception rate constant (default: 127*10^8.88 kg*m3/kmol2/s)",
         false));
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
@@ -236,7 +227,7 @@ void BrookesMoss_Grammar::DefineRules()
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@Calpha2",
         OpenSMOKEpp::SINGLE_MEASURE,
-        "Model constant for soot incipent rate (default: 178*10^9.50 kg*m3/kmol2/s)",
+        "BrookesMossHall channel-2 inception rate constant (default: 178*10^9.50 kg*m3/kmol2/s)",
         false));
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(

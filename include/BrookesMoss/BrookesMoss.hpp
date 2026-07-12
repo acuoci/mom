@@ -50,17 +50,21 @@
 #include <expected>
 #endif
 
+/**
+ * @file BrookesMoss.hpp
+ * @brief Brookes-Moss two-equation soot moment model.
+ */
+
 namespace MOM
 {
 
 /**
  * @class BrookesMoss
- * @brief Two-equation soot model of Brookes & Moss (1999), with Hall et al. (2016) extension.
+ * @brief Two-equation soot source-term model with optional Brookes-Moss-Hall kinetics.
  *
- * A classical two-scalar soot model widely used in turbulent diffusion flames.
- * Transports soot mass fraction and a normalised radical nuclei concentration.
- * The BM-Hall extension (Hall et al. 2016) adds phenyl-based inception and an
- * improved oxidation correlation.
+ * The model transports soot mass fraction and a normalized soot number-density
+ * variable. It includes nucleation, surface growth, oxidation, coagulation,
+ * gas-phase source terms, thermophoresis, and soot radiation coupling.
  *
  * @par References
  * - Brookes & Moss, *Combust. Flame* **116** (1999) 486–503.
@@ -70,23 +74,15 @@ namespace MOM
  * | Index | Symbol | Physical meaning |
  * |---|---|---|
  * | 0 | Ys | Soot mass fraction [-] |
- * | 1 | bs | Normalised radical nuclei concentration = Ns / (ρ·Ns_norm) [m³/kg] |
+ * | 1 | bs | Normalized number-density variable, Ns / (rho*Ns_norm) [m3/kg] |
  *
  * @par Physical processes modelled
- * - **Nucleation** — Brookes-Moss (1999) or BM-Hall (2016) extended inception.
- * - **Surface growth** — C2H2 deposition with Arrhenius kinetics.
- * - **Oxidation** — O2 attack (Brookes-Moss) or O2+OH (BM-Hall).
- * - **Coagulation** — free-molecular regime.
- * - **Thermophoresis** — encoded in the effective diffusion coefficient.
- *
- * @par NOT modelled
- * - **Condensation**: no PAH surface adsorption term; `sources_condensation()`
- *   returns a zero span.
- * - **Sintering**: `sources_sintering()` returns a zero span.
+ * Nucleation, surface growth, oxidation, and coagulation are modelled.
+ * Condensation and sintering are not modelled and therefore return zero spans
+ * through the common source-accessor API.
  *
  * @par Thread safety
- * Not thread-safe — one instance per OpenMP thread.
- * See `MomentMethodBase` for the complete thread-safety contract.
+ * Instances are mutable work objects. Use one model instance per thread.
  *
  * @tparam Thermo  Must satisfy the MOM::ThermoMap concept.
  */
@@ -99,7 +95,7 @@ public:
 
     using typename Base::MomentVector;
 
-    /// Labels accepted by MOM::MakeAnyMomentMethod for runtime variant selection.
+    /** @brief Labels accepted by `MOM::MakeAnyMomentMethod()`. */
     static constexpr std::array<std::string_view, 3> variant_labels{"BrookesMoss", "brookesmoss", "BM"};
 
     // -- Method-specific sub-model enums -------------------------------------
@@ -126,8 +122,9 @@ public:
      * @struct Config
      * @brief Plain configuration parameters for the BrookesMoss variant.
      *
-     * Nucleation and oxidation models are represented as integers:
-     * 0 = off, 1 = BrookesMoss, 2 = BrookesMossHall.
+     * Integer process selectors follow the convention:
+     * 0 = off, 1 = BrookesMoss, 2 = BrookesMossHall where applicable.
+     *
      * @note No external dependencies: only standard C++ types.
      */
     struct Config : CommonConfig<0>,
@@ -137,17 +134,17 @@ public:
                     SootRadiationConfig
     {
         // ---- Gas species ---------------------------------------------------
-        std::string precursors_species     = "C2H2"; //!< Nucleation precursor species
-        std::string surface_growth_species = "C2H2"; //!< Surface growth species
-        std::string benzene_species        = "C6H6";
-        std::string phenylradical_species  = "C6H5";
+        std::string precursors_species     = "C2H2"; //!< Nucleation precursor species.
+        std::string surface_growth_species = "C2H2"; //!< Surface-growth reactant species.
+        std::string benzene_species        = "C6H6"; //!< Benzene species for BM-Hall kinetics.
+        std::string phenylradical_species  = "C6H5"; //!< Phenyl radical species for BM-Hall kinetics.
 
         // ---- Soot/particle properties --------------------------------------
         double soot_particle_diameter_m = 1.e-9; //!< Mean particle diameter [m]
-        double soot_particle_mw_kg_kmol = 144.;  //!< Particle MW            [kg/kmol]
-        double ns_norm                  = 1.e15; //!< Ns normalisation value  [#/m3]
+        double soot_particle_mw_kg_kmol = 144.;  //!< Particle molecular weight [kg/kmol]
+        double ns_norm                  = 1.e15; //!< Number-density normalization [#/m3]
 
-        // ---- Model kinetic constants ----------------------------------------
+        // ---- Brookes-Moss kinetic constants ---------------------------------
         double calpha   = 54.;      //!< Nucleation pre-exponential   [1/s]
         double talpha   = 21000.;   //!< Nucleation activation temp.  [K]
         double cbeta    = 1.0;      //!< Condensation coefficient     [-]
@@ -161,10 +158,10 @@ public:
         double sg_exponent1        = 1.; //!< Surface growth exponent 1          [-]
         double sg_exponent2        = 1.; //!< Surface growth exponent 2          [-]
 
-        // ---- Model kinetic constants ----------------------------------------
-        double calpha1_bmh   = 127.*std::pow(10.,8.88); //!< Nucleation pre-exponential   [kg*m3/kmol2/s]
+        // ---- Brookes-Moss-Hall kinetic constants ----------------------------
+        double calpha1_bmh   = 127.*std::pow(10.,8.88); //!< Channel-1 nucleation pre-exponential [kg*m3/kmol2/s]
         double talpha1_bmh   = 4378.;                  //!< Nucleation activation temp.  [K]
-        double calpha2_bmh   = 178.*std::pow(10.,9.50);//!< Nucleation pre-exponential   [kg*m3/kmol2/s]
+        double calpha2_bmh   = 178.*std::pow(10.,9.50);//!< Channel-2 nucleation pre-exponential [kg*m3/kmol2/s]
         double talpha2_bmh   = 6390.;                   //!< Nucleation activation temp.  [K]
         double comega2_bmh   = 8903.51;                 //!< Oxidation pre-exponential    [kg*m/kmol/s/sqrt(K)]
         double tomega2_bmh   = 19778;                   //!< Oxidation activation temp.   [K]
@@ -179,86 +176,96 @@ public:
     BrookesMoss(const BrookesMoss&)            = delete;
     BrookesMoss& operator=(const BrookesMoss&) = delete;
     BrookesMoss(BrookesMoss&&)            = default; ///< Move-constructible for placement in std::variant.
-    BrookesMoss& operator=(BrookesMoss&&) = delete;  ///< Not move-assignable — const Thermo& member cannot be reseated.
+    BrookesMoss& operator=(BrookesMoss&&) = delete;  ///< Not move-assignable: const Thermo& member cannot be reseated.
 
     /**
-     * @brief Configure all BrookesMoss parameters from a plain configuration struct.
-     *
-     * Applies every field of @p cfg by calling the corresponding `Set*()`
-     * methods or direct member assignment where no setter exists, followed
-     * by `PrintSummary()`.  No dependency on external parsing frameworks.
-     *
-     * @param cfg  Configuration struct.  Default-constructed @c Config
-     *             reproduces the constructor defaults.
+     * @brief Configures the model from a plain configuration struct.
+     * @param cfg Configuration values. A default-constructed `Config` applies
+     *            the model defaults.
      */
     void SetupFromConfig(const Config& cfg);
 
 #if defined(MOM_USE_DICTIONARY)
     /**
-     * @brief Parse an OpenSMOKE++ dictionary into a BrookesMoss Config.
-     * @tparam DictType  OpenSMOKE++ dictionary type — no include-time dependency.
+     * @brief Parses an OpenSMOKE++ dictionary into a BrookesMoss configuration.
+     * @tparam DictType OpenSMOKE++ dictionary type.
+     * @param dict Input dictionary.
+     * @return Parsed configuration, or an error string for invalid keyword values.
      */
     template <typename DictType>
     [[nodiscard]] static std::expected<Config, std::string> ParseConfig(DictType& dict);
 #endif
 
-    // -- MomentMethod concept — state injection --------------------------------
+    // -- MomentMethod concept: state injection ---------------------------------
 
-    /// @param T    Temperature [K]
-    /// @param P_Pa Pressure [Pa]
-    /// @param Y    Mass fractions, size = n_species
+    /**
+     * @brief Sets the gas thermodynamic state for the current cell.
+     * @param T Gas temperature [K].
+     * @param P_Pa Gas pressure [Pa].
+     * @param Y Species mass fractions, size equal to `thermo.NumberOfSpecies()`.
+     */
     void SetState(double T, double P_Pa, const double* Y) noexcept;
 
-    /// Generic span setter. Order: [Ys, bs].
-    /// Ys [-], bs [m3/kg].
+    /**
+     * @brief Sets the transported moment variables from a span.
+     * @param m Span of size 2 ordered as `[Ys, bs]`, where `Ys` is soot mass
+     *          fraction [-] and `bs` is normalized number density [m3/kg].
+     */
     void SetMoments(std::span<const double> m) noexcept;
 
-    /// Named setter (preferred for BrookesMoss-aware code).
+    /**
+     * @brief Sets the transported moment variables by name.
+     * @param Ys Soot mass fraction [-].
+     * @param bs Normalized number-density variable [m3/kg].
+     */
     void SetMoments(double Ys, double bs) noexcept;
 
-    // -- MomentMethod concept — core computation -------------------------------
+    // -- MomentMethod concept: core computation --------------------------------
 
+    /** @brief Computes all active moment source terms for the current state. */
     void ComputeSources() noexcept;
+
+    /** @brief Computes gas-phase source terms from the current process rates. */
     void CalculateOmegaGas() noexcept;
 
-    // -- MomentMethod concept — particle properties ----------------------------
+    // -- MomentMethod concept: particle properties -----------------------------
 
     [[nodiscard]] double volume_fraction() const noexcept;
-    [[nodiscard]] double particle_diameter() const noexcept;  //!< mean particle diameter [m]
-    [[nodiscard]] double collision_diameter() const noexcept; //!< same as ParticleDiameter for BM
+    [[nodiscard]] double particle_diameter() const noexcept;  //!< Mean particle diameter [m].
+    [[nodiscard]] double collision_diameter() const noexcept; //!< Collision diameter [m].
     [[nodiscard]] double particle_number_density() const noexcept; //!< [#/m3]
     [[nodiscard]] double mass_fraction() const noexcept;          //!< = Ys_
     [[nodiscard]] double specific_surface_area() const noexcept;       //!< [m2/m3]
     [[nodiscard]] double diffusion_coefficient() const noexcept;  //!< [kg/m/s]
-    [[nodiscard]] double number_primary_particles() const noexcept;
+    [[nodiscard]] double number_primary_particles() const noexcept; //!< Returns 0 for this two-equation model.
     
-    // -- MomentMethod concept — initial conditions -----------------------------
+    // -- MomentMethod concept: initial conditions ------------------------------
 
     [[nodiscard]] std::span<const double> initial_moments() const noexcept
     {
         return {initial_moments_cache_.data(), 2u};
     }
 
-    // -- MomentMethod concept — precursor --------------------------------------
+    // -- MomentMethod concept: precursor ---------------------------------------
 
+    /** @brief Returns the 0-based precursor species index, or -1 if unset. */
     [[nodiscard]] int precursor_index() const noexcept { return prec_index_; }
 
+    /** @brief Returns the precursor molar concentration [kmol/m3]. */
     [[nodiscard]] double precursor_concentration() const noexcept { return conc_prec_; }
 
+    /** @brief Returns the configured precursor species name. */
     [[nodiscard]] const std::string& precursor_species() const noexcept { return prec_species_; }
 
-    // -- MomentMethod concept — diagnostics ------------------------------------
+    // -- MomentMethod concept: diagnostics -------------------------------------
 
     void PrintSummary() const;
 
-    // -- Reporter output hook (MomentMethodReporter extensibility protocol) ------
-    //
-    // Makes BrookesMoss self-describing with respect to output.
-    // MomentMethodReporter calls this with a lambda cb(label, value):
-    //   • header mode — lambda uses label to register the column
-    //   • row mode    — lambda uses value to write the data
-
-    /// BrookesMoss-specific prefix columns: gas-phase source diagnostics.
+    /**
+     * @brief Emits BrookesMoss-specific reporter columns.
+     *
+     * The callback is called as `cb(label, value)` for gas-source diagnostics.
+     */
     template <typename CB> void variant_prefix_output(CB&& cb) const
     {
         cb("omegaTot[kg/m3/s]", this->omega_gas_.sum());
@@ -283,6 +290,7 @@ public:
 
     // -- Model switches --------------------------------------------------------
 
+    /** @brief Sets the nucleation model by integer flag: 0=off, 1=BM, 2=BM-Hall. */
     void SetNucleation(int flag)
     {
         switch (flag)
@@ -298,6 +306,7 @@ public:
 
     void SetNucleation(std::string_view label);
 
+    /** @brief Sets the surface-growth model by integer flag: 0=off, 1=on. */
     void SetSurfaceGrowth(int flag)
     {
         if (flag != 0 && flag != 1)
@@ -306,6 +315,7 @@ public:
         surface_growth_model_ = flag;
     }
 
+    /** @brief Sets the oxidation model by integer flag: 0=off, 1=BM, 2=BM-Hall. */
     void SetOxidation(int flag)
     {
         switch (flag)
@@ -321,6 +331,7 @@ public:
 
     void SetOxidation(std::string_view label);
 
+    /** @brief Sets the coagulation model by integer flag: 0=off, 1=on. */
     void SetCoagulation(int flag)
     {
         if (flag != 0 && flag != 1)
@@ -329,10 +340,15 @@ public:
         coagulation_model_ = flag;
     }
 
+    /** @brief Sets and validates the nucleation precursor species. */
     void SetPrecursors(std::string_view name);
+    /** @brief Sets and validates the surface-growth species. */
     void SetSurfaceGrowthSpecies(std::string_view name);
+    /** @brief Sets and validates the benzene species used by BM-Hall kinetics. */
     void SetBenzeneSpecies(std::string_view name);
+    /** @brief Sets and validates the phenyl radical species used by BM-Hall kinetics. */
     void SetPhenylRadicalSpecies(std::string_view name);
+    /** @brief Sets the optional gas-closure dummy species. */
     void SetGasClosureDummySpecies(std::string_view name);
 
     /// Sets normalisation factor for nuclei concentration [#/m3] (default: 1e15).
@@ -383,36 +399,38 @@ public:
     [[nodiscard]] const std::string& sg_species() const noexcept { return sg_species_; }
 
     /**
-     * @name CRTP extension points — per-process source storage
+     * @name Per-process source storage accessors
      *
      * BrookesMoss models: nucleation, coagulation, growth, oxidation.
-     * Condensation and sintering are **not** modelled; `sources_condensation()`
-     * and `sources_sintering()` return zero spans automatically.
+     * Condensation and sintering use the base-class zero fallback.
      * @{
      */
 
-    /** @brief Nucleation source terms [mol/m³/s], size = n_equations. */
+    /** @brief Nucleation source terms, size = n_equations. */
     [[nodiscard, gnu::always_inline]] std::span<const double> sources_nucleation_impl() const noexcept
     {
         return {source_nucleation_.data(), this->n_equations};
     }
 
+    /** @brief Coagulation source terms, size = n_equations. */
     [[nodiscard, gnu::always_inline]] std::span<const double> sources_coagulation_impl() const noexcept
     {
         return {source_coagulation_.data(), this->n_equations};
     }
 
+    /** @brief Surface-growth source terms, size = n_equations. */
     [[nodiscard, gnu::always_inline]] std::span<const double> sources_growth_impl() const noexcept
     {
         return {source_growth_.data(), this->n_equations};
     }
 
+    /** @brief Oxidation source terms, size = n_equations. */
     [[nodiscard, gnu::always_inline]] std::span<const double> sources_oxidation_impl() const noexcept
     {
         return {source_oxidation_.data(), this->n_equations};
     }
 
-    /** @brief Oxidation-only gas-phase source terms [kg/m³/s] for operator splitting. */
+    /** @brief Oxidation-only gas-phase source terms [kg/m3/s] for operator splitting. */
     [[nodiscard, gnu::always_inline]] std::span<const double> omega_gas_oxidation_impl() const noexcept
     {
         return {omega_gas_oxidation_.data(),
@@ -426,7 +444,7 @@ private:
     // -- Private computational methods ------------------------------------------
 
     void MemoryAllocation();
-    void ApplyConfig(const Config& cfg); //!< core of SetupFromConfig, without PrintSummary()
+    void ApplyConfig(const Config& cfg);
     void NucleationSourceTerms();
     void NucleationSourceTerms_BM();
     void NucleationSourceTerms_BMH();
@@ -468,10 +486,10 @@ private:
     double conc_OH_ = 0.;
     double conc_O2_ = 0.;    
 
-    // 0-based species indices (−1 = not found in mechanism, safely ignored)
-    int index_H_    = -1; //!< H radical  — BM-Hall nucleation ch.2 gas coupling
-    int index_H2_   = -1; //!< H₂        — nucleation/surface-growth/oxidation (OH) coupling
-    int index_CO_   = -1; //!< CO         — oxidation gas coupling (both variants)
+    // 0-based species indices (-1 = not found in mechanism).
+    int index_H_    = -1; //!< H radical for BM-Hall channel 2 gas coupling.
+    int index_H2_   = -1; //!< H2 for nucleation, surface growth, and oxidation gas coupling.
+    int index_CO_   = -1; //!< CO for oxidation gas coupling.
     int index_C2H2_ = -1;
     std::string phenylradical_species_ = "C6H5";
     std::string benzene_species_       = "C6H6";
@@ -538,7 +556,7 @@ private:
     MomentVector source_growth_      = MomentVector::Zero();
     MomentVector source_oxidation_   = MomentVector::Zero();
 
-    Eigen::VectorXd omega_gas_oxidation_; //!< Oxidation-only gas-phase sources [kg/m³/s].
+    Eigen::VectorXd omega_gas_oxidation_; //!< Oxidation-only gas-phase sources [kg/m3/s].
 
     // -- Initial moments cache --------------------------------------------------
     MomentVector initial_moments_cache_ = MomentVector::Zero();

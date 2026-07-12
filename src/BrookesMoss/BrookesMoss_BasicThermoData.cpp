@@ -1,7 +1,7 @@
-/*-----------------------------------------------------------------------*\
-|   MOM Library — BrookesMoss<BasicThermoData> explicit instantiation     |
-|   Compiled unconditionally. Requires no external dependencies.          |
-\*-----------------------------------------------------------------------*/
+/**
+ * @file BrookesMoss_BasicThermoData.cpp
+ * @brief Explicit instantiation of `BrookesMoss<BasicThermoData>`.
+ */
 
 #if defined(MOM_COMPILED_LIBRARY)
 #error "Do not define MOM_COMPILED_LIBRARY when compiling library sources"
@@ -13,4 +13,3 @@ namespace MOM
 {
 template class BrookesMoss<BasicThermoData>;
 }
-
