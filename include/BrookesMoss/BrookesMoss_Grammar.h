@@ -41,12 +41,22 @@
 #include "DictionaryGrammar.h"
 #include "DictionaryKeyWord.h"
 
+/**
+ * @file BrookesMoss_Grammar.h
+ * @brief OpenSMOKE++ dictionary grammar for the BrookesMoss model.
+ */
+
 namespace MOM
 {
+/**
+ * @class BrookesMoss_Grammar
+ * @brief Defines valid dictionary keywords for BrookesMoss configuration.
+ */
 class BrookesMoss_Grammar : public OpenSMOKEpp::DictionaryGrammar
 {
 protected:
 
+    /** @brief Registers dictionary keywords, value types, and mandatory flags. */
     virtual void DefineRules();
 };
 } // namespace MOM

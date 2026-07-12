@@ -33,5 +33,7 @@
 |                                                                         |
 \*-----------------------------------------------------------------------*/
 
-// Superseded by HMOM_BasicThermoData.cpp and HMOM_OpenSMOKEThermo.cpp
-// This file is intentionally empty. Do not add to CMakeLists sources.
+/**
+ * @file HMOM.cpp
+ * @brief Reserved translation unit for optional non-template HMOM definitions.
+ */

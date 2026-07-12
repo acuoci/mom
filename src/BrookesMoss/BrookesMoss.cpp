@@ -1,2 +1,4 @@
-// Superseded by BrookesMoss_BasicThermoData.cpp
-// This file is intentionally empty. Do not add to CMakeLists sources.
+/**
+ * @file BrookesMoss.cpp
+ * @brief Reserved source file for BrookesMoss non-template definitions.
+ */

@@ -40,8 +40,7 @@
  * @brief Particle property and model-status free functions for AnyMomentMethod.
  *
  * Contains all physical property queries (geometry, transport, radiation) and
- * model-status/control queries (active flag, gas consumption, closure species,
- * precursor index, etc.).  All functions are zero-copy and `noexcept`.
+ * model-status queries for the runtime-selected API.
  *
  * Included automatically by `MOM/MOM.hpp`.
  *

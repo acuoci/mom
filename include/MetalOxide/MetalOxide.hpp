@@ -51,17 +51,22 @@
 #include <expected>
 #endif
 
+/**
+ * @file MetalOxide.hpp
+ * @brief Three-equation moment model for solid oxide nanoparticle dynamics.
+ */
+
 namespace MOM
 {
 
 /**
  * @class MetalOxide
- * @brief Three-equation method of moments for solid oxide nanoparticle formation and evolution.
+ * @brief Configurable solid oxide nanoparticle source-term model.
  *
- * Models a configurable solid oxide material from a gas-phase precursor via
- * nucleation, condensation, coagulation, and sintering. The default material
- * constants are TiO2/anatase and can be replaced explicitly through Config or
- * the dictionary interface.
+ * Models particle formation and evolution from a gas-phase precursor through
+ * nucleation, condensation, coagulation, and sintering. The solid material,
+ * precursor, and gas stoichiometry are supplied explicitly through `Config` or
+ * through the dictionary interface.
  *
  * @par References
  * - Kruis, Kusters & Pratsinis, *Aerosol Sci. Technol.* **19** (1993) 514–526.
@@ -71,30 +76,19 @@ namespace MOM
  * | Index | Symbol | Physical meaning |
  * |---|---|---|
  * | 0 | Ysolid | Solid particle mass fraction [-] |
- * | 1 | NsolidN | Scaled number density = N / N0_scaling [-] (default N0_scaling = 10¹⁵ #/m³) |
- * | 2 | Ssolid | Total particle surface area per gas volume [m²/m³] |
+ * | 1 | NsolidN | Scaled number density, N / N0_scaling [-] |
+ * | 2 | Ssolid | Total particle surface area per gas volume [m2/m3] |
  *
  * @par Physical processes modelled
- * - **Nucleation** — binary (precursor + precursor) or fixed-cluster variant.
- * - **Condensation** — precursor condensation on existing solid oxide particles.
- * - **Coagulation** — free-molecular kernel with enhancement factor.
- * - **Sintering** — viscous-flow model (Kruis et al. 1993):
- *   τ_s = (1/A_s)·T^{−n_s}·exp(T_s/T).
- * - **Thermophoresis** — encoded in the effective diffusion coefficient.
+ * Nucleation, condensation, coagulation, and sintering are modelled. Surface
+ * growth and oxidation are not modelled and therefore return zero spans through
+ * the common source-accessor API.
  *
- * @par NOT modelled
- * - Surface growth by CVD.
- * - Oxidation (particles are already fully oxidised).
- * - Radiative heat transfer (dielectric — `PlanckCoeffModel::None`).
- *
- * @note `sources_growth()` and `sources_oxidation()` return zero spans from the
- *       base class because no `_impl()` methods are declared.
  * @note When sintering is stiff relative to the flow time step, use
  *       `SinteringDeferredUpdate()` to integrate it separately via an ODE sub-step.
  *
  * @par Thread safety
- * Not thread-safe — one instance per OpenMP thread.
- * See `MomentMethodBase` for the complete thread-safety contract.
+ * Instances are mutable work objects. Use one model instance per thread.
  *
  * @tparam Thermo  Must satisfy the MOM::ThermoMap concept.
  */
@@ -107,7 +101,7 @@ public:
 
     using typename Base::MomentVector;
 
-    /// Labels accepted by MOM::MakeAnyMomentMethod for runtime variant selection.
+    /** @brief Labels accepted by `MOM::MakeAnyMomentMethod()`. */
     static constexpr std::array<std::string_view, 2> variant_labels{"MetalOxide", "metaloxide"};
 
     // -- Method-specific sub-model enums -------------------------------------
@@ -124,25 +118,22 @@ public:
      * @struct NDFReconstructionData
      * @brief Parameters of the Pareto + log-normal NDF reconstruction.
      *
-     * Uses the same reconstruction framework as `ThreeEquations` (Franzelli et al.
-     * 2019), adapted for solid oxide nanoparticle size distributions.
-     *
-     * Call `ReconstructedNDFData()` to compute and retrieve these parameters.
+     * Returned by `ReconstructedNDFData()` for reporting and NDF file output.
      */
     struct NDFReconstructionData
     {
         bool valid;     //!< True if reconstruction is physically meaningful.
-        double N;       //!< Particle number density [#/m³].
+        double N;       //!< Particle number density [#/m3].
         double fv;      //!< Volume fraction [-].
-        double nuMean;  //!< Mean particle volume [m³/#].
-        double nuNucl;  //!< Volume of a newly nucleated particle [m³/#].
-        double alpha;   //!< Pareto weight α ∈ [0,1] [-].
-        double nbar0;   //!< Nucleation-peak normalised NDF value [1/m³].
-        double sigma;   //!< Log-normal standard deviation σ [-].
+        double nuMean;  //!< Mean particle volume [m3/#].
+        double nuNucl;  //!< Volume of a newly nucleated particle [m3/#].
+        double alpha;   //!< Pareto weight [0,1] [-].
+        double nbar0;   //!< Nucleation-peak normalized NDF value [1/m3].
+        double sigma;   //!< Log-normal standard deviation [-].
         double k;       //!< Pareto tail index k [-].
-        double nu1mean; //!< Mean volume of the Pareto contribution [m³/#].
-        double nu2mean; //!< Mean volume of the log-normal contribution [m³/#].
-        double mu;      //!< Log-normal location parameter μ [log(m³)].
+        double nu1mean; //!< Mean volume of the Pareto contribution [m3/#].
+        double nu2mean; //!< Mean volume of the log-normal contribution [m3/#].
+        double mu;      //!< Log-normal location parameter [log(m3)].
     };
 
     // -- Configuration struct ------------------------------------------------
@@ -151,13 +142,12 @@ public:
      * @struct GasStoichiometryTerm
      * @brief Gas-phase stoichiometric coefficient per precursor molecule.
      *
-     * Coefficients are positive for produced gas species and negative for
-     * consumed gas species.  The condensed solid is not listed here; it is
-     * represented by @c solid_formula_units_per_precursor.
+     * Coefficients are positive for products and negative for reactants. The
+     * solid product is represented by `solid_formula_units_per_precursor`.
      */
     struct GasStoichiometryTerm
     {
-        std::string species; //!< Gas species name
+        std::string species; //!< Gas species name.
         double coefficient = 0.; //!< Stoichiometric coefficient [kmol/kmol precursor]
     };
 
@@ -165,49 +155,50 @@ public:
      * @struct Config
      * @brief Plain configuration parameters for the solid oxide variant.
      *
-     * The @c nucleation_model field uses strings matching the grammar convention:
-     * @c "none" | @c "binary" (default) | @c "fixed-cluster".
+     * The `nucleation_model` field accepts `"none"`, `"binary"`, or
+     * `"fixed-cluster"`.
+     *
      * @note No external dependencies: only standard C++ types.
      */
     struct Config : CommonConfig<1>, GasConsumptionConfig<false>
     {
         // ---- Activation / precursor ----------------------------------------
-        std::string precursor_species = "none"; //!< Solid oxide precursor species
+        std::string precursor_species = "none"; //!< Gas precursor species.
 
         // ---- Solid material -------------------------------------------------
-        std::string solid_name                       = "TiO2";   //!< Solid product label
+        std::string solid_name                       = "TiO2";   //!< Solid product label.
         double      solid_molecular_weight_kg_kmol   = 79.866;   //!< Solid formula-unit molecular weight [kg/kmol]
         double      solid_density_kg_m3              = 4230.;    //!< Solid density [kg/m3]
-        double      solid_formula_units_per_precursor = 1.;      //!< Solid formula units formed per precursor molecule
+        double      solid_formula_units_per_precursor = 1.;      //!< Solid formula units per precursor molecule.
 
         // ---- Gas consumption / closure -------------------------------------
-        std::vector<GasStoichiometryTerm> gas_stoichiometry; //!< Explicit gas reaction terms
-        double gas_stoichiometry_mass_tolerance = 1.e-3; //!< Relative mass-balance tolerance
+        std::vector<GasStoichiometryTerm> gas_stoichiometry; //!< Explicit gas reaction terms.
+        double gas_stoichiometry_mass_tolerance = 1.e-3; //!< Relative mass-balance tolerance.
 
         // ---- Process model selection ---------------------------------------
-        /// Nucleation model: "none" | "binary" (default) | "fixed-cluster"
+        /// Nucleation model: "none" | "binary" | "fixed-cluster".
         std::string nucleation_model = "binary";
         int sintering_model          = 1; //!< Sintering model index
         int coagulation_model        = 1; //!< Coagulation model index
         int condensation_model       = 1; //!< Condensation model index
 
         // ---- Particle cluster sizes ----------------------------------------
-        int minimum_formula_units            = 2; //!< Minimum solid formula units per aggregate
-        int nucleated_particle_formula_units = 5; //!< Solid formula units per nucleated particle
+        int minimum_formula_units            = 2; //!< Minimum solid formula units per aggregate.
+        int nucleated_particle_formula_units = 5; //!< Solid formula units per nucleated particle.
 
-        // ---- Sintering kinetics: τ_s = As · T^ns · d_p^4 · exp(Ts/T) -----
+        // ---- Sintering kinetics: tau_s = As * T^ns * d_p^4 * exp(Ts/T) ---
         double sintering_As_s_K_m = 7.44e16; //!< Pre-exponential [s,K,m]
         double sintering_Ts_K     = 31000.;  //!< Activation temperature [K] (positive; used as exp(Ts/T))
         double sintering_ns       =  1.0;    //!< Temperature/size exponent [-]
 
         // ---- Sintering numerical regularisation ----------------------------
-        bool   sintering_deferred    = false;  //!< Defer sintering to operator-split step
+        bool   sintering_deferred    = false;  //!< Defer sintering to operator-split step.
         double sintering_dp_min_m    = 2.e-9;  //!< Diameter below which sintering inactive [m]
         double sintering_tau_min_s   = 1.e-10; //!< Minimum sintering time-scale [s]
         double sintering_k_max_per_s = 1.e6;   //!< Maximum sintering rate [1/s]
 
         // ---- Numerical floors ----------------------------------------------
-        double ns_minimum_per_m3 = 1.e3;   //!< Minimum number density floor [#/m³]
+        double ns_minimum_per_m3 = 1.e3;   //!< Minimum number density floor [#/m3]
         double fv_minimum        = 1.e-16; //!< Minimum volume fraction floor [-]
 
     };
@@ -220,98 +211,122 @@ public:
     MetalOxide(const MetalOxide&)            = delete;
     MetalOxide& operator=(const MetalOxide&) = delete;
     MetalOxide(MetalOxide&&)            = default; ///< Move-constructible for placement in std::variant.
-    MetalOxide& operator=(MetalOxide&&) = delete;  ///< Not move-assignable — const Thermo& member cannot be reseated.
+    MetalOxide& operator=(MetalOxide&&) = delete;  ///< Not move-assignable: const Thermo& member cannot be reseated.
 
     /**
-     * @brief Configure all solid oxide parameters from a plain configuration struct.
-     *
-     * Applies every field of @p cfg by calling the corresponding `Set*()`
-     * methods or direct member assignment where no setter exists, followed
-     * by `PrintSummary()`.  No dependency on external parsing frameworks.
-     *
-     * @param cfg  Configuration struct.  Default-constructed @c Config
-     *             reproduces the constructor defaults.
+     * @brief Configures the model from a plain configuration struct.
+     * @param cfg Configuration values. A default-constructed `Config` applies
+     *            the model defaults.
      */
     void SetupFromConfig(const Config& cfg);
 
 #if defined(MOM_USE_DICTIONARY)
     /**
-     * @brief Parse an OpenSMOKE++ dictionary into a MetalOxide Config.
-     * @tparam DictType  OpenSMOKE++ dictionary type — no include-time dependency.
+     * @brief Parses an OpenSMOKE++ dictionary into a MetalOxide configuration.
+     * @tparam DictType OpenSMOKE++ dictionary type.
+     * @param dict Input dictionary.
+     * @return Parsed configuration, or an error string for invalid keyword values.
      */
     template <typename DictType>
     [[nodiscard]] static std::expected<Config, std::string> ParseConfig(DictType& dict);
 #endif
 
-    // -- MomentMethod concept — state injection --------------------------------
+    // -- MomentMethod concept: state injection ---------------------------------
 
-    /// @param T    Temperature [K]
-    /// @param P_Pa Pressure [Pa]
-    /// @param Y    Mass fractions, size = n_species
+    /**
+     * @brief Sets the gas thermodynamic state for the current cell.
+     * @param T Gas temperature [K].
+     * @param P_Pa Gas pressure [Pa].
+     * @param Y Species mass fractions, size equal to `thermo.NumberOfSpecies()`.
+     */
     void SetState(double T, double P_Pa, const double* Y) noexcept;
 
-    /// Generic span setter. Order: [Ysolid, NsolidN, Ssolid].
-    /// Ysolid [-], NsolidN [-], Ssolid [m2/m3].
+    /**
+     * @brief Sets the transported moment variables from a span.
+     * @param m Span of size 3 ordered as `[Ysolid, NsolidN, Ssolid]`.
+     */
     void SetMoments(std::span<const double> m) noexcept;
 
-    /// Named setter for the transported solid moments.
+    /**
+     * @brief Sets the transported moment variables by name.
+     * @param solid_mass_fraction Solid particle mass fraction [-].
+     * @param scaled_number_density Number density scaled by `N0_scaling_` [-].
+     * @param surface_area_concentration Total particle surface area [m2/m3].
+     */
     void SetMoments(double solid_mass_fraction,
                     double scaled_number_density,
                     double surface_area_concentration) noexcept;
 
-    // -- MomentMethod concept — core computation -------------------------------
+    // -- MomentMethod concept: core computation --------------------------------
 
-    /// Computes all source terms for the current cell state.
+    /** @brief Computes all active moment source terms for the current state. */
     void ComputeSources() noexcept;
 
+    /** @brief Computes gas-phase source terms from the current process rates. */
     void CalculateOmegaGas() noexcept;
 
     // -- Deferred sintering (operator-splitting compatible) --------------------
-    //
-    // When sintering is stiff relative to the main transport time step,
-    // it can be integrated separately using an ODE solver. Call this method
-    // after ComputeSources to update surface area with a sub-step.
-    //
-    // Returns the sintering time scale [s].
 
+    /**
+     * @brief Applies the analytical deferred-sintering update to surface area.
+     * @param dt_ode Sub-step duration [s].
+     * @return Updated surface-area concentration [m2/m3].
+     */
     [[nodiscard]] double SinteringDeferredUpdate(double dt_ode);
 
-    // -- MomentMethod concept — particle properties ----------------------------
+    // -- MomentMethod concept: particle properties -----------------------------
 
     [[nodiscard]] double volume_fraction() const noexcept;
-    [[nodiscard]] double particle_diameter() const noexcept;  //!< primary particle diameter [m]
-    [[nodiscard]] double collision_diameter() const noexcept; //!< aggregate collision diameter [m]
-    [[nodiscard]] double AggregateDiameter() const noexcept; //!< mobility aggregate diameter [m]
-    [[nodiscard]] double particle_number_density() const noexcept;    //!< [#/m3]
-    [[nodiscard]] double mass_fraction() const noexcept;             //!< solid mass fraction [-]
-    [[nodiscard]] double specific_surface_area() const noexcept;          //!< total surface area [m2/m3]
-    [[nodiscard]] double number_primary_particles() const noexcept; //!< np [-]
-    [[nodiscard]] double diffusion_coefficient() const noexcept;     //!< [kg/m/s]
+    [[nodiscard]] double particle_diameter() const noexcept;  //!< Primary particle diameter [m].
+    [[nodiscard]] double collision_diameter() const noexcept; //!< Aggregate collision diameter [m].
+    [[nodiscard]] double AggregateDiameter() const noexcept; //!< Mobility aggregate diameter [m].
+    [[nodiscard]] double particle_number_density() const noexcept; //!< Particle number density [#/m3].
+    [[nodiscard]] double mass_fraction() const noexcept; //!< Solid mass fraction [-].
+    [[nodiscard]] double specific_surface_area() const noexcept; //!< Total surface area [m2/m3].
+    [[nodiscard]] double number_primary_particles() const noexcept; //!< Mean primary particles per aggregate [-].
+    [[nodiscard]] double diffusion_coefficient() const noexcept; //!< Effective diffusion coefficient [kg/m/s].
 
-    // -- MomentMethod concept — initial conditions -----------------------------
+    // -- MomentMethod concept: initial conditions ------------------------------
 
+    /** @brief Returns initial values for `[Ysolid, NsolidN, Ssolid]`. */
     [[nodiscard]] std::span<const double> initial_moments() const noexcept
     {
         return {initial_moments_cache_.data(), 3u};
     }
 
-    // -- MomentMethod concept — precursor --------------------------------------
+    // -- MomentMethod concept: precursor ---------------------------------------
 
+    /** @brief Returns the 0-based precursor species index, or -1 if unset. */
     [[nodiscard]] int precursor_index() const noexcept { return precursor_index_; }
 
+    /** @brief Returns the precursor molar concentration [kmol/m3]. */
     [[nodiscard]] double precursor_concentration() const noexcept { return c_precursor_; }
 
+    /** @brief Returns the configured precursor species name. */
     [[nodiscard]] const std::string& precursor_species() const noexcept
     {
         return precursor_species_;
     }
 
-    // -- MomentMethod concept — diagnostics ------------------------------------
+    // -- MomentMethod concept: diagnostics -------------------------------------
 
     void PrintSummary() const;
 
     // -- Aggregated properties helper ------------------------------------------
 
+    /**
+     * @brief Computes regularized aggregate properties from the current moments.
+     *
+     * @param fv Particle volume fraction [-].
+     * @param dp Primary particle diameter [m].
+     * @param dc Collision diameter [m].
+     * @param da Sphere-equivalent aggregate diameter [m].
+     * @param np Mean number of primary particles per aggregate [-].
+     * @param ss Surface area per particle [m2].
+     * @param vs Volume per particle [m3].
+     * @param ssph Spherical surface area for volume @p vs [m2].
+     * @param tauS Sintering time scale [s].
+     */
     void Properties(double& fv,
                     double& dp,
                     double& dc,
@@ -322,14 +337,12 @@ public:
                     double& ssph,
                     double& tauS) const noexcept;
 
-    // -- Reporter output hook (MomentMethodReporter extensibility protocol) ------
-    //
-    // Makes MetalOxide self-describing with respect to output.
-    // MomentMethodReporter calls this with a lambda cb(label, value):
-    //   • header mode — lambda uses label to register the column
-    //   • row mode    — lambda uses value to write the data
-
-    /// Variant-specific prefix columns: da, np, ss, vs, tauS, NDF parameters.
+    /**
+     * @brief Emits MetalOxide-specific reporter columns.
+     *
+     * The callback is called as `cb(label, value)` for aggregate properties,
+     * NDF reconstruction parameters, and gas-source diagnostics.
+     */
     template <typename CB> void variant_prefix_output(CB&& cb) const
     {
         double fv, dp, dc, da, np, ss, vs, ssph, tauS;
@@ -361,43 +374,71 @@ public:
 
     // -- NDF reconstruction ----------------------------------------------------
 
+    /** @brief Returns parameters of the current reconstructed NDF. */
     [[nodiscard]] NDFReconstructionData ReconstructedNDFData(bool use_regularized_moments = false) const;
 
+    /**
+     * @brief Returns the normalized NDF value at particle volume @p nu.
+     * @param nu Particle volume [m3].
+     * @param use_regularized_moments If true, applies numerical floors before reconstruction.
+     * @return Normalized NDF [1/m3].
+     */
     [[nodiscard]] double ReconstructedNormalizedNDF(double nu,
                                                     bool use_regularized_moments = false) const;
 
+    /**
+     * @brief Returns the dimensional NDF value at particle volume @p nu.
+     * @param nu Particle volume [m3].
+     * @param use_regularized_moments If true, applies numerical floors before reconstruction.
+     * @return Dimensional NDF [#/m3 gas / m3 particle].
+     */
     [[nodiscard]] double ReconstructedNDF(double nu, bool use_regularized_moments = false) const;
 
+    /**
+     * @brief Fills a vector with dimensional NDF values at the requested volumes.
+     * @param nu Particle-volume grid [m3].
+     * @param n Output dimensional NDF values.
+     * @param use_regularized_moments If true, applies numerical floors before reconstruction.
+     */
     void ReconstructedNDF(const Eigen::VectorXd& nu,
                           Eigen::VectorXd& n,
                           bool use_regularized_moments = false) const;
 
     // -- Material / geometry accessors -----------------------------------------
 
+    /** @brief Returns the solid material label. */
     [[nodiscard]] const std::string& solid_name() const noexcept { return solid_name_; }
 
+    /** @brief Returns the solid material density [kg/m3]. */
     [[nodiscard]] double solid_density() const noexcept { return solid_density_kg_m3_; }
 
+    /** @brief Returns the solid formula-unit molecular weight [kg/kmol]. */
     [[nodiscard]] double solid_molecular_weight() const noexcept
     {
         return solid_molecular_weight_kg_kmol_;
     }
 
+    /** @brief Returns solid formula units formed per precursor molecule. */
     [[nodiscard]] double solid_formula_units_per_precursor() const noexcept
     {
         return solid_formula_units_per_precursor_;
     }
 
+    /** @brief Returns the volume of a nucleated particle [m3]. */
     [[nodiscard]] double NucleationParticleVolume() const noexcept;
 
+    /** @brief Returns the minimum-particle surface area [m2]. */
     [[nodiscard]] double s0() const noexcept { return s0_; }
 
+    /** @brief Returns the minimum-particle volume [m3]. */
     [[nodiscard]] double v0() const noexcept { return v0_; }
 
+    /** @brief Returns the number-density scaling factor [#/m3]. */
     [[nodiscard]] double ScalingFactorNs() const noexcept { return N0_scaling_; }
 
     // -- Model switches --------------------------------------------------------
 
+    /** @brief Sets the nucleation model by integer flag: 0=off, 1=binary, 2=fixed-cluster. */
     void SetNucleation(int flag)
     {
         if (flag != 0 && flag != 1 && flag != 2)
@@ -406,6 +447,7 @@ public:
         nucleation_variant_ = static_cast<NucleationVariant>(flag);
     }
 
+    /** @brief Sets the coagulation model by integer flag: 0=off, 1=on. */
     void SetCoagulation(int flag)
     {
         if (flag != 0 && flag != 1)
@@ -414,6 +456,7 @@ public:
         coagulation_model_ = flag;
     }
 
+    /** @brief Sets the condensation model by integer flag: 0=off, 1=on. */
     void SetCondensation(int flag)
     {
         if (flag != 0 && flag != 1)
@@ -422,6 +465,7 @@ public:
         condensation_model_ = flag;
     }
 
+    /** @brief Sets the sintering model by integer flag: 0=off, 1=on. */
     void SetSintering(int flag)
     {
         if (flag != 0 && flag != 1)
@@ -430,12 +474,16 @@ public:
         sintering_model_ = flag;
     }
 
+    /** @brief Sets and validates solid material properties. */
     void SetSolidMaterial(std::string_view name, double molecular_weight_kg_kmol, double density_kg_m3);
 
+    /** @brief Sets solid formula units formed per precursor molecule. */
     void SetSolidFormulaUnitsPerPrecursor(double n);
 
+    /** @brief Sets formula units in a newly nucleated particle. */
     void SetNumberOfFormulaUnitsPerNucleatedParticle(unsigned n);
 
+    /** @brief Sets the minimum formula-unit count used by regularized geometry. */
     void SetMinimumNumberOfFormulaUnits(unsigned n);
 
     void SetNucleationCollisionEnhancementFactor(double eps) noexcept { epsilon_nuc_ = eps; }
@@ -444,7 +492,7 @@ public:
 
     void SetCondensationCollisionEnhancementFactor(double eps) noexcept { epsilon_cond_ = eps; }
 
-    /// Sintering kinetics: τ_s = (1 / As) * T^(-ns) * exp(Ts / T) [s]
+    /// Sintering kinetics: tau_s = As * T^ns * dp^4 * exp(Ts/T) [s].
     void SetSinteringFrequencyFactor(double As) noexcept { As_ = As; }
 
     void SetSinteringActivationTemperature(double Ts) noexcept { Ts_ = Ts; }
@@ -455,10 +503,12 @@ public:
 
     void SetFvMinimum(double v) noexcept { fv_min_ = v; }
 
+    /** @brief Sets and validates the gas precursor species. */
     void SetPrecursor(std::string_view name);
+    /** @brief Sets the optional gas-closure dummy species. */
     void SetGasClosureDummySpecies(std::string_view name);
 
-    /// Configure explicit gas-phase stoichiometry. Empty input clears gas-source stoichiometry.
+    /** @brief Configures explicit gas-phase stoichiometry per precursor molecule. */
     void SetGasStoichiometry(std::span<const GasStoichiometryTerm> terms,
                              double relative_mass_tolerance = 1.e-3);
 
@@ -478,30 +528,32 @@ public:
     [[nodiscard]] bool is_sintering_deferred() const noexcept { return is_sintering_deferred_; }
 
     /**
-     * @name CRTP extension points — per-process source storage
+     * @name Per-process source storage accessors
      *
      * Solid oxide models: nucleation, coagulation, condensation, sintering.
-     * Growth and oxidation are **not** modelled; `sources_growth()` and
-     * `sources_oxidation()` return zero spans automatically.
+     * Growth and oxidation use the base-class zero fallback.
      * @{
      */
 
-    /** @brief Nucleation source terms [mol/m³/s], size = n_equations. */
+    /** @brief Nucleation source terms, size = n_equations. */
     [[nodiscard, gnu::always_inline]] std::span<const double> sources_nucleation_impl() const noexcept
     {
         return {source_nucleation_.data(), this->n_equations};
     }
 
+    /** @brief Coagulation source terms, size = n_equations. */
     [[nodiscard, gnu::always_inline]] std::span<const double> sources_coagulation_impl() const noexcept
     {
         return {source_coagulation_.data(), this->n_equations};
     }
 
+    /** @brief Condensation source terms, size = n_equations. */
     [[nodiscard, gnu::always_inline]] std::span<const double> sources_condensation_impl() const noexcept
     {
         return {source_condensation_.data(), this->n_equations};
     }
 
+    /** @brief Sintering source terms, size = n_equations. */
     [[nodiscard, gnu::always_inline]] std::span<const double> sources_sintering_impl() const noexcept
     {
         return {source_sintering_.data(), this->n_equations};
@@ -515,7 +567,7 @@ private:
 
     void MemoryAllocation();
     void Precalculations();
-    void ApplyConfig(const Config& cfg); //!< core of SetupFromConfig, without PrintSummary()
+    void ApplyConfig(const Config& cfg);
     void NucleationSourceTerms();
     void NucleationSourceTerms_Binary();
     void NucleationSourceTerms_FixedCluster();
@@ -625,10 +677,7 @@ private:
     double v_min_  = 0.;     //!< [m3] set in Precalculations from n_formula_units_min_
     double S_min_  = 0.;     //!< [m2/m3]
 
-    // -- Per-process source storage (owned by MetalOxide, not by base) --------------
-    //
-    // Solid oxide models: nucleation, coagulation, condensation, sintering.
-    // growth and oxidation are absent; base class returns zero span for both.
+    // -- Per-process source storage --------------------------------------------
 
     MomentVector source_nucleation_   = MomentVector::Zero();
     MomentVector source_coagulation_  = MomentVector::Zero();

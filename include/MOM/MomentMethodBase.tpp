@@ -37,10 +37,8 @@
  * @file MomentMethodBase.tpp
  * @brief Template method implementations for MomentMethodBase<Derived, NEq>.
  *
- * This file is `#include`d at the **bottom** of MomentMethodBase.hpp and must
- * never be compiled as a standalone translation unit.  It exists solely to keep
- * the header readable: the class definition stays in the `.hpp` while the
- * out-of-line template bodies live here.
+ * This file is included by `MomentMethodBase.hpp`; do not compile it as a
+ * standalone translation unit.
  *
  * @par Contents
  * Planck mean absorption coefficient correlations — three peer-reviewed empirical
@@ -58,11 +56,8 @@
  * temperature.  The sign convention makes @f$\dot{q}_\mathrm{rad}@f$ negative
  * (a heat *loss* from the gas phase) whenever @f$T > T_\infty@f$.
  *
- * The active correlation is selected at construction time via
- * ProcessFlags::PlanckCoeffModel and dispatched in
- * MomentMethodBase::planck_coefficient().  The three implementations below are
- * otherwise functionally independent — each is a pure arithmetic function with
- * no side effects and no access to member state.
+ * The active correlation is selected through `PlanckCoeffModel` and dispatched
+ * by `MomentMethodBase::planck_coefficient()`.
  *
  * @note All three correlations are empirical curve-fits valid over a limited
  *       temperature range (typically 1000–2500 K) and for soot volume fractions
@@ -77,10 +72,6 @@
 
 namespace MOM
 {
-
-// ============================================================================
-// PlanckSmooke
-// ============================================================================
 
 /**
  * @brief Planck mean absorption coefficient — Smooke et al. (2005) correlation.
@@ -104,9 +95,7 @@ namespace MOM
  * @param fv Soot volume fraction [-].  Typically 1×10⁻⁸ – 1×10⁻⁵ in flames.
  * @return   Planck mean absorption coefficient kP [1/m].
  *
- * @note The function is @c const and @c noexcept; it reads no member state and
- *       performs only two multiplications — safe to call in inner loops.
- *       Dispatched by planck_coefficient() when PlanckCoeffModel::Smooke is set.
+ * @note Dispatched by `planck_coefficient()` when `PlanckCoeffModel::Smooke` is set.
  */
 template <class Derived, unsigned NEq>
 double MomentMethodBase<Derived, NEq>::PlanckSmooke(double T, double fv) const noexcept
@@ -114,10 +103,6 @@ double MomentMethodBase<Derived, NEq>::PlanckSmooke(double T, double fv) const n
     constexpr double C1 = 1232.4; // [K^{-1} m^{-1}]  — Smooke et al. (2005)
     return C1 * fv * T;
 }
-
-// ============================================================================
-// PlanckKent
-// ============================================================================
 
 /**
  * @brief Planck mean absorption coefficient — Kent & Honnery (1990) correlation.
@@ -127,13 +112,6 @@ double MomentMethodBase<Derived, NEq>::PlanckSmooke(double T, double fv) const n
  *   @f[ k_P = C_1 \, f_v \, (C_2 + T) \quad \left[\mathrm{m}^{-1}\right] @f]
  *
  * with @f$C_1 = 1.3\times10^5\ \mathrm{m^{-1}}@f$ and @f$C_2 = 0\ \mathrm{K}@f$.
- *
- * @par Why C2 = 0
- * The original Kent & Honnery fit contains a polynomial in T whose constant
- * term is negligible over the flame-temperature range.  @p C2 is retained as a
- * named constant (rather than being silently absorbed into C1) so the
- * affine structure of the formula remains legible and the offset can be
- * restored to its original non-zero value without restructuring the expression.
  *
  * @par Reference
  * J.H. Kent, D. Honnery, "Soot and mixture fraction in turbulent diffusion
@@ -146,8 +124,7 @@ double MomentMethodBase<Derived, NEq>::PlanckSmooke(double T, double fv) const n
  * @param fv Soot volume fraction [-].
  * @return   Planck mean absorption coefficient kP [1/m].
  *
- * @note The function is @c const and @c noexcept.
- *       Dispatched by planck_coefficient() when PlanckCoeffModel::Kent is set.
+ * @note Dispatched by `planck_coefficient()` when `PlanckCoeffModel::Kent` is set.
  */
 template <class Derived, unsigned NEq>
 double MomentMethodBase<Derived, NEq>::PlanckKent(double T, double fv) const noexcept
@@ -156,10 +133,6 @@ double MomentMethodBase<Derived, NEq>::PlanckKent(double T, double fv) const noe
     constexpr double C2 = 0.;    // [K]         — temperature offset; zero in the adopted linearisation
     return C1 * fv * (C2 + T);
 }
-
-// ============================================================================
-// PlanckSazhin
-// ============================================================================
 
 /**
  * @brief Planck mean absorption coefficient — Sazhin (1994) polynomial correlation.
@@ -180,16 +153,6 @@ double MomentMethodBase<Derived, NEq>::PlanckKent(double T, double fv) const noe
  * | C2     | -1.00e-4 | m⁻¹ K⁻²           | negative curvature (mild saturation at high T) |
  * | C3     | 0        | m⁻¹ K⁻³           | cubic term — zero in adopted quadratic fit |
  *
- * @par Why C3 = 0
- * The quadratic truncation already reproduces the mild negative curvature of
- * kP at temperatures above ~2000 K.  C3 is kept explicit (rather than removed)
- * so the polynomial degree remains obvious and upgrading to a full cubic fit
- * requires only changing the one constant, not restructuring the expression.
- *
- * @par Implementation
- * @c T2 = T*T is computed once and shared between the quadratic and (potential)
- * cubic terms, eliminating a redundant multiplication.
- *
  * @par Reference
  * S.S. Sazhin, "An approximation for the absorption of thermal radiation by
  * soot particles," *Prog. Energy Combust. Sci.* **20** (1994) 297–318.
@@ -203,8 +166,7 @@ double MomentMethodBase<Derived, NEq>::PlanckKent(double T, double fv) const noe
  * @param fv Soot volume fraction [-].
  * @return   Planck mean absorption coefficient kP [1/m].
  *
- * @note The function is @c const and @c noexcept.
- *       Dispatched by planck_coefficient() when PlanckCoeffModel::Sazhin is set.
+ * @note Dispatched by `planck_coefficient()` when `PlanckCoeffModel::Sazhin` is set.
  */
 template <class Derived, unsigned NEq>
 double MomentMethodBase<Derived, NEq>::PlanckSazhin(double T, double fv) const noexcept

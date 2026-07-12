@@ -42,19 +42,18 @@
 #include <cmath>
 #include <limits>
 #include <numeric>
+
+/**
+ * @file BrookesMoss.tpp
+ * @brief Template implementation of the Brookes-Moss soot model.
+ */
+
 namespace MOM
 {
 
-// ============================================================================
-// Constructor
-// ============================================================================
-
 template <ThermoMap Thermo> BrookesMoss<Thermo>::BrookesMoss(const Thermo& thermo) : thermo_(thermo)
 {
-    // -- Species indices for SetState / gas-coupling ----------------------
-    // These are mechanism lookups, not user-configurable parameters.
-    // index_C6H5_ and index_C6H6_ stay at their in-class default of -1
-    // until SetBenzeneSpecies / SetPhenylRadicalSpecies are called.
+    // Mechanism lookups used by state injection and gas coupling.
     index_H_    = thermo_.IndexOfSpecies("H");
     index_H2_   = thermo_.IndexOfSpecies("H2");
     index_CO_   = thermo_.IndexOfSpecies("CO");
@@ -62,26 +61,17 @@ template <ThermoMap Thermo> BrookesMoss<Thermo>::BrookesMoss(const Thermo& therm
     index_O2_   = thermo_.IndexOfSpecies("O2");
     index_C2H2_ = thermo_.IndexOfSpecies("C2H2");
 
-    // -- Internal numerical floors (not user-configurable via Config) ------
     Ys_min_ = 1.e-30;
     bs_min_ = 1.e-30;
 
-    // -- Apply all tunable parameter defaults from Config{} ----------------
-    // Config{} is the single source of truth for every numerical constant.
     ApplyConfig(Config{});
-
-    // -- Memory allocation (size depends on thermo_.NumberOfSpecies()) -----
     MemoryAllocation();
 }
 
-// ============================================================================
-// MemoryAllocation
-// ============================================================================
-
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::MemoryAllocation()
 {
-    this->ZeroSources();          // zeros source_all_ (base class)
-    source_nucleation_.setZero(); // owned by BrookesMoss — zeroed explicitly
+    this->ZeroSources();
+    source_nucleation_.setZero();
     source_coagulation_.setZero();
     source_growth_.setZero();
     source_oxidation_.setZero();
@@ -89,14 +79,9 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::MemoryAllocation()
     this->omega_gas_            = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(thermo_.NumberOfSpecies()));
     omega_gas_oxidation_        = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(thermo_.NumberOfSpecies()));
 
-    // Default initial moment values
     initial_moments_cache_(0) = 1.e-21; // Ys_init [-]
     initial_moments_cache_(1) = 1.e-12; // bs_init [m3/kg]
 }
-
-// ============================================================================
-// SetState
-// ============================================================================
 
 template <ThermoMap Thermo>
 void BrookesMoss<Thermo>::SetState(double T, double P_Pa, const double* Y) noexcept
@@ -109,9 +94,7 @@ void BrookesMoss<Thermo>::SetState(double T, double P_Pa, const double* Y) noexc
     // Surface growth species concentration [kmol/m3]
     conc_sg_ = this->SpeciesConcentrationKmolM3(sg_index_, Y, cTot, thermo_);
 
-    // Key species concentrations [kmol/m3]
-    // NOTE: conc_H2_ is required by the BM-Hall nucleation rate (denominator);
-    //       index_H2_ is always set in the constructor (soft lookup, −1 if absent).
+    // Key species concentrations [kmol/m3].
     conc_OH_   = this->SpeciesConcentrationKmolM3(index_OH_, Y, cTot, thermo_);
     conc_O2_   = this->SpeciesConcentrationKmolM3(index_O2_, Y, cTot, thermo_);
     conc_H2_   = this->SpeciesConcentrationKmolM3(index_H2_, Y, cTot, thermo_);
@@ -119,10 +102,6 @@ void BrookesMoss<Thermo>::SetState(double T, double P_Pa, const double* Y) noexc
     conc_C6H5_ = this->SpeciesConcentrationKmolM3(index_C6H5_, Y, cTot, thermo_);
     conc_C6H6_ = this->SpeciesConcentrationKmolM3(index_C6H6_, Y, cTot, thermo_);
 }
-
-// ============================================================================
-// SetMoments
-// ============================================================================
 
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::SetMoments(std::span<const double> m) noexcept
 {
@@ -136,10 +115,6 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::SetMoments(double Ys, doub
     Ys_ = std::max(Ys, 0.);
     bs_ = std::max(bs, 0.);
 }
-
-// ============================================================================
-// SetPrecursors
-// ============================================================================
 
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::SetPrecursors(std::string_view name)
 {
@@ -158,10 +133,6 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::SetPrecursors(std::string_
                                  prec_species_);
 }
 
-// ============================================================================
-// SetSurfaceGrowthSpecies
-// ============================================================================
-
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::SetSurfaceGrowthSpecies(std::string_view name)
 {
     sg_species_ = std::string(name);
@@ -178,10 +149,6 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::SetSurfaceGrowthSpecies(st
         throw std::runtime_error("[BrookesMoss] Surface growth species has no carbon atoms: " +
                                  sg_species_);
 }
-
-// ============================================================================
-// SetBenzene
-// ============================================================================
 
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::SetBenzeneSpecies(std::string_view name)
 {
@@ -203,10 +170,6 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::SetBenzeneSpecies(std::str
     index_C6H6_     = species_index;
 }
 
-// ============================================================================
-// SetPhenylRadical
-// ============================================================================
-
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::SetPhenylRadicalSpecies(std::string_view name)
 {
     const std::string species_name = std::string(name);
@@ -226,10 +189,6 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::SetPhenylRadicalSpecies(st
     phenylradical_species_ = species_name;
     index_C6H5_            = species_index;
 }
-
-// ============================================================================
-// SetGasClosureDummySpecies
-// ============================================================================
 
 template <ThermoMap Thermo>
 void BrookesMoss<Thermo>::SetGasClosureDummySpecies(std::string_view name)
@@ -251,10 +210,6 @@ void BrookesMoss<Thermo>::SetGasClosureDummySpecies(std::string_view name)
 
     this->is_closure_dummy_species_ = true;
 }
-
-// ============================================================================
-// SetNucleation (string variant)
-// ============================================================================
 
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::SetNucleation(std::string_view label)
 {
@@ -279,10 +234,6 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::SetNucleation(std::string_
                                  ". Allowed: none | BrookesMoss | BrookesMossHall");
     }
 }
-
-// ============================================================================
-// SetOxidation (string variant)
-// ============================================================================
 
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::SetOxidation(std::string_view label)
 {
@@ -310,32 +261,24 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::SetOxidation(std::string_v
     }
 }
 
-// ============================================================================
-// CheckBrookesMossHallSpecies
-// ============================================================================
-
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::CheckBrookesMossHallSpecies()
 {
     SetBenzeneSpecies(benzene_species_);
     SetPhenylRadicalSpecies(phenylradical_species_);
 
-    // Adjust surface growth activation temperature for BMH
+    // BM-Hall uses a lower surface-growth activation temperature.
     Cgamma_ = 9000.6;
 }
 
-// ============================================================================
-// ComputeSources
-// ============================================================================
-
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::ComputeSources() noexcept
 {
-    this->ZeroSources();          // zeros source_all_ (base class)
-    source_nucleation_.setZero(); // owned by BrookesMoss — zeroed explicitly
+    this->ZeroSources();
+    source_nucleation_.setZero();
     source_coagulation_.setZero();
     source_growth_.setZero();
     source_oxidation_.setZero();
 
-    // Reset intermediate quantities
+    // Reset process mass-rate diagnostics.
     dMdt_nucleation_       = 0.;
     dMdt_nucleation_BMH_1_ = 0.;
     dMdt_nucleation_BMH_2_ = 0.;
@@ -344,7 +287,7 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::ComputeSources() noexcept
     dMdt_oxidation_OH_     = 0.;
     dMdt_oxidation_O2_     = 0.;
 
-    // Sub-process source terms
+    // Active sub-process source terms.
     if (nucleation_variant_ != NucleationVariant::Off)
         NucleationSourceTerms();
     if (surface_growth_model_ > 0)
@@ -354,7 +297,7 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::ComputeSources() noexcept
     if (coagulation_model_ > 0)
         CoagulationSourceTerms();
 
-    // Sanitise and accumulate total source
+    // Sanitize and accumulate total sources.
     for (unsigned i = 0; i < 2u; ++i)
     {
         if (!std::isfinite(this->source_nucleation_(i)))
@@ -374,10 +317,6 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::ComputeSources() noexcept
         CalculateOmegaGas();
 }
 
-// ============================================================================
-// NucleationSourceTerms  (dispatcher)
-// ============================================================================
-
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::NucleationSourceTerms()
 {
     if (nucleation_variant_ == NucleationVariant::BrookesMoss)
@@ -385,10 +324,6 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::NucleationSourceTerms()
     else if (nucleation_variant_ == NucleationVariant::BrookesMossHall)
         NucleationSourceTerms_BMH();
 }
-
-// ============================================================================
-// NucleationSourceTerms_BM  — Brookes & Moss (1999)
-// ============================================================================
 
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::NucleationSourceTerms_BM()
 {
@@ -410,17 +345,12 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::NucleationSourceTerms_BM()
     this->source_nucleation_(1) = dNdt / (this->rho_ * Ns_norm_);
 }
 
-// ============================================================================
-// NucleationSourceTerms_BMH  — Hall et al. (2016)
-// Two-channel inception: C2H2 (channel 1) + A1/C6H6 (channel 2)
-// ============================================================================
-
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::NucleationSourceTerms_BMH()
 {
     dMdt_nucleation_BMH_1_ = 0.;
     dMdt_nucleation_BMH_2_ = 0.;
 
-    // Channel 1: C2H2-based inception
+    // Channel 1: C2H2-based inception.
     if (conc_C2H2_ > 0.)
     {
         // Inception rate (#/m3/s)
@@ -430,7 +360,7 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::NucleationSourceTerms_BMH(
         dMdt_nucleation_BMH_1_ = mwp_ / this->Nav_kmol_ * dNdt1 ;
     }
 
-    // Channel 2: C6H6-based inception
+    // Channel 2: C6H6-based inception.
     if (conc_C6H6_ >= 0)
     {
         // Inception rate (#/m3/s)
@@ -453,10 +383,6 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::NucleationSourceTerms_BMH(
     // Source for bs [m3/kg/s]
     this->source_nucleation_(1) = dNdt_total / (this->rho_ * Ns_norm_);
 }
-
-// ============================================================================
-// SurfaceGrowthSourceTerms
-// ============================================================================
 
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::SurfaceGrowthSourceTerms()
 {
@@ -488,10 +414,6 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::SurfaceGrowthSourceTerms()
     this->source_growth_(1) = 0.;
 }
 
-// ============================================================================
-// CoagulationSourceTerms  — free-molecular regime
-// ============================================================================
-
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::CoagulationSourceTerms()
 {
     const double N  = std::max(bs_, 0.) * this->rho_ * Ns_norm_; // [#/m3]
@@ -513,10 +435,6 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::CoagulationSourceTerms()
     this->source_coagulation_(1) = -1. / this->rho_ * (dNdt / Ns_norm_);
 }
 
-// ============================================================================
-// OxidationSourceTerms  (dispatcher)
-// ============================================================================
-
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::OxidationSourceTerms()
 {
     if (oxidation_variant_ == OxidationVariant::BrookesMoss)
@@ -524,10 +442,6 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::OxidationSourceTerms()
     else if (oxidation_variant_ == OxidationVariant::BrookesMossHall)
         OxidationSourceTerms_BMH();
 }
-
-// ============================================================================
-// OxidationSourceTerms_BM  — Brookes & Moss (1999), OH attack
-// ============================================================================
 
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::OxidationSourceTerms_BM()
 {
@@ -556,10 +470,6 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::OxidationSourceTerms_BM()
     this->source_oxidation_(1) = 0.;
 }
 
-// ============================================================================
-// OxidationSourceTerms_BMH  — Hall et al. (2016), OH + O2 channels
-// ============================================================================
-
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::OxidationSourceTerms_BMH()
 {
     const double M = std::max(Ys_, 0.) * this->rho_;            // [kg/m3]
@@ -572,12 +482,12 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::OxidationSourceTerms_BMH()
     const double A =
         std::pow(this->pi_ * N, 1. / 3.) * std::pow(6. * M / this->rho_particle_, 2. / 3.);
 
-    // Channel 1: OH oxidation  →  C + OH → CO + ½H₂
+    // Channel 1: OH oxidation.
     dMdt_oxidation_OH_ = 0.;
     if (conc_OH_ > 0.)
         dMdt_oxidation_OH_ = Coxid_ * Comega_ * etaColl_ * conc_OH_ * std::sqrt(this->T_) * A;
 
-    // Channel 2: O2 oxidation  →  C + O₂ → CO + ½O₂  (net: C + ½O₂ → CO)
+    // Channel 2: O2 oxidation.
     dMdt_oxidation_O2_ = 0.;
     if (conc_O2_ > 0.)
         dMdt_oxidation_O2_ = Comega2_BMH_ * conc_O2_ * std::exp(-Tomega2_BMH_ / this->T_) * A;
@@ -592,10 +502,6 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::OxidationSourceTerms_BMH()
     this->source_oxidation_(1) = 0.;
 }
 
-// ============================================================================
-// CalculateOmegaGas
-// ============================================================================
-
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::CalculateOmegaGas() noexcept
 {
     this->omega_gas_.setZero();
@@ -605,7 +511,7 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::CalculateOmegaGas() noexce
 
     const int nsp = static_cast<int>(thermo_.NumberOfSpecies());
 
-    // Helper: add mass source [kg/m3/s] directly for species idx
+    // Adds a mass source [kg/m3/s] directly to a valid species index.
     auto AddMass = [&](int idx, double omega_kg_m3_s)
     {
         if (idx < 0 || idx >= nsp || !std::isfinite(omega_kg_m3_s))
@@ -613,19 +519,8 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::CalculateOmegaGas() noexce
         this->omega_gas_[idx] += omega_kg_m3_s;
     };
 
-    // -- Nucleation coupling -----------------------------------------------
-    //
-    // BrookesMoss variant
-    // -------------------
-    // Net reaction:  Precursor  →  nC × [C]_soot  +  (nH/2) × H₂
-    //
-    // Per kg of soot formed, the stoichiometric factor is
-    //   prec_per_kg_soot = 1 / (nC_prec × W_C)   [kmol_prec / kg_soot]
-    //
-    // Mass balance (pure hydrocarbon CₙHₘ, MW = 12n+m):
-    //   precursor consumed  = (12n+m)/(n·12) kg/kg_soot
-    //   H₂ produced        =  m / (n·12)     kg/kg_soot
-    //   net gas removed    = 1.0              kg/kg_soot  → absorbed by dummy closure  ✓
+    // -- Nucleation gas coupling ------------------------------------------
+    // Brookes-Moss: precursor -> nC soot carbon + (nH/2) H2.
 
     if (nucleation_variant_ == NucleationVariant::BrookesMoss)
     {
@@ -644,30 +539,18 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::CalculateOmegaGas() noexce
         }
     }
 
-    // BM-Hall variant (Hall et al. 2016) — two-channel inception
-    // -----------------------------------------------------------
-    // The stoichiometry is derived per inception event (one soot nucleus of mass mwp_):
-    //   events_per_s = dMdt / mwp_   [kmol_events / m³ / s]
-    //
-    // Channel 1:  2 C₂H₂  +  C₆H₅•  →  C₁₀H₇(soot)  +  H₂
-    //   Atom check — C: 4+6=10 ✓   H: 4+5=9=7+2 ✓   MW: 52+77=129=127+2 ✓
-    //   Consumed: 2 mol C₂H₂, 1 mol C₆H₅
-    //   Produced: 1 mol H₂  (C₁₀H₇ absorbed by dummy closure)
-    //
-    // Channel 2:  C₂H₂  +  C₆H₆  +  C₆H₅•  →  C₁₄H₁₀(soot)  +  H•  +  H₂
-    //   Atom check — C: 2+6+6=14 ✓  H: 2+6+5=13=10+1+2 ✓  MW: 26+78+77=181=178+1+2 ✓
-    //   Consumed: 1 mol C₂H₂, 1 mol C₆H₆, 1 mol C₆H₅
-    //   Produced: 1 mol H•, 1 mol H₂  (C₁₄H₁₀ absorbed by dummy closure)
+    // BM-Hall: two inception channels. Solid PAH products are represented by
+    // the soot phase and closed through the optional dummy species.
 
     else if (nucleation_variant_ == NucleationVariant::BrookesMossHall)
     {
-        // Channel 1: 2 C₂H₂ + C₆H₅ → C₁₀H₇(soot) + H₂
+        // Channel 1: 2 C2H2 + C6H5 -> C10H7(soot) + H2.
         if (dMdt_nucleation_BMH_1_ > 0. && mwp_ > 0.)
         {
-            // [kmol_events/m³/s] — each event consumes exactly 2 C₂H₂ + 1 C₆H₅
+            // [kmol_events/m3/s]
             const double ev1 = dMdt_nucleation_BMH_1_ / mwp_;
 
-            if (prec_index_ >= 0)   // C₂H₂ (precursor species)
+            if (prec_index_ >= 0)   // C2H2 precursor species
             {
                 const double MW_C2H2 = thermo_.MolecularWeight(static_cast<unsigned>(prec_index_));
                 AddMass(prec_index_, -ev1 * 2. * MW_C2H2);
@@ -682,15 +565,15 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::CalculateOmegaGas() noexce
                 const double MW_H2 = thermo_.MolecularWeight(static_cast<unsigned>(index_H2_));
                 AddMass(index_H2_, ev1 * MW_H2);
             }
-            // C₁₀H₇ soot product (MW=127) is absorbed by the dummy closure
+            // C10H7 soot product is represented by the particle phase.
         }
 
-        // Channel 2: C₂H₂ + C₆H₆ + C₆H₅ → C₁₄H₁₀(soot) + H• + H₂
+        // Channel 2: C2H2 + C6H6 + C6H5 -> C14H10(soot) + H + H2.
         if (dMdt_nucleation_BMH_2_ > 0. && mwp_ > 0.)
         {
             const double ev2 = dMdt_nucleation_BMH_2_ / mwp_;
 
-            if (prec_index_ >= 0)   // C₂H₂ (precursor species)
+            if (prec_index_ >= 0)   // C2H2 precursor species
             {
                 const double MW_C2H2 = thermo_.MolecularWeight(static_cast<unsigned>(prec_index_));
                 AddMass(prec_index_, -ev2 * MW_C2H2);
@@ -715,17 +598,12 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::CalculateOmegaGas() noexce
                 const double MW_H2 = thermo_.MolecularWeight(static_cast<unsigned>(index_H2_));
                 AddMass(index_H2_, ev2 * MW_H2);
             }
-            // C₁₄H₁₀ soot product (MW=178) is absorbed by the dummy closure
+            // C14H10 soot product is represented by the particle phase.
         }
     }
 
-    // -- Surface growth coupling -------------------------------------------
-    //
-    // Net reaction:  sg_species  →  nC_sg × [C]_soot  +  (nH_sg/2) × H₂
-    //
-    // Same stoichiometric logic as BM nucleation.  For C₂H₂ (nC=2, nH=2):
-    //   C₂H₂ consumed = 26/24 kg/kg_soot,  H₂ produced = 2/24 kg/kg_soot
-    //   net gas removed = 1.0 kg/kg_soot  → absorbed by dummy closure  ✓
+    // -- Surface-growth gas coupling --------------------------------------
+    // sg_species -> nC soot carbon + (nH/2) H2.
 
     if (dMdt_surface_growth_ > 0. && sg_index_ >= 0 && sg_nc_ > 0.)
     {
@@ -741,25 +619,12 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::CalculateOmegaGas() noexce
         }
     }
 
-    // -- Oxidation coupling ------------------------------------------------
-    //
-    // Snapshot omega_gas_ before adding any oxidation terms.  The diff taken
-    // after the block gives the oxidation-only gas contribution, stored in
-    // omega_gas_oxidation_ for operator-splitting (GetOmegaGasOxidation).
+    // -- Oxidation gas coupling -------------------------------------------
+    // Snapshot the pre-oxidation gas vector to form the oxidation-only source.
     const Eigen::VectorXd omega_snap_before_ox = this->omega_gas_;
 
-    // OH channel (both BM and BM-Hall):  C_soot + OH → CO + ½H₂
-    //   Per kg soot oxidized:
-    //     OH consumed = MW_OH / W_C            (17/12 kg/kg_soot)
-    //     CO produced = MW_CO / W_C            (28/12 kg/kg_soot)
-    //     H₂ produced = ½ × MW_H₂ / W_C       ( 1/12 kg/kg_soot)
-    //     Net gas produced = +1 kg/kg_soot  ✓  → dummy closure absorbs −dMdt_oxid
-    //
-    // O₂ channel (BM-Hall only):  C_soot + O₂ → CO + ½O₂  (net: C + ½O₂ → CO)
-    //   Per kg soot oxidized:
-    //     O₂ consumed (net) = ½ × MW_O₂ / W_C (16/12 kg/kg_soot)
-    //     CO produced       = MW_CO / W_C       (28/12 kg/kg_soot)
-    //     Net gas produced = +1 kg/kg_soot  ✓
+    // OH channel: C_soot + OH -> CO + 0.5 H2.
+    // O2 channel: C_soot + 0.5 O2 -> CO.
 
     if (dMdt_oxidation_OH_ > 0.)
     {
@@ -798,13 +663,12 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::CalculateOmegaGas() noexce
         }
     }
 
-    // Capture oxidation-only gas contribution (before closure modifies the dummy species).
+    // Oxidation-only gas contribution before closure modifies the dummy species.
     omega_gas_oxidation_ = this->omega_gas_ - omega_snap_before_ox;
 
-    // -- Dummy species closure (enforce mass conservation) -----------------
+    // -- Dummy species closure --------------------------------------------
     if (this->is_closure_dummy_species_)
     {
-        // dummy_index_ must be set during setup — a negative value is a programming error.
         assert(this->closure_dummy_index_ >= 0 && "[BrookesMoss::CalculateOmegaGas] dummy_index_ not set.");
         double sum = 0.;
         for (int i = 0; i < nsp; ++i)
@@ -812,9 +676,7 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::CalculateOmegaGas() noexce
                 sum += this->omega_gas_[i];
         this->omega_gas_[this->closure_dummy_index_] = -sum;
 
-        // Apply the same closure to the oxidation-only vector so that
-        // omega_gas_[k] == omega_gas_oxidation_[k] + omega_gas_without_oxidation[k]
-        // holds for ALL k, including the dummy species.
+        // Apply the same closure to the oxidation-only vector.
         double sum_ox = 0.;
         for (int i = 0; i < nsp; ++i)
             if (i != this->closure_dummy_index_)
@@ -822,10 +684,6 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::CalculateOmegaGas() noexce
         omega_gas_oxidation_[this->closure_dummy_index_] = -sum_ox;
     }
 }
-
-// ============================================================================
-// Property methods
-// ============================================================================
 
 template <ThermoMap Thermo> double BrookesMoss<Thermo>::volume_fraction() const noexcept
 {
@@ -856,7 +714,6 @@ template <ThermoMap Thermo> double BrookesMoss<Thermo>::particle_diameter() cons
 
 template <ThermoMap Thermo> double BrookesMoss<Thermo>::collision_diameter() const noexcept
 {
-    // For BrookesMoss the collision diameter equals the mean particle diameter
     return particle_diameter();
 }
 
@@ -877,13 +734,8 @@ template <ThermoMap Thermo> double BrookesMoss<Thermo>::number_primary_particles
     return 0.;
 }
 
-// ============================================================================
-// PrintSummary
-// ============================================================================
-
 template <ThermoMap Thermo> void BrookesMoss<Thermo>::PrintSummary() const
 {
-    // Helper lambdas — no heap allocation, resolved at compile time
     const auto nuc_str = [](NucleationVariant v) -> const char* {
         switch (v) {
             case NucleationVariant::Off:             return "off";
@@ -997,10 +849,6 @@ template <ThermoMap Thermo> void BrookesMoss<Thermo>::PrintSummary() const
         << "------------------------------------------------------------------------------------------\n";
 }
 
-// ============================================================================
-// ApplyConfig  (private — all parameter assignments, no I/O)
-// ============================================================================
-
 template <ThermoMap Thermo>
 void BrookesMoss<Thermo>::ApplyConfig(const Config& cfg)
 {
@@ -1015,8 +863,7 @@ void BrookesMoss<Thermo>::ApplyConfig(const Config& cfg)
     double cgamma           = cfg.cgamma;
     double eta_coll         = cfg.eta_coll;
 
-    // Keep explicit user values, but make BM-Hall config setup match the string setters
-    // when the Brookes-Moss defaults were left untouched.
+    // BM-Hall defaults matching the string-based setters.
     if (is_bmh_nucleation && soot_particle_mw == defaults.soot_particle_mw_kg_kmol)
         soot_particle_mw = 1200.;
     if (is_bmh_active && cgamma == defaults.cgamma)
@@ -1027,8 +874,6 @@ void BrookesMoss<Thermo>::ApplyConfig(const Config& cfg)
     // -- Gas species -------------------------------------------------------
     this->SetPrecursors(cfg.precursors_species);
     this->SetSurfaceGrowthSpecies(cfg.surface_growth_species);
-    // BM-Hall species are only needed when the BM-Hall variant is active;
-    // avoid spurious "species not found" warnings for basic BrookesMoss runs.
     if (cfg.nucleation_model == 2 || cfg.oxidation_model == 2)
     {
         this->SetBenzeneSpecies(cfg.benzene_species);
@@ -1050,7 +895,7 @@ void BrookesMoss<Thermo>::ApplyConfig(const Config& cfg)
     this->SetMWp(soot_particle_mw);
     this->SetNsNorm(cfg.ns_norm);
 
-    // -- Kinetic constants (direct member assignment — no setters) ----------
+    // -- Kinetic constants -------------------------------------------------
     Calpha_      = cfg.calpha;
     Talpha_      = cfg.talpha;
     Cbeta_       = cfg.cbeta;
@@ -1078,10 +923,6 @@ void BrookesMoss<Thermo>::ApplyConfig(const Config& cfg)
     is_debug_mode_ = cfg.debug_mode;
 }
 
-// ============================================================================
-// SetupFromConfig  (public — delegates to ApplyConfig, then prints summary)
-// ============================================================================
-
 template <ThermoMap Thermo>
 void BrookesMoss<Thermo>::SetupFromConfig(const Config& cfg)
 {
@@ -1090,21 +931,11 @@ void BrookesMoss<Thermo>::SetupFromConfig(const Config& cfg)
 }
 
 #if defined(MOM_USE_DICTIONARY)
-// ============================================================================
-// ParseConfig — OpenSMOKE++ dictionary → BrookesMoss::Config
-// ============================================================================
-
 template <ThermoMap Thermo>
 template <typename DictType>
 std::expected<typename BrookesMoss<Thermo>::Config, std::string>
 BrookesMoss<Thermo>::ParseConfig(DictType& dict)
 {
-    // SetGrammar validates the dictionary against the grammar rules defined in
-    // BrookesMoss_Grammar::DefineRules().  On any violation (missing mandatory
-    // keyword, unknown keyword, duplicate, conflicting keyword) it calls
-    // Dictionary::ErrorMessage() which throws std::runtime_error.
-    // That exception is intentionally NOT caught here so it propagates to the
-    // caller and stops the simulation.
     BrookesMoss_Grammar grammar;
     dict.SetGrammar(grammar);
 

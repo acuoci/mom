@@ -37,12 +37,13 @@
 
 #include <stdexcept>
 
+/**
+ * @file OutputFileColumns.cpp
+ * @brief Implementation of the fixed-width ASCII table writer.
+ */
+
 namespace MOM
 {
-
-// ============================================================================
-// Constructors
-// ============================================================================
 
 OutputFileColumns::OutputFileColumns()
 {
@@ -63,16 +64,12 @@ OutputFileColumns::OutputFileColumns(const std::string& file_name)
     file_name_ = file_name;
 }
 
-// ============================================================================
-// Default — internal state reset
-// ============================================================================
-
 void OutputFileColumns::Default()
 {
     n_                = 0;
     iterator_         = 0;
-    minimum_          = 16; // minimum field width: wide enough for a typical scientific value
-    tab_              = 4;  // gap between column tag end and the start of the data field
+    minimum_          = 16;
+    tab_              = 4;
     status_completed_ = false;
     file_name_.clear();
 
@@ -81,18 +78,13 @@ void OutputFileColumns::Default()
     precision_.clear();
 }
 
-// ============================================================================
-// Open / Close
-// ============================================================================
-
 void OutputFileColumns::Open(const std::filesystem::path& file_name)
 {
     file_name_ = file_name;
 
-    // Truncate any existing file; set stream flags once for the lifetime of the file.
     fOut_.open(file_name, std::ios::out);
-    fOut_.setf(std::ios::scientific); // values written as X.XXXe+YY
-    fOut_.setf(std::ios::left);       // left-align within each field width
+    fOut_.setf(std::ios::scientific);
+    fOut_.setf(std::ios::left);
 }
 
 void OutputFileColumns::Open(const std::string& file_name)
@@ -109,33 +101,18 @@ void OutputFileColumns::Close()
     if (fOut_.is_open())
         fOut_.close();
 
-    // Reset bookkeeping so the object may be reused for a different file.
     Default();
 }
 
-// ============================================================================
-// Column declaration
-// ============================================================================
-
 void OutputFileColumns::AddColumn(const std::string& label, const unsigned int precision)
 {
-    // Build the column tag as "Label(N)" where N is the 1-based column index.
-    // The index is stringified via a stringstream to avoid sprintf/to_string
-    // ambiguity on all supported platforms.
     iterator_++;
     std::stringstream number;
     number << iterator_;
     const std::string tag = label + "(" + number.str() + ")";
     tag_.push_back(tag);
 
-    // Field-width calculation:
-    //   label_width    = tag character count + tab  (keeps column tag readable)
-    //   precision_width = precision + 9              (covers the widest scientific token:
-    //                                                 sign[1] + digit[1] + '.'[1] +
-    //                                                 fractional[precision] + 'e'[1] +
-    //                                                 exp-sign[1] + exp-digits[3] = precision+8,
-    //                                                 plus one space guard = precision+9)
-    //   width[i]       = max(label_width, precision_width, minimum_)
+    // Field width accounts for the header tag and a scientific-notation token.
     const unsigned int label_width     = static_cast<unsigned int>(tag.size()) + tab_;
     const unsigned int precision_width = precision + 9u;
     width_.push_back(std::max(label_width, std::max(precision_width, minimum_)));
@@ -161,7 +138,6 @@ void OutputFileColumns::Complete()
         throw std::runtime_error(message.str());
     }
 
-    // Lock the layout and write the header row.
     status_completed_ = true;
     n_                = iterator_;
     iterator_         = 0;
@@ -172,15 +148,9 @@ void OutputFileColumns::Complete()
     fOut_ << std::endl;
 }
 
-// ============================================================================
-// Data row interface
-// ============================================================================
-
 void OutputFileColumns::NewRow()
 {
-    // Allow the very first call (iterator_ == 0, no values written yet) to pass
-    // through silently so callers can unconditionally place NewRow() at the top
-    // of a data loop without special-casing the first iteration.
+    // The first call may be used to start the first row.
     if (iterator_ != n_ && iterator_ != 0)
     {
         std::stringstream message;
@@ -193,33 +163,15 @@ void OutputFileColumns::NewRow()
     iterator_ = 0;
 }
 
-// ============================================================================
-// operator<< — value insertion
-// ============================================================================
-
 template <typename T>
 OutputFileColumns& OutputFileColumns::operator<<(const T& number)
 {
-    // Write the value formatted to the precision and width of the current column,
-    // then advance the iterator so the next insertion targets the next column.
     fOut_ << std::setprecision(precision_[iterator_]) << std::setw(width_[iterator_]) << number;
     iterator_++;
-    return *this; // return *this enables chaining: out << a << b << c;
+    return *this;
 }
 
-// ============================================================================
-// Explicit template instantiations
-// ============================================================================
-//
-// operator<< is defined in this .cpp, not in the header, so the compiler
-// cannot generate instantiations on demand at call sites.  The explicit
-// instantiations below make all commonly used numeric types available to
-// translation units that include only the header.
-//
-// To support an additional type T, add:
-//   template OutputFileColumns& OutputFileColumns::operator<<(const T&);
-
-// Integer types
+// Explicit instantiations for supported numeric types.
 template OutputFileColumns& OutputFileColumns::operator<<(const int&);
 template OutputFileColumns& OutputFileColumns::operator<<(const unsigned int&);
 template OutputFileColumns& OutputFileColumns::operator<<(const long&);
@@ -227,7 +179,6 @@ template OutputFileColumns& OutputFileColumns::operator<<(const unsigned long&);
 template OutputFileColumns& OutputFileColumns::operator<<(const long long&);
 template OutputFileColumns& OutputFileColumns::operator<<(const unsigned long long&);
 
-// Floating-point types
 template OutputFileColumns& OutputFileColumns::operator<<(const float&);
 template OutputFileColumns& OutputFileColumns::operator<<(const double&);
 template OutputFileColumns& OutputFileColumns::operator<<(const long double&);

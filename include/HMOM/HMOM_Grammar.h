@@ -41,12 +41,23 @@
 #include "DictionaryGrammar.h"
 #include "DictionaryKeyWord.h"
 
+/**
+ * @file HMOM_Grammar.h
+ * @brief OpenSMOKE++ dictionary grammar for HMOM configuration.
+ */
+
 namespace MOM
 {
+
+/**
+ * @class HMOM_Grammar
+ * @brief Defines dictionary keywords accepted by the HMOM variant.
+ */
 class HMOM_Grammar : public OpenSMOKEpp::DictionaryGrammar
 {
 protected:
 
+    /** @brief Registers HMOM dictionary keywords and their value types. */
     virtual void DefineRules();
 };
 } // namespace MOM

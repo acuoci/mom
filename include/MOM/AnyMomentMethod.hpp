@@ -37,36 +37,14 @@
 
 /**
  * @file AnyMomentMethod.hpp
- * @brief Core type alias, factory, and cell-loop helper for AnyMomentMethod.
+ * @brief Runtime-selectable MOM variant type, factory, and dispatch-hoisting helper.
  *
- * This file defines exactly four things:
+ * `AnyMomentMethod<Thermo>` is a `std::variant` over the concrete variants
+ * registered in `MomVariantList.hpp`. Use `MakeAnyMomentMethod()` when the
+ * variant name is read from an input file, and use `ForEachCell()` to move the
+ * runtime dispatch outside a CFD cell loop.
  *
- * 1. `AnyMomentMethod<Thermo>` — the runtime-selectable moment method type
- *    (a `std::variant` over all registered concrete variants).
- *
- * 2. `detail::FactoryHelper` — a compile-time recursive label dispatcher used
- *    exclusively by `MakeAnyMomentMethod`.
- *
- * 3. `MakeAnyMomentMethod<Thermo>(thermo, label)` — the factory function that
- *    constructs the right variant from a runtime string label.
- *
- * 4. `ForEachCell(m, callback)` — hoists the variant dispatch outside a cell
- *    loop, so the loop body executes with the concrete type statically known.
- *
- * @par Full interface
- * This file does **not** include the free-function dispatch API.  For the
- * complete public API, include `MOM/MOM.hpp`, which transitively provides:
- *
- * | Header           | Contents                                            |
- * |------------------|-----------------------------------------------------|
- * | `Dispatch.hpp`   | SetState, SetMoments, Compute, ComputeCell, …       |
- * | `Properties.hpp` | GetVolumeFraction, GetParticleDiameter, …           |
- * | `Sources.hpp`    | GetSources, GetNucleationSources, GetOxidationModel, … |
- * | `Splitting.hpp`  | GetSourcesWithoutOxidation, GetOxidationRateCoefficients, … |
- *
- * @par Adding a new variant
- * Edit `MomVariantList.hpp` only — add the new type to `AllVariants`.
- * No changes are required here.
+ * @note Include `MOM/MOM.hpp` for the complete public API.
  */
 
 // -- Standard library ---------------------------------------------------------
@@ -81,50 +59,24 @@
 #endif
 
 // -- Project headers ----------------------------------------------------------
-// MomVariantList.hpp is the single authoritative registry of all variants.
-// It transitively provides: all variant headers, MomentMethodConcept.hpp,
-// detail::TypeList, AllVariants, and <variant>.
 #include "MomVariantList.hpp"
 
 namespace MOM
 {
 
-// ============================================================================
-// AnyMomentMethod<Thermo> — runtime-selectable moment method
-// ============================================================================
-//
-// Expands to std::variant<HMOM<Thermo>, BrookesMoss<Thermo>, ...> with the
-// exact set of types registered in MomVariantList.hpp::AllVariants.
-// Dispatch is via std::visit, which generates a jump table (one indirect
-// branch per call) — comparable to a vtable call but without aliasing
-// penalties that prevent auto-vectorisation of the source computation loop.
-//
-// No manual edit required here when adding a new variant.  Edit
-// MomVariantList.hpp::AllVariants instead.
-// ============================================================================
-
+/**
+ * @brief Runtime-selectable moment method over all registered concrete variants.
+ *
+ * @tparam Thermo Thermodynamics backend satisfying `ThermoMap`.
+ */
 template <ThermoMap Thermo>
 using AnyMomentMethod = typename AllVariants::template AsVariant<Thermo>;
-
-// ============================================================================
-// detail::FactoryHelper — compile-time recursive label dispatcher
-// ============================================================================
-//
-// Iterates the registered variants at compile time, checking each type's
-// variant_labels member against the runtime label string.  Falls through
-// recursively until a match is found or the list is exhausted.
-//
-// Used exclusively by MakeAnyMomentMethod below; not part of the public API.
-// ============================================================================
 
 namespace detail
 {
 
 /**
- * @brief Base case — empty variant list; no label matched.
- *
- * Throws `std::invalid_argument` with a diagnostic message pointing to
- * `MomVariantList.hpp` for the list of registered variants.
+ * @brief Factory recursion base case used when no registered label matches.
  */
 template <template <typename> class... Vs> struct FactoryHelper
 {
@@ -138,11 +90,7 @@ template <template <typename> class... Vs> struct FactoryHelper
 };
 
 /**
- * @brief Recursive case — try `First`'s labels, then recurse into `Rest...`.
- *
- * Iterates `First<Thermo>::variant_labels` at compile time.  On a match,
- * constructs an `AnyMomentMethod<Thermo>` in-place holding `First<Thermo>`.
- * On no match, delegates to `FactoryHelper<Rest...>`.
+ * @brief Factory recursion step over the registered variant list.
  */
 template <template <typename> class First, template <typename> class... Rest>
 struct FactoryHelper<First, Rest...>
@@ -158,10 +106,7 @@ struct FactoryHelper<First, Rest...>
 };
 
 /**
- * @brief Unpacks `TypeList<Vs...>` → `FactoryHelper<Vs...>::make`.
- *
- * Allows `MakeAnyMomentMethod` to delegate to the correct `FactoryHelper`
- * specialisation without naming the individual variant types explicitly.
+ * @brief Builds the factory dispatcher from a registered variant type list.
  */
 template <template <typename> class... Vs, typename Thermo>
 inline AnyMomentMethod<Thermo> make_from_type_list(TypeList<Vs...>,
@@ -198,18 +143,14 @@ template <ThermoMap Thermo>
 /**
  * @brief Deleted overload — prevents a temporary Thermo from being silently bound.
  *
- * `const Thermo&&` is NOT a forwarding reference (it is const-qualified), so it
- * matches rvalues and moved objects but never plain lvalues.  The live lvalue
- * overload above therefore remains reachable for all valid call sites.
+ * Moment method objects store a reference to the thermodynamics backend, so the
+ * backend must outlive the returned `AnyMomentMethod`.
  *
- * @note Diagnoses lifetime mistakes at compile time:
  * @code
- *   // BAD  — thermo lifetime ends before the returned variant is used:
- *   auto m = MOM::MakeAnyMomentMethod(MOM::BasicThermoData{...}, "HMOM"); // deleted ✓
+ *   auto m = MOM::MakeAnyMomentMethod(MOM::BasicThermoData{...}, "HMOM"); // error
  *
- *   // GOOD — thermo outlives the variant:
  *   MOM::BasicThermoData thermo{...};
- *   auto m = MOM::MakeAnyMomentMethod(thermo, "HMOM");                    // OK ✓
+ *   auto m = MOM::MakeAnyMomentMethod(thermo, "HMOM");                    // OK
  * @endcode
  */
 template <ThermoMap Thermo>
@@ -218,10 +159,9 @@ AnyMomentMethod<Thermo> MakeAnyMomentMethod(const Thermo&&, std::string_view) = 
 /**
  * @brief Hoist variant dispatch outside a cell loop for maximum performance.
  *
- * Calls `std::visit` **once** before the cell loop, then invokes @p callback
+ * Calls `std::visit` once before the cell loop, then invokes @p callback
  * with the concrete model type as argument.  The callback owns the loop, so all
- * N cells are processed with the same concrete type — zero jump-table overhead
- * inside the hot loop.
+ * cells are processed with the same statically known type.
  *
  * @code
  *   MOM::ForEachCell(model, [&](auto& m) {
@@ -237,10 +177,6 @@ AnyMomentMethod<Thermo> MakeAnyMomentMethod(const Thermo&&, std::string_view) = 
  *   });
  * @endcode
  *
- * The compiler generates one fully-optimised loop body per registered variant
- * and selects among them via a single indirect branch, which the branch
- * predictor collapses to zero overhead after the first call.
- *
  * @tparam Thermo       Must satisfy `ThermoMap`.
  * @tparam CellCallback Callable with signature `void(ConcreteModel&)`.
  * @param  m            The runtime-polymorphic model instance.
@@ -254,8 +190,4 @@ inline void ForEachCell(AnyMomentMethod<Thermo>& m, CellCallback&& callback)
 
 } // namespace MOM
 
-// AnyMomentMethod<Thermo> is a thin std::variant alias — its only template body
-// is the MakeAnyMomentMethod factory (AnyMomentMethod.tpp).
-// That factory is trivially inlined and does not benefit from pre-compilation,
-// so we always include it (no extern template needed here).
 #include "AnyMomentMethod.tpp"

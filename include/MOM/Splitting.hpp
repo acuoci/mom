@@ -39,19 +39,14 @@
  * @file Splitting.hpp
  * @brief Operator-splitting support functions for AnyMomentMethod.
  *
- * Provides the complete set of functions required to implement Lie–Trotter
- * (or Strang) operator splitting that removes the stiff oxidation eigenvalue
- * from the moment ODE system.
+ * Provides source accessors and rate coefficients for treating oxidation as an
+ * analytical sub-step outside the main moment ODE solve.
  *
  * Included automatically by `MOM/MOM.hpp`.
  *
- * @par Motivation
- * Oxidation is a first-order sink on all moment variables.  Its linearised
- * rate coefficient κ_i = |source_oxidation[i]| / |M_i| can reach 10⁵–10⁶ s⁻¹
- * in a flame — orders of magnitude larger than the CFD time step allows in an
- * implicit BDF solver.  The Patankar limiter bounds values but not eigenvalues,
- * so the BDF solver still brackets the C⁰ kink and produces tiny sub-steps.
- * Operator splitting removes the eigenvalue entirely:
+ * @par Usage
+ * Oxidation is treated as a first-order sink with rate coefficient
+ * `kappa_i = max(-source_oxidation[i], 0) / max(abs(M_i), eps)`.
  *
  * **Step A** — ODE sub-step with non-oxidation sources only:
  * @code
@@ -67,7 +62,7 @@
  *       M[i] *= std::exp(-kappa[i] * dt);
  * @endcode
  *
- * **Step C** — gas-phase correction with saturation factor φ:
+ * **Step C** — gas-phase correction with saturation factor phi:
  * @code
  *   // Inside Equations(), pass only the non-oxidation gas sources:
  *   auto gas_no_ox = MOM::GetOmegaGasOxidation(mom);  // zero-copy, oxidation-only
@@ -81,22 +76,6 @@
  *   for (int k = 0; k < n_species; ++k)
  *       Y[k] += ox_gas[k] / rho * dt * phi;
  * @endcode
- *
- * @par API convention
- *
- * All functions in this file follow the same convention as `Sources.hpp`:
- *
- * | Pattern | When used | Example |
- * |---|---|---|
- * | `[[nodiscard]] std::span<const double> GetXxx(m)` | Zero-copy into internal storage | `GetOxidationSources`, `GetSourcesWithoutOxidation`, `GetOxidationRateCoefficients` |
- * | `[[nodiscard]] std::span<const double> GetXxx(m, inputs...)` | Derived value, needs external input, written to internal cache | `GetOxidationRateCoefficients` |
- * | `void FillXxx(m, out)` | Output too large to buffer internally (gas-phase, n_species) | `FillOmegaGasWithoutOxidation` |
- *
- * The `Fill` prefix signals an output-parameter function.  It is used only for
- * `FillOmegaGasWithoutOxidation` where caching would require a second n_species
- * `Eigen::VectorXd` per model instance — cost not justified by the marginal
- * ergonomic gain.  For the moment-space functions the cache is a `MomentVector`
- * (≤ 32 bytes) and is unconditionally worth the uniformity.
  *
  * @par Functions provided
  * - `GetOxidationSources`           — zero-copy span of oxidation-only moment sources
@@ -122,8 +101,8 @@ namespace MOM
 /**
  * @brief Returns a zero-copy span over the **oxidation-only** moment source vector.
  *
- * Points directly into the model's internal `source_oxidation_` storage —
- * zero-overhead.  All entries are ≤ 0 (oxidation is always a sink for soot).
+ * Points directly into the model's internal oxidation source storage. For
+ * models without oxidation, the returned span is the standard zero fallback.
  *
  * @pre  `ComputeSources()` must have been called at the current state.
  * @return Span of size `n_equations`; valid until next `ComputeSources()`.
@@ -136,7 +115,7 @@ GetOxidationSources(const AnyMomentMethod<Thermo>& m) noexcept
 }
 
 /**
- * @brief Returns a zero-copy span over `source_all[i] − source_oxidation[i]`.
+ * @brief Returns a zero-copy span over `source_all[i] - source_oxidation[i]`.
  *
  * For operator splitting of the stiff oxidation terms: pass these reduced
  * sources to the stiff ODE solver instead of the full `GetSources()` vector,
@@ -164,23 +143,22 @@ GetSourcesWithoutOxidation(const AnyMomentMethod<Thermo>& m) noexcept
 }
 
 /**
- * @brief Returns a zero-copy span of first-order oxidation rate coefficients κ_i [1/s].
+ * @brief Returns a zero-copy span of first-order oxidation rate coefficients [1/s].
  *
  * Linearises the (generally nonlinear) oxidation depletion as a first-order decay:
  *
- *   κ_i = max(−source_oxidation[i], 0) / max(|M_i|, ε)
+ *   kappa_i = max(-source_oxidation[i], 0) / max(abs(M_i), eps)
  *
  * The exact analytical solution for the oxidation sub-step then reads:
  *
- *   M_i(t + Δt) = M_i(t) · exp(−κ_i · Δt)
+ *   M_i(t + dt) = M_i(t) * exp(-kappa_i * dt)
  *
- * This is unconditionally stable regardless of how large κ_i is — it removes
- * the stiff oxidation eigenvalue from the ODE system entirely.
+ * This gives the analytical oxidation update used by the splitting step.
  *
  * The result is written into `MomentMethodBase::kappa_oxidation_` (a
  * `mutable MomentVector`) and a span into that buffer is returned.
  *
- * @note  κ_i is evaluated at the **current** stored oxidation sources (the
+ * @note  `kappa_i` is evaluated at the current stored oxidation sources (the
  *        last `ComputeSources()` call) and the @p current_moments passed by
  *        the caller.  For Lie–Trotter splitting, call this after the ODE step.
  *        For symmetric Strang splitting, evaluate at t + Δt/2.
@@ -217,7 +195,7 @@ GetOxidationRateCoefficients(const AnyMomentMethod<Thermo>& m,
  *        vector [kg/m³/s].
  *
  * Points directly into internal storage — zero-overhead.
- * Returns an empty span for models without oxidation gas coupling (e.g. MetalOxide/TiO₂).
+ * Returns an empty span for models without oxidation gas coupling.
  *
  * @pre `ComputeSources()` must have been called at the current state.
  */
@@ -229,19 +207,15 @@ GetOmegaGasOxidation(const AnyMomentMethod<Thermo>& m) noexcept
 }
 
 /**
- * @brief Writes `omega_gas[k] − omega_gas_oxidation[k]` into @p out for each species.
+ * @brief Writes `omega_gas[k] - omega_gas_oxidation[k]` into @p out for each species.
  *
  * For operator splitting: pass these reduced gas sources inside `Equations()`,
  * then apply the oxidation contribution analytically after the ODE step completes.
  *
- * @par Why this function uses an output parameter
- * Gas-phase source vectors are sized to `n_species` at runtime (typically 50–300
- * elements).  Caching a second copy inside the model would double the per-instance
- * `omega_gas_` storage, which is significant in multi-cell CFD loops.  The `Fill`
- * prefix signals intentionally that this function writes into a caller-owned buffer,
- * unlike the moment-space functions which return zero-copy spans into internal caches.
+ * The output buffer is caller-owned because gas-phase vectors are sized by the
+ * number of species at runtime.
  *
- * @par Post-step gas-phase correction with saturation factor φ
+ * @par Post-step gas-phase correction with saturation factor phi
  * After the outer CFD timestep @p dt has completed and the soot moments have been
  * updated with the exponential decay (Step B above), apply the integrated oxidation
  * effect on gas species:
@@ -256,9 +230,8 @@ GetOmegaGasOxidation(const AnyMomentMethod<Thermo>& m) noexcept
  *       Y[k] += ox_gas[k] / rho * dt * phi;
  * @endcode
  *
- * The factor φ ∈ (0, 1] collapses to 1 for small `κ·Δt` (first-order approximation)
- * and falls toward `1/(κ·Δt)` for fast oxidation, bounding the integrated gas
- * consumption to at most the available reactant mass.
+ * The factor `phi` tends to 1 for small `kappa*dt` and limits integrated gas
+ * consumption for fast oxidation.
  *
  * @pre  `ComputeSources()` must have been called at the current state.
  * @param m    Model variant.

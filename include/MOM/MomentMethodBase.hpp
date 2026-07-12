@@ -53,110 +53,31 @@
 namespace MOM
 {
 
-// ============================================================================
-// MomentMethodBase<Derived, NEq>
-// ============================================================================
-//
-// CRTP base class providing shared state and common implementations for all
-// moment method classes. Zero virtual functions — all dispatch is resolved
-// statically at compile time via the Curiously Recurring Template Pattern.
-//
-// Design rationale
-// ----------------
-// * NEq is a compile-time constant, so all source vectors are fixed-size
-//   Eigen::Matrix<double, NEq, 1> objects. These live on the stack (for
-//   NEq <= ~16), are fully unrolled by the compiler, and are SIMD-vectorised
-//   without any heap allocation in the computational hot loop.
-//
-// * Physical sub-process source vectors (nucleation, coagulation, …) are
-//   owned by the Derived class for each process it models, NOT stored here.
-//   The base class provides a compile-time zero-span fallback via CRTP
-//   detection: `if constexpr (requires(const Derived& d) { d.sources_X_impl(); })`
-//   forwards to the derived implementation; otherwise it returns a view of
-//   a static constexpr zero array. Zero overhead — the branch is resolved
-//   at compile time and the non-taken arm is never instantiated.
-//
-// * The omega_gas_ vector (gas-phase source terms) is an Eigen::VectorXd
-//   sized once during setup (n_species elements). It is NOT re-allocated
-//   in the hot loop. Eigen provides cache-line alignment and the same
-//   setZero() / .data() API as the fixed-size source vectors.
-//
-// * The Planck absorption coefficient implementation is shared here; MetalOxide
-//   uses PlanckCoeffModel::None and gets 0.0 from planck_coefficient().
-//
-// Template parameters
-// -------------------
-//   Derived  — The concrete subclass (HMOM, BrookesMoss, ThreeEquations, MetalOxide)
-//   NEq      — Number of transported moment equations (compile-time constant)
-// ============================================================================
+/**
+ * @file MomentMethodBase.hpp
+ * @brief CRTP base class and shared utilities for MOM variants.
+ */
 
 /**
  * @class MomentMethodBase
- * @brief CRTP base class providing shared state and common implementations for all
- *        Method of Moments particle transport models.
+ * @brief Shared state and common accessors for Method of Moments particle models.
  *
  * @tparam Derived  The concrete subclass (HMOM, BrookesMoss, ThreeEquations, MetalOxide).
- *                  The CRTP pattern gives the base class access to the derived
- *                  implementation at compile time with zero overhead — no virtual
- *                  functions, no vtable, no indirect branches in the hot loop.
  * @tparam NEq      Number of transported moment equations (compile-time constant).
- *                  Typical values: 2 (BrookesMoss), 3 (ThreeEquations, MetalOxide), 4 (HMOM).
  *
- * @par Design rationale
+ * The base owns quantities common to all variants: total moment sources,
+ * gas-phase source terms, transport settings, particle density, closure-species
+ * bookkeeping, and Planck mean absorption correlations. Per-process source
+ * vectors are owned by the derived class when the process is modelled.
  *
- * - **Zero virtual functions.**  All dispatch is resolved statically at compile
- *   time via CRTP.  The compiler can inline and SIMD-vectorise the full per-cell
- *   update path without any indirect branches.
- *
- * - **Fixed-size source vectors.**  Because `NEq` is a compile-time constant, all
- *   source vectors are `Eigen::Matrix<double, NEq, 1>` objects.  For `NEq <= ~16`
- *   these live entirely on the stack and are fully unrolled by the compiler.  No
- *   heap allocation occurs in the computational hot loop.
- *
- * - **Per-process source vectors owned by Derived.**  Only the total source vector
- *   (`source_all_`) is stored in the base.  Nucleation, coagulation, condensation,
- *   growth, oxidation, and sintering source vectors are owned by the concrete
- *   subclass, which only declares the ones it actually models.  The CRTP dispatch
- *   methods `sources_X()` detect at compile time whether `Derived` has declared
- *   `sources_X_impl()`.  If it has, the call is forwarded at zero cost.  If it
- *   has not, a static `constexpr` zero array is returned — no storage allocated,
- *   no runtime branch.
- *
- * - **Gas-phase source terms.**  `omega_gas_` is an `Eigen::VectorXd` sized once
- *   during setup (`n_species` elements).  It is not re-allocated in the hot loop.
- *
- * - **Shared physical constants.**  Boltzmann constant, Avogadro number, ideal gas
- *   constant, carbon atomic weight, π, and √2 are declared as `static constexpr`
- *   members carrying full double precision (CODATA 2018 / IUPAC 2021 values).
- *
- * @par CRTP extension points for per-process sources
- *
- * A derived class signals support for physical process X by declaring:
- * @code
- *   [[nodiscard, gnu::always_inline]]
- *   std::span<const double> sources_X_impl() const noexcept;
- * @endcode
- * The `_impl()` suffix avoids name hiding and makes the extension point explicit.
- * The `[[gnu::always_inline]]` attribute guarantees the two-level call chain
- * `sources_X() → derived().sources_X_impl()` is collapsed to a direct memory
- * access at **all** optimisation levels, including debug (`-O0`) and profiling
- * (`-Og`) builds.
+ * @note Per-process source getters return a span over the derived storage when
+ *       available, otherwise a compile-time zero span of size `NEq`. This gives
+ *       callers a uniform API for all variants.
  *
  * @par Thread safety
- * **One instance per thread — never shared across threads.**
- *
- * Each concrete instance holds mutable internal state that is overwritten on
- * every call to `ComputeSources()` (moment values, intermediate species
- * concentrations, source vectors).  Concurrent access to the same instance from
- * multiple threads is undefined behaviour.
- *
- * For MPI+OpenMP or pure-OpenMP CFD solvers:
- * - Allocate **one model instance per OpenMP thread** (e.g. in a `#pragma omp threadprivate`
- *   variable or via an `std::vector<Model>` of size `omp_get_max_threads()`).
- * - The shared `Thermo` reference may be safely read from multiple threads
- *   simultaneously, provided no thread writes to it during the parallel region.
- * - `MomentMethodReporter` and `OutputFileColumns` carry the same constraint —
- *   use one reporter instance per thread, or serialise output behind a mutex.
+ * Model instances are mutable work objects. Use one instance per thread, or
+ * serialize access externally. The referenced thermodynamics backend may be
+ * shared only if it is read-only during source evaluation.
  */
 template <class Derived, unsigned NEq> class MomentMethodBase
 {
@@ -305,19 +226,10 @@ public:
     }
 
     /**
-     * @name Per-process source span getters — CRTP dispatch with zero fallback
+     * @name Per-process source span getters
      *
-     * Each method checks at compile time (via `if constexpr (requires(...))`) whether
-     * the concrete `Derived` class has declared a `sources_X_impl()` extension point.
-     *
-     * - If **yes**: the call is forwarded to `derived().sources_X_impl()` at zero
-     *   overhead (the compiler sees through the two-level call chain completely).
-     * - If **no**: the base returns `{kZeroData, NEq}` — a view of a `static constexpr`
-     *   zero array — with no storage allocation and no runtime branch.
-     *
-     * @note `[[gnu::always_inline]]` guarantees this inlining even at `-O0`/`-Og`,
-     *       making profiling and debug builds faithfully represent the release-build
-     *       call graph.
+     * Each getter returns a zero-copy span of size `n_equations`. If the derived
+     * variant does not model the process, the span points to a static zero array.
      * @{
      */
 
@@ -376,24 +288,10 @@ public:
     }
 
     /**
-     * @name Per-process instance activation flags — CRTP dispatch with zero fallback
+     * @name Per-process activation flags
      *
-     * Each method returns the strongly-typed process enum class (e.g. `NucleationModel`,
-     * `OxidationModel`) configured by the user for the corresponding physical process
-     * IN THIS INSTANCE.  The query detects at compile time whether `Derived` exposes
-     * the matching getter; if not, `XxxModel::Off` is returned.
-     *
-     * @par This answers the INSTANCE question: "is process X currently enabled?"
-     * The user might set `nucleation_model = 0` in the input file, causing
-     * `model_nucleation()` to return `NucleationModel::Off` even for a type that is
-     * structurally capable of nucleation.  To ask the TYPE question ("can this model
-     * type EVER produce nucleation sources?"), use `capability_nucleation()` instead
-     * — see below.
-     *
-     * @par Naming convention
-     * - `model_X()` (base dispatcher, this group) → reads instance flag, returns enum class
-     * - `nucleation_model()` / `oxidation_model()` / … (derived getter) → same enum class
-     * - `IsActive(model_X())` → convenience bool predicate (see `ProcessFlags.hpp`)
+     * Each getter returns the configured process model for this instance, or
+     * `XxxModel::Off` when the process is not implemented by the variant.
      * @{
      */
 
@@ -454,48 +352,11 @@ public:
     /** @} */
 
     /**
-     * @name Per-process TYPE capability accessors — always `constexpr`, never reads instance state
+     * @name Per-process type capabilities
      *
-     * These methods answer the STRUCTURAL question: "does this model TYPE implement
-     * process X?" — not "is process X currently enabled in this instance?".
-     *
-     * @par This answers the TYPE question: "can this model type EVER produce X sources?"
-     * The value is a `constexpr bool` derived from the same `requires(...)` check
-     * used by `sources_X()`.  It is resolved entirely at compile time for each
-     * concrete variant; the `static` keyword makes the type-level nature explicit.
-     *
-     * @par Comparison with instance activation (model_X())
-     * @code
-     *   // Type capability — always the same for a given model type:
-     *   constexpr bool can_oxidise = mm.capability_oxidation(); // true for HMOM/3Eq/BM
-     *
-     *   // Instance activation — depends on the user's input configuration:
-     *   OxidationModel oxi = mm.model_oxidation(); // Off if user wrote oxidation_model 0
-     *
-     *   // Use capability for structural decisions (output columns, static_assert):
-     *   if constexpr (mm.capability_oxidation())
-     *       register_oxidation_columns();           // compile-time branch
-     *
-     *   // Use activation for runtime decisions (should we do operator splitting?):
-     *   if (IsActive(mm.model_oxidation()))
-     *       apply_operator_splitting();             // runtime branch
-     * @endcode
-     *
-     * @par Capability matrix (as of 2026-07)
-     * | Method                    | HMOM | BrookesMoss | ThreeEq | MetalOxide |
-     * |---------------------------|------|-------------|---------|------------|
-     * | `capability_nucleation()` |  Y   |      Y      |    Y    |     Y      |
-     * | `capability_growth()`     |  Y   |      Y      |    Y    |     N      |
-     * | `capability_coagulation()`|  Y   |      Y      |    Y    |     Y      |
-     * | `capability_condensation()`|  Y  |      N      |    Y    |     Y      |
-     * | `capability_oxidation()`  |  Y   |      Y      |    Y    |     N      |
-     * | `capability_sintering()`  |  N   |      N      |    N    |     Y      |
-     *
-     * @note This mirrors the `ModelsNucleation<Derived>` / `ModelsOxidation<Derived>`
-     *       process-capability concepts in `MomentMethodConcept.hpp`.  Those concepts
-     *       are the recommended way to ask the TYPE question when the concrete type is
-     *       statically known; `capability_X()` is the way to ask it when you only have
-     *       an instance (or an `AnyMomentMethod` wrapper that hides the type).
+     * These `constexpr` functions report whether the variant type implements a
+     * physical process, independent of whether the current instance has the
+     * process enabled in its configuration.
      * @{
      */
 
@@ -839,26 +700,6 @@ protected:
     }
 
     // -- Sphere-geometry primitives ------------------------------------------
-    //
-    // These small helpers centralise the sphere-geometry identities used in
-    // the per-particle Properties() functions and initialisation code of every
-    // variant.  All four are `const noexcept` (they read the static pi_ only)
-    // and are marked always_inline so they fold away completely in hot loops.
-    //
-    // Naming convention:
-    //   SphereDiameter(v)          d = (6V/π)^{1/3}          [m]
-    //   SphereSurface(d)           S = π d²                   [m²]
-    //   SphereSurfaceFromVolume(v) S = (36π)^{1/3} V^{2/3}   [m²]
-    //   NumberPrimaryParticles(ss,vs)  np = ss³/(36π vs²) ≥ 1 [-]
-    //
-    // ⚠ FP note for SphereDiameter: the operand order "6./pi_ * v" (pre-divide
-    //   then multiply) is empirically more accurate than the alternative
-    //   "6.*v/pi_" (pre-multiply then divide): in the ~10% of inputs where the
-    //   two forms produce different IEEE-754 doubles, the pre-divide form gives
-    //   the correctly-rounded result 83.7% of the time vs 16.3% for pre-multiply.
-    //   Reason: fl(6/π) is a fixed, correctly-rounded constant; multiplying it
-    //   by v incurs only one additional rounding, whereas fl(6*v) introduces a
-    //   fresh, v-dependent rounding error before the division by π.
 
     //! Diameter of the sphere with volume @p v [m³].  d = (6V/π)^{1/3}.
     [[nodiscard]] [[gnu::always_inline]]
@@ -904,30 +745,12 @@ protected:
     /**
      * @brief Safe accessor for a single gas-phase source term by species index.
      *
-     * Returns `omega_gas_[idx]` when @p idx is a valid (non-negative,
-     * in-range) species index, and 0.0 otherwise.  Specifically:
-     * - Returns 0.0 if @p idx < 0.  The convention throughout the library is
-     *   that species absent in the user's mechanism are assigned index −1 by
-     *   `ThermoMap::IndexOfSpecies`.  Treating absent-species output as zero
-     *   is correct: no contribution means no source term.
-     * - Returns 0.0 if `idx >= omega_gas_.size()`.  This cannot occur after a
-     *   correct `MemoryAllocation()` call (which sizes `omega_gas_` to
-     *   `n_species`), but the guard makes the accessor unconditionally safe
-     *   even in partially-initialised states.
-     * - Returns 0.0 if `omega_gas_` is empty (not yet allocated).
-     *
-     * @par Intended use
-     * Call this inside `variant_prefix_output` / `variant_suffix_output` hooks
-     * instead of direct `omega_gas_[idx]` subscripting.  This prevents undefined
-     * behaviour if a species listed in the output hook (e.g. OH, H2) is absent
-     * from the user's reaction mechanism, which is a perfectly valid configuration.
-     *
-     * BrookesMoss and MetalOxide previously defined equivalent local lambdas
-     * inside their output hooks; this method is the canonical, documented
-     * replacement for that pattern.
+     * Returns `omega_gas_[idx]` when @p idx is a valid species index, and 0.0
+     * when the index is negative, out of range, or the gas-source vector is not
+     * allocated. Use this in output hooks for optional mechanism species.
      *
      * @param idx  Species index as returned by `ThermoMap::IndexOfSpecies`.
-     *             −1 signals "species not present in mechanism".
+     *             -1 signals "species not present in mechanism".
      * @return     Gas-phase source term [kg/m³/s], or 0.0 if unavailable.
      */
     [[nodiscard]] double safe_omega_gas(int idx) const noexcept

@@ -1,6 +1,11 @@
-/*-----------------------------------------------------------------------*\
-|   Shared configuration building blocks for MOM variants                  |
-\*-----------------------------------------------------------------------*/
+/**
+ * @file MOMConfig.hpp
+ * @brief Shared plain-data configuration blocks used by MOM variant Config types.
+ *
+ * These structs collect configuration fields that are common across multiple
+ * particle models. Concrete variants inherit only the blocks they need while
+ * preserving direct member access such as `cfg.gas_consumption`.
+ */
 
 #pragma once
 
@@ -12,9 +17,7 @@ namespace MOM
 /**
  * @brief Common activation, transport, and diagnostic controls.
  *
- * @tparam ThermophoreticDefault Integer default for the variant's
- *         thermophoretic model. BrookesMoss historically defaults to 0,
- *         while HMOM, ThreeEquations, and MetalOxide default to 1.
+ * @tparam ThermophoreticDefault Default thermophoretic model index for the variant.
  */
 template <int ThermophoreticDefault> struct CommonConfig
 {

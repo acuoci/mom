@@ -44,59 +44,45 @@
 #include <numeric>
 #include <span>
 #include <sstream>
+
+/**
+ * @file MetalOxide.tpp
+ * @brief Template implementation of the MetalOxide nanoparticle model.
+ */
+
 namespace MOM
 {
 
-// ============================================================================
-// Constructor
-// ============================================================================
-
 template <ThermoMap Thermo> MetalOxide<Thermo>::MetalOxide(const Thermo& thermo) : thermo_(thermo)
 {
-    // -- Default material / physics constants -----------------------------
-    // Config{} keeps TiO2/anatase as the default material. The material can be
-    // replaced at setup time for generic metal-oxide use.
     this->rho_particle_ = solid_density_kg_m3_;
     this->planck_model_ = PlanckCoeffModel::None;
 
-    // -- Enhancement factors (not exposed in Config; set before ApplyConfig
-    //    so they are ready when Precalculations() runs inside ApplyConfig) --
     epsilon_nuc_  = 2.5;
     epsilon_coag_ = 2.2;
     epsilon_cond_ = 1.3;
 
-    // -- Internal sintering regularisation (not in Config) -----------------
+    // Internal sintering regularization.
     sintering_activation_np_       = 1.05;
     sintering_activation_width_np_ = 0.05;
     sintering_relative_tolerance_  = 1.e-3;
     sintering_tau_qss_             = 1.e-6;
 
-    // -- Apply all tunable parameter defaults from Config{} ----------------
-    // Config{} is the single source of truth for every numerical constant.
-    // ApplyConfig calls Precalculations() internally after setting
-    // n_formula_units_min_
-    // and the other geometry-affecting parameters.
     ApplyConfig(Config{});
-
-    // -- Memory allocation (size depends on thermo_.NumberOfSpecies()) -----
     MemoryAllocation();
 }
 
-// ============================================================================
-// MemoryAllocation
-// ============================================================================
-
 template <ThermoMap Thermo> void MetalOxide<Thermo>::MemoryAllocation()
 {
-    this->ZeroSources();          // zeros source_all_ (base class)
-    source_nucleation_.setZero(); // owned by MetalOxide — zeroed explicitly
+    this->ZeroSources();
+    source_nucleation_.setZero();
     source_coagulation_.setZero();
     source_condensation_.setZero();
     source_sintering_.setZero();
 
     this->omega_gas_ = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(thermo_.NumberOfSpecies()));
 
-    // Initial moments (IC at numerical floor values)
+    // Initial moments at numerical floor values.
     const double N0  = std::max(N_min_, 0.0);
     const double fv0 = N0 * v0_;
     const double Y0  = solid_density_kg_m3_ / 1.0 * fv0; // reference gas density 1 kg/m3
@@ -107,10 +93,6 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::MemoryAllocation()
     initial_moments_cache_(2) = S0;
 }
 
-// ============================================================================
-// Precalculations  (call whenever n_formula_units_min_ or vprec_/dprec_ change)
-// ============================================================================
-
 template <ThermoMap Thermo> void MetalOxide<Thermo>::Precalculations()
 {
     v0_ = static_cast<double>(n_formula_units_min_) * solid_formula_unit_volume_m3_;
@@ -120,7 +102,7 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::Precalculations()
     v_min_ = v0_;
     S_min_ = N_min_ * s0_;
 
-    // Kernel prefactor for nucleation (temperature-independent part)
+    // Temperature-independent kernel prefactors.
     if (vprec_ > 0. && dprec_ > 0.)
         alpha_nuc_ = epsilon_nuc_ * std::sqrt(this->pi_ * this->kB_ / (2. * solid_density_kg_m3_)) *
                      std::sqrt(2. / vprec_) * std::pow(2. * dprec_, 2.);
@@ -131,10 +113,6 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::Precalculations()
 
     alpha_cond_ = epsilon_cond_ * std::sqrt(this->pi_ * this->kB_ / (2. * solid_density_kg_m3_));
 }
-
-// ============================================================================
-// Material configuration
-// ============================================================================
 
 template <ThermoMap Thermo>
 void MetalOxide<Thermo>::SetSolidMaterial(std::string_view name,
@@ -192,16 +170,12 @@ void MetalOxide<Thermo>::SetMinimumNumberOfFormulaUnits(unsigned n)
     Precalculations();
 }
 
-// ============================================================================
-// SetState  — injects thermodynamic state from the CFD solver
-// ============================================================================
-
 template <ThermoMap Thermo>
 void MetalOxide<Thermo>::SetState(double T, double P_Pa, const double* Y) noexcept
 {
     const double cTot = this->template UpdateMixtureState<>(T, P_Pa, Y, thermo_);
 
-    // Precursor mass fraction and concentration
+    // Precursor mass fraction and concentration.
     Y_precursor_ = 0.;
     c_precursor_ = 0.;
     if (precursor_index_ >= 0)
@@ -210,10 +184,6 @@ void MetalOxide<Thermo>::SetState(double T, double P_Pa, const double* Y) noexce
         c_precursor_ = this->SpeciesConcentrationKmolM3(precursor_index_, Y, cTot, thermo_);
     }
 }
-
-// ============================================================================
-// SetMoments
-// ============================================================================
 
 template <ThermoMap Thermo> void MetalOxide<Thermo>::SetMoments(std::span<const double> m) noexcept
 {
@@ -231,10 +201,6 @@ void MetalOxide<Thermo>::SetMoments(double solid_mass_fraction,
     scaled_number_density_ = std::max(scaled_number_density, 0.);
     surface_area_concentration_ = std::max(surface_area_concentration, 0.);
 }
-
-// ============================================================================
-// SetPrecursor
-// ============================================================================
 
 template <ThermoMap Thermo> void MetalOxide<Thermo>::SetPrecursor(std::string_view name)
 {
@@ -268,17 +234,12 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::SetPrecursor(std::string_vi
     v_precursor_ = m_precursor_ / solid_density_kg_m3_;
     d_precursor_ = this->SphereDiameter(v_precursor_);
 
-    // Effective collision geometry used by nucleation/condensation kernels:
-    // volume contribution = configured solid formula units per precursor.
+    // Effective collision geometry used by nucleation and condensation kernels.
     vprec_ = solid_formula_units_per_precursor_ * solid_formula_unit_volume_m3_;
     dprec_ = d_precursor_;
 
     Precalculations();
 }
-
-// ============================================================================
-// Gas stoichiometry setup
-// ============================================================================
 
 template <ThermoMap Thermo> void MetalOxide<Thermo>::ClearGasStoichiometry() noexcept
 {
@@ -379,10 +340,6 @@ void MetalOxide<Thermo>::SetGasStoichiometry(std::span<const GasStoichiometryTer
     ValidateGasStoichiometryMassBalance();
 }
 
-// ============================================================================
-// SetGasClosureDummySpecies
-// ============================================================================
-
 template <ThermoMap Thermo> void MetalOxide<Thermo>::SetGasClosureDummySpecies(std::string_view name)
 {
     this->closure_dummy_species_ = std::string(name);
@@ -405,10 +362,6 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::SetGasClosureDummySpecies(s
     this->is_closure_dummy_species_ = true;
 }
 
-// ============================================================================
-// Properties  — aggregate particle properties from the three moments
-// ============================================================================
-
 template <ThermoMap Thermo>
 void MetalOxide<Thermo>::Properties(double& fv,
                               double& dp,
@@ -427,7 +380,7 @@ void MetalOxide<Thermo>::Properties(double& fv,
     // Volume fraction [-]
     fv = this->rho_ / solid_density_kg_m3_ * Y;
 
-    // Number density used for property calculation (regularized)
+    // Number density used for property calculation.
     const double NStar  = std::max(N, N_min_);
     const double fvStar = std::max(fv, fv_min_);
 
@@ -441,33 +394,27 @@ void MetalOxide<Thermo>::Properties(double& fv,
     const double SStar = std::max(S, S_min_);
     ss                 = std::max(SStar / NStar, ssph);
 
-    // Sphere-equivalent aggregate diameter [m]
-    // (diameter of a sphere whose volume equals the aggregate volume)
+    // Sphere-equivalent aggregate diameter [m].
     da = this->SphereDiameter(vs);
     da = std::max(da, d0_);
 
-    // Primary particle diameter [m]
-    // dp ≤ da always (since ss ≥ ssph ensures 6*vs/ss ≤ 6*vs/ssph = da)    
+    // Primary particle diameter [m].
     dp = 6. * vs / ss;
     dp = std::max(dp, d0_);
 
     // Number of primary particles per aggregate [-]
     np = this->NumberPrimaryParticles(ss, vs);
 
-    // Collision diameter — fractal aggregate (Df = 1.8) [m]
+    // Collision diameter for a fractal aggregate with Df = 1.8 [m].
     // dc = dp * np^(1/Df). For np = 1 (sphere) this reduces to dc = dp.
     // Df = 3 (compact sphere) would give a significantly smaller dc for np > 1,
     // corrupting the condensation kernel (dprec + dc)^2 and coagulation (2*dc)^2.
     constexpr double Df = 1.8;
     dc = dp * std::pow(np, 1. / Df);
 
-    // Sintering time scale [s]:  τ_s = As · T^ns · dp^4 · exp(Ts/T)
+    // Sintering time scale [s]: tau_s = As * T^ns * dp^4 * exp(Ts/T).
     tauS = As_ * std::pow(this->T_, ns_) * std::pow(dp, 4.) * std::exp(Ts_ / this->T_);
 }
-
-// ============================================================================
-// VolumeFraction, MassFraction, ParticleNumberDensity, SpecificSurface
-// ============================================================================
 
 template <ThermoMap Thermo> double MetalOxide<Thermo>::volume_fraction() const noexcept
 {
@@ -488,11 +435,6 @@ template <ThermoMap Thermo> double MetalOxide<Thermo>::specific_surface_area() c
 {
     return std::max(surface_area_concentration_, 0.);
 }
-
-// ============================================================================
-// ParticleDiameter, CollisionDiameter, AggregateDiameter,
-// NumberOfPrimaryParticles
-// ============================================================================
 
 template <ThermoMap Thermo> double MetalOxide<Thermo>::particle_diameter() const noexcept
 {
@@ -522,10 +464,6 @@ template <ThermoMap Thermo> double MetalOxide<Thermo>::number_primary_particles(
     return np;
 }
 
-// ============================================================================
-// DiffusionCoefficient  — Cunningham-corrected Brownian + Schmidt fallback
-// ============================================================================
-
 template <ThermoMap Thermo> double MetalOxide<Thermo>::diffusion_coefficient() const noexcept
 {
     double fv, dp, dc, da, np, ss, vs, ssph, tauS;
@@ -536,10 +474,6 @@ template <ThermoMap Thermo> double MetalOxide<Thermo>::diffusion_coefficient() c
     const double GammaSc       = this->mu_ / this->schmidt_number_;
     return std::max(GammaBrownian, GammaSc);
 }
-
-// ============================================================================
-// NucleationParticleVolume
-// ============================================================================
 
 template <ThermoMap Thermo> double MetalOxide<Thermo>::NucleationParticleVolume() const noexcept
 {
@@ -555,10 +489,6 @@ template <ThermoMap Thermo> double MetalOxide<Thermo>::NucleationParticleVolume(
     return v0_;
 }
 
-// ============================================================================
-// NucleationSourceTerms  — dispatcher
-// ============================================================================
-
 template <ThermoMap Thermo> void MetalOxide<Thermo>::NucleationSourceTerms()
 {
     if (nucleation_variant_ == NucleationVariant::Binary)
@@ -566,10 +496,6 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::NucleationSourceTerms()
     else if (nucleation_variant_ == NucleationVariant::FixedCluster)
         NucleationSourceTerms_FixedCluster();
 }
-
-// ============================================================================
-// NucleationSourceTerms_Binary
-// ============================================================================
 
 template <ThermoMap Thermo> void MetalOxide<Thermo>::NucleationSourceTerms_Binary()
 {
@@ -602,10 +528,6 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::NucleationSourceTerms_Binar
     this->source_nucleation_(2) = source_S;
 }
 
-// ============================================================================
-// NucleationSourceTerms_FixedCluster
-// ============================================================================
-
 template <ThermoMap Thermo> void MetalOxide<Thermo>::NucleationSourceTerms_FixedCluster()
 {
     if (c_precursor_ <= 0.)
@@ -634,10 +556,6 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::NucleationSourceTerms_Fixed
     this->source_nucleation_(1) = source_N / N0_scaling_;
     this->source_nucleation_(2) = source_S;
 }
-
-// ============================================================================
-// CoagulationSourceTerms
-// ============================================================================
 
 template <ThermoMap Thermo> void MetalOxide<Thermo>::CoagulationSourceTerms()
 {
@@ -678,10 +596,6 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::CoagulationSourceTerms()
     this->source_coagulation_(2) = 0.;
 }
 
-// ============================================================================
-// CondensationSourceTerms
-// ============================================================================
-
 template <ThermoMap Thermo> void MetalOxide<Thermo>::CondensationSourceTerms()
 {
     if (c_precursor_ <= 0. || vprec_ <= 0. || dprec_ <= 0.)
@@ -710,10 +624,7 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::CondensationSourceTerms()
 
     // Surface area change per condensation event (fractal correction).
     // deltas = (2/3) * (vprec/vs) * ss * np^chi
-    // The np^chi factor (chi = -0.2043) accounts for the fractal morphology of aggregates: 
-    // a particle with np primaries grows its surface less per unit volume added than a sphere
-    // would.  When np = 1 (sphere) the factor is 1. Dropping this term causes deltas to be 
-    // overestimated whenever coagulation has produced aggregates (np > 1).
+    // The np^chi factor accounts for fractal aggregate morphology.
     constexpr double chi = -0.2043;
     const double deltas = (2. / 3.) * (vprec_ / vs) * ss * std::pow(std::max(np, 1.), chi);
 
@@ -721,10 +632,6 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::CondensationSourceTerms()
     this->source_condensation_(1) = 0.;
     this->source_condensation_(2) = deltas * BetaNprecN;
 }
-
-// ============================================================================
-// SinteringSourceTerms
-// ============================================================================
 
 template <ThermoMap Thermo> void MetalOxide<Thermo>::SinteringSourceTerms()
 {
@@ -770,10 +677,6 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::SinteringSourceTerms()
     this->source_sintering_(2) = OmegaS;
 }
 
-// ============================================================================
-// SinteringDeferredUpdate  — analytical ODE solution for stiff sintering
-// ============================================================================
-
 template <ThermoMap Thermo> double MetalOxide<Thermo>::SinteringDeferredUpdate(double dt_ode)
 {
     if (sintering_model_ == 0)
@@ -794,7 +697,7 @@ template <ThermoMap Thermo> double MetalOxide<Thermo>::SinteringDeferredUpdate(d
     if (dp < sintering_dp_min_)
         return S;
 
-    // Smooth activation
+    // Smooth activation based on aggregate morphology.
     double activation = 1.;
     if (sintering_activation_np_ > 1.)
     {
@@ -808,19 +711,15 @@ template <ThermoMap Thermo> double MetalOxide<Thermo>::SinteringDeferredUpdate(d
     const double tauS_phys = std::max(tauS, sintering_tau_min_);
     const double tauSeff   = tauS_phys / activation;
 
-    // Analytical solution: S(t) = S_sphere + (S0 - S_sphere)*exp(-dt/tau)
+    // Analytical solution: S(t) = S_sphere + (S0 - S_sphere)*exp(-dt/tau).
     const double S_new = S_sphere + (S - S_sphere) * std::exp(-dt_ode / tauSeff);
     return std::max(S_new, S_sphere);
 }
 
-// ============================================================================
-// ComputeSources  — master entry point
-// ============================================================================
-
 template <ThermoMap Thermo> void MetalOxide<Thermo>::ComputeSources() noexcept
 {
-    this->ZeroSources();          // zeros source_all_ (base class)
-    source_nucleation_.setZero(); // owned by MetalOxide — must be zeroed before early return
+    this->ZeroSources();
+    source_nucleation_.setZero();
     source_coagulation_.setZero();
     source_condensation_.setZero();
     source_sintering_.setZero();
@@ -844,7 +743,7 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::ComputeSources() noexcept
     if (sintering_model_ > 0)
         SinteringSourceTerms();
 
-    // Sanitise and accumulate total source
+    // Sanitize and accumulate total source.
     for (unsigned i = 0; i < 3u; ++i)
     {
         if (!std::isfinite(this->source_nucleation_(i)))
@@ -867,18 +766,10 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::ComputeSources() noexcept
         CalculateOmegaGas_internal();
 }
 
-// ============================================================================
-// CalculateOmegaGas  — public interface
-// ============================================================================
-
 template <ThermoMap Thermo> void MetalOxide<Thermo>::CalculateOmegaGas() noexcept
 {
     CalculateOmegaGas_internal();
 }
-
-// ============================================================================
-// CalculateOmegaGas_internal  — gas-phase consumption [kg/m3/s]
-// ============================================================================
 
 template <ThermoMap Thermo> void MetalOxide<Thermo>::CalculateOmegaGas_internal() noexcept
 {
@@ -912,7 +803,7 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::CalculateOmegaGas_internal(
         this->omega_gas_[term.index] +=
             term.coefficient * Rprec * term.molecular_weight_kg_kmol;
 
-    // Dummy species closure: adjust to enforce sum(omega_gas) = 0
+    // Dummy species closure enforces sum(omega_gas) = 0.
     if (this->is_closure_dummy_species_ && this->closure_dummy_index_ >= 0)
     {
         const int nsp = static_cast<int>(thermo_.NumberOfSpecies());
@@ -924,13 +815,8 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::CalculateOmegaGas_internal(
     }
 }
 
-// ============================================================================
-// PrintSummary
-// ============================================================================
-
 template <ThermoMap Thermo> void MetalOxide<Thermo>::PrintSummary() const
 {
-    // Helper lambdas — no heap allocation, resolved at compile time
     const auto nuc_str = [](NucleationVariant v) -> const char* {
         switch (v) {
             case NucleationVariant::Off:          return "off";
@@ -1050,10 +936,6 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::PrintSummary() const
         << "------------------------------------------------------------------------------------------\n";
 }
 
-// ============================================================================
-// ApplyConfig  (private — all parameter assignments, no I/O)
-// ============================================================================
-
 template <ThermoMap Thermo>
 void MetalOxide<Thermo>::ApplyConfig(const Config& cfg)
 {
@@ -1066,9 +948,6 @@ void MetalOxide<Thermo>::ApplyConfig(const Config& cfg)
     this->SetSolidFormulaUnitsPerPrecursor(cfg.solid_formula_units_per_precursor);
 
     // -- Precursor / gas setup ---------------------------------------------
-    // Always call SetPrecursor — including when cfg.precursor_species == "none",
-    // which resets all precursor-derived geometry (vprec_, dprec_, etc.) to 0.
-    // This ensures a subsequent SetupFromConfig("none") can clear a prior precursor.
     this->SetPrecursor(cfg.precursor_species);
     this->SetGasStoichiometry(cfg.gas_stoichiometry,
                               cfg.gas_stoichiometry_mass_tolerance);
@@ -1084,7 +963,7 @@ void MetalOxide<Thermo>::ApplyConfig(const Config& cfg)
         ValidateGasStoichiometryMassBalance();
     }
 
-    // -- Nucleation model (string → enum → int) ----------------------------
+    // -- Nucleation model --------------------------------------------------
     if (cfg.nucleation_model == "none" || cfg.nucleation_model == "0")
         this->SetNucleation(static_cast<int>(NucleationVariant::Off));
     else if (cfg.nucleation_model == "binary" || cfg.nucleation_model == "1")
@@ -1120,10 +999,7 @@ void MetalOxide<Thermo>::ApplyConfig(const Config& cfg)
     Ts_ = cfg.sintering_Ts_K;
     ns_ = cfg.sintering_ns;
 
-    // -- Sintering regularisation (Config-exposed subset) ------------------
-    // sintering_activation_np_, sintering_activation_width_np_,
-    // sintering_relative_tolerance_, sintering_tau_qss_ are internal
-    // numerical knobs not exposed in Config — they live in the constructor.
+    // -- Sintering regularization -----------------------------------------
     is_sintering_deferred_ = cfg.sintering_deferred;
     sintering_dp_min_      = cfg.sintering_dp_min_m;
     sintering_tau_min_     = cfg.sintering_tau_min_s;
@@ -1132,7 +1008,7 @@ void MetalOxide<Thermo>::ApplyConfig(const Config& cfg)
     // -- Numerical floors + geometry recompute -----------------------------
     N_min_  = cfg.ns_minimum_per_m3;
     fv_min_ = cfg.fv_minimum;
-    Precalculations(); // recompute geometry that depends on N_min_, n_formula_units_min_, epsilon_*
+    Precalculations();
 
     // -- Transport ---------------------------------------------------------
     this->SetSchmidtNumber(cfg.schmidt_number);
@@ -1141,20 +1017,12 @@ void MetalOxide<Thermo>::ApplyConfig(const Config& cfg)
     this->is_debug_mode_ = cfg.debug_mode;
 }
 
-// ============================================================================
-// SetupFromConfig  (public — delegates to ApplyConfig, then prints summary)
-// ============================================================================
-
 template <ThermoMap Thermo>
 void MetalOxide<Thermo>::SetupFromConfig(const Config& cfg)
 {
     ApplyConfig(cfg);
     PrintSummary();
 }
-
-// ============================================================================
-// NDF reconstruction  (Pareto + log-normal, analogous to ThreeEquations)
-// ============================================================================
 
 template <ThermoMap Thermo>
 typename MetalOxide<Thermo>::NDFReconstructionData MetalOxide<Thermo>::ReconstructedNDFData(
@@ -1298,21 +1166,11 @@ void MetalOxide<Thermo>::ReconstructedNDF(const Eigen::VectorXd& nu,
 }
 
 #if defined(MOM_USE_DICTIONARY)
-// ============================================================================
-// ParseConfig — OpenSMOKE++ dictionary → MetalOxide::Config
-// ============================================================================
-
 template <ThermoMap Thermo>
 template <typename DictType>
 std::expected<typename MetalOxide<Thermo>::Config, std::string>
 MetalOxide<Thermo>::ParseConfig(DictType& dict)
 {
-    // SetGrammar validates the dictionary against the grammar rules defined in
-    // MetalOxide_Grammar::DefineRules().  On any violation (missing mandatory
-    // keyword, unknown keyword, duplicate, conflicting keyword) it calls
-    // Dictionary::ErrorMessage() which throws std::runtime_error.
-    // That exception is intentionally NOT caught here so it propagates to the
-    // caller and stops the simulation.
     MetalOxide_Grammar grammar;
     dict.SetGrammar(grammar);
 

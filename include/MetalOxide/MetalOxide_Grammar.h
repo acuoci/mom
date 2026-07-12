@@ -41,12 +41,22 @@
 #include "DictionaryGrammar.h"
 #include "DictionaryKeyWord.h"
 
+/**
+ * @file MetalOxide_Grammar.h
+ * @brief OpenSMOKE++ dictionary grammar for the MetalOxide model.
+ */
+
 namespace MOM
 {
+/**
+ * @class MetalOxide_Grammar
+ * @brief Defines valid dictionary keywords for MetalOxide configuration.
+ */
 class MetalOxide_Grammar : public OpenSMOKEpp::DictionaryGrammar
 {
 protected:
 
+    /** @brief Registers dictionary keywords, value types, and mandatory flags. */
     virtual void DefineRules();
 };
 } // namespace MOM

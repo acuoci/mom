@@ -39,9 +39,8 @@
  * @file Dispatch.hpp
  * @brief Core per-cell dispatch free functions for AnyMomentMethod.
  *
- * Contains state injection, computation triggers, configuration, and
- * diagnostic functions.  These are the functions a CFD solver calls on
- * every cell iteration to drive the moment method computation.
+ * Contains state injection, computation, configuration, and diagnostic
+ * functions for the runtime-selected API.
  *
  * Included automatically by `MOM/MOM.hpp`.  Can also be included directly
  * when only dispatch functionality is needed (e.g. in a performance-critical
@@ -64,15 +63,11 @@ namespace MOM
 {
 
 /**
- * @name Core dispatch — state injection and computation
+ * @name Core dispatch: state injection and computation
  *
- * These free functions reproduce the MomentMethod concept's state-injection
- * and computation interface as `std::visit` wrappers on `AnyMomentMethod<Thermo>`.
- * Each carries O(1) dispatch cost — one indirect branch via the variant jump table.
- *
- * Use `ComputeCell` as the single hot-path entry point in cell loops: it collapses
- * four `std::visit` calls into one, keeping the object layout in registers across
- * the full per-cell computation.
+ * These functions forward the compile-time `MomentMethod` API through
+ * `AnyMomentMethod<Thermo>`. Prefer `ComputeCell` in cell loops to perform state
+ * injection and source evaluation with a single visit.
  * @{
  */
 

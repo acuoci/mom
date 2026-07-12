@@ -44,13 +44,16 @@ namespace MOM
 {
 
 /**
+ * @file ThermoProxy.hpp
+ * @brief Thermodynamics backend concept and lightweight test implementation.
+ */
+
+/**
  * @concept ThermoMap
  * @brief Minimal thermodynamics interface required by any moment method variant.
  *
- * This concept fully decouples the MOM library core from any specific
- * thermodynamics backend (OpenSMOKE++, Cantera, custom solvers).  Any backend
- * can be adapted by wrapping it in a thin adapter class that satisfies these
- * requirements.
+ * Any CFD or chemistry backend can be used by providing an adapter satisfying
+ * this concept.
  *
  * @par Conventions
  * - All species indices are **0-based**.
@@ -155,13 +158,10 @@ struct BasicThermoData
 static_assert(ThermoMap<BasicThermoData>, "BasicThermoData must satisfy ThermoMap");
 
 /**
- * @note Additional thermodynamics adapters (e.g. for OpenSMOKE::ThermodynamicsMap_CHEMKIN)
- * live in the compatibility layer and are not included by this header.  They follow
- * the same pattern — a thin wrapper that forwards calls to satisfy ThermoMap —
- * ensuring the MOM library core never includes OpenSMOKE++ headers directly.
+ * @note Additional thermodynamics adapters live in compatibility layers and are
+ *       intentionally not included by this header.
  *
  * @code
- *   #include "OpenSMOKE++ headers..."
  *   #include "MOM/ThermoProxy.hpp"
  *   OpenSMOKE::ThermodynamicsMap_CHEMKIN osThermo(...);
  *   MOM::OpenSMOKEThermo thermo(osThermo);

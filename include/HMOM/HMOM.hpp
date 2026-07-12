@@ -49,24 +49,27 @@
 #include "MOM/ThermoProxy.hpp"
 
 #if defined(MOM_USE_DICTIONARY)
-#include <expected> // std::expected / std::unexpected — C++23, only with MOM_USE_DICTIONARY
+#include <expected>
 #endif
+
+/**
+ * @file HMOM.hpp
+ * @brief Hybrid Method of Moments soot model.
+ */
 
 namespace MOM
 {
 
 /**
  * @class HMOM
- * @brief Hybrid Method of Moments for soot with 4 transported equations.
+ * @brief Four-equation Hybrid Method of Moments soot source-term model.
  *
- * Implements the HMOM model of Mueller, Pitsch & Raman (2009) as extended by
- * Attili, Bisetti, Mueller & Pitsch (2014).  The method transports a set of
- * normalised moments that describe a bimodal number density function (NDF)
- * consisting of a small (nucleation) mode and a large (growth/coagulation) mode.
+ * HMOM transports normalized moments for a two-mode soot number density
+ * function with one nucleation mode and one growth/coagulation mode.
  *
  * @par References
- * - Mueller, Pitsch & Raman, *Proc. Combust. Inst.* **32** (2009) 785–792.
- * - Attili, Bisetti, Mueller & Pitsch, *Combust. Flame* **161** (2014) 1849–1865.
+ * - Mueller, Pitsch & Raman, *Proc. Combust. Inst.* **32** (2009) 785-792.
+ * - Attili, Bisetti, Mueller & Pitsch, *Combust. Flame* **161** (2014) 1849-1865.
  *
  * @par Transported variables (normalised, [mol/m3])
  * | Index | Symbol | Physical meaning |
@@ -77,28 +80,24 @@ namespace MOM
  * | 3 | N0  | Small-particle (nucleation-mode) number density |
  *
  * @par Physical processes modelled
- * - **Nucleation** — PAH dimerisation in the free-molecular regime.
- * - **Surface growth** — HACA mechanism (H-abstraction / C2H2 addition),
+ * - **Nucleation**: PAH dimerisation in the free-molecular regime.
+ * - **Surface growth**: HACA mechanism (H-abstraction / C2H2 addition),
  *   5-step kinetic scheme with surface-site efficiency.
- * - **Condensation** — PAH adsorption onto existing soot particles.
- * - **Oxidation** — O2 and OH attack (Lee et al. and Roper correlations).
- * - **Coagulation** — discrete (small–small, small–large, large–large collisions)
+ * - **Condensation**: PAH adsorption onto existing soot particles.
+ * - **Oxidation**: O2 and OH attack (Lee et al. and Roper correlations).
+ * - **Coagulation**: discrete (small-small, small-large, large-large collisions)
  *   plus a continuum correction term.
- * - **Thermophoresis** — encoded in the effective diffusion coefficient.
+ * - **Thermophoresis**: encoded in the effective diffusion coefficient.
  *
  * @par NDF reconstruction
  * HMOM reconstructs the NDF as two delta-function nodes:
  * - Node 0 (small mode): nucleated particles at fixed volume V0, surface S0.
  * - Node 1 (large mode): aggregated particles with mean volume VL, surface SL.
  *
- * @note All five modelled processes have a corresponding `sources_X_impl()`
- *       extension point declared here, which MomentMethodBase detects at compile
- *       time via `if constexpr (requires(...))` to route calls with zero overhead.
- *       Sintering is NOT declared; `sources_sintering()` returns a zero span.
+ * @note Sintering is not modelled and therefore returns the base-class zero span.
  *
  * @par Thread safety
- * Not thread-safe — one instance per OpenMP thread.
- * See `MomentMethodBase` for the complete thread-safety contract.
+ * Instances are mutable work objects. Use one model instance per thread.
  *
  * @tparam Thermo  Must satisfy the MOM::ThermoMap concept.
  */
@@ -111,7 +110,7 @@ public:
 
     using typename Base::MomentVector;
 
-    /// Labels accepted by MOM::MakeAnyMomentMethod for runtime variant selection.
+    /** @brief Labels accepted by `MOM::MakeAnyMomentMethod()`. */
     static constexpr std::array<std::string_view, 2> variant_labels{"HMOM", "hmom"};
 
     // -- Method-specific sub-model enums -------------------------------------
@@ -119,7 +118,7 @@ public:
     /** @brief Sticking coefficient model for PAH-soot collisions. */
     enum class StickingModel : int
     {
-        Constant = 0, //!< Fixed sticking coefficient (default: 2×10⁻³).
+        Constant = 0, //!< Fixed sticking coefficient.
         PAH4     = 1  //!< PAH 4-ring collision cross-section sticking model.
     };
 
@@ -133,16 +132,16 @@ public:
     /** @brief Model for the aggregate collision diameter. */
     enum class CollisionDiameterModel : int
     {
-        Model1 = 1, //!< Collision diameter ∝ N^{1/3} d_p (Mueller 2009).
+        Model1 = 1, //!< Collision diameter proportional to N^{1/3} d_p (Mueller 2009).
         Model2 = 2  //!< Collision diameter from fractal geometry (Attili 2014).
     };
 
     /**
      * @brief Properties of one node in the HMOM two-delta NDF reconstruction.
      *
-     * HMOM reconstructs the NDF as two delta nodes (Mueller et al. 2009, §3.2):
-     * - Node 0 (small mode): newly nucleated particles at fixed volume V₀, surface S₀.
-     * - Node 1 (large mode): grown/coagulated particles with mean volume V_L, surface S_L.
+     * HMOM reconstructs the NDF as two delta nodes: newly nucleated particles
+     * at fixed volume/surface, and grown/coagulated particles at mean
+     * volume/surface.
      */
     struct NDFNode
     {
@@ -156,59 +155,31 @@ public:
 
     /**
      * @struct NDFReconstructionData
-     * @brief Parameters of the HMOM two-node NDF reconstruction, smeared to a
-     *        bimodal log-normal for diagnostic visualization.
+     * @brief Parameters for the HMOM two-node NDF reconstruction.
      *
-     * @par Physical background
-     * HMOM is a strict two-delta method (Mueller et al. 2009, §3.2).  The
-     * exact NDF carried by the transported moments is:
-     * @code
-     *   n(v) = N0 · δ(v − V0)  +  NL · δ(v − VL)
-     * @endcode
-     * where @c V0 is the fixed nucleation volume (derived from PAH geometry)
-     * and @c VL = NLVL/NL is the mean large-mode aggregate volume.  Both modes
-     * are **point masses** — the four transported moments M00, M10, M01, N0
-     * fully determine the node positions (V0, VL) and weights (N0, NL) but
-     * carry **no information** about within-mode polydispersity.
+     * The physical HMOM NDF is a two-delta distribution. For diagnostic output,
+     * each delta node is smeared with a fixed log-normal kernel. The smearing
+     * width is not a transported physical quantity.
      *
-     * @par Smeared visualization
-     * For output purposes each Dirac delta is replaced by a narrow log-normal
-     * kernel with a fixed, purely cosmetic log-volume standard deviation
-     * σ = kNDFSmearSigmaLnV:
-     * @code
-     *   n_vis(v) ≈ N0 · LN(v; μ₀, σ)  +  NL · LN(v; μL, σ)
-     * @endcode
-     * The location parameters preserve the original delta positions as means:
-     * @code
-     *   μ₀ = ln(V0) − σ²/2   so that  ⟨v⟩_small = V0
-     *   μL = ln(VL) − σ²/2   so that  ⟨v⟩_large = VL
-     * @endcode
-     *
-     * @warning The smearing width σ is **not** derived from any transported
-     *          moment; it is a visualization convenience only.  Users should
-     *          not interpret the width of the smeared peaks as physical
-     *          polydispersity information.
-     *
-     * @note All length-containing fields are in SI units [m³, #/m³].
-     *       MomentMethodReporter::WriteReconstructedNDF() applies nm³ conversion.
+     * @note Fields use SI units. `MomentMethodReporter::WriteReconstructedNDF()`
+     *       performs nm-based output conversion.
      */
     struct NDFReconstructionData
     {
         bool   valid;   //!< True if the reconstruction is physically meaningful.
 
-        // -- Small (nucleation) mode — monodisperse delta at V₀ in HMOM ------
-        double N0;      //!< Number density of the nucleation mode [#/m³].
-        double V0;      //!< Nucleation-mode particle volume [m³/#].
-        double mu0;     //!< Log-normal location: μ₀ = ln(V₀) − σ²/2  [ln(m³)].
+        // -- Small nucleation mode -------------------------------------------
+        double N0;      //!< Number density of the nucleation mode [#/m3].
+        double V0;      //!< Nucleation-mode particle volume [m3/#].
+        double mu0;     //!< Log-normal location parameter [ln(m3)].
 
-        // -- Large (growth / coagulation) mode — monodisperse delta at VL ----
-        double NL;      //!< Number density of the large (growth) mode [#/m³].
-        double VL;      //!< Mean particle volume of the large mode [m³/#].
-        double muL;     //!< Log-normal location: μL = ln(VL) − σ²/2  [ln(m³)].
+        // -- Large growth/coagulation mode -----------------------------------
+        double NL;      //!< Number density of the large mode [#/m3].
+        double VL;      //!< Mean particle volume of the large mode [m3/#].
+        double muL;     //!< Log-normal location parameter [ln(m3)].
 
-        // -- Shared cosmetic smearing width -----------------------------------
+        // -- Shared diagnostic smearing width --------------------------------
         double sigma;   //!< Log-volume std dev used for both smeared modes [-].
-                        //!< Equals kNDFSmearSigmaLnV; stored here for self-containedness.
     };
 
     // -- Configuration struct ------------------------------------------------
@@ -216,10 +187,6 @@ public:
     /**
      * @struct Config
      * @brief Plain configuration parameters for the HMOM variant.
-     *
-     * All fields carry defaults that reproduce the post-constructor state.
-     * Pass a default-constructed @c Config to `SetupFromConfig()` to apply
-     * the library defaults without any input file.
      *
      * @note No external dependencies: only standard C++ types.
      */
@@ -235,8 +202,8 @@ public:
         int collision_diameter_model = 2; //!< Collision diameter model index [2 = default]
 
         // ---- Surface density -----------------------------------------------
-        double surface_density_per_m2   = 1.7e19;  //!< Active surface site density [#/m²]
-        bool   surface_density_correction = false;  //!< Temperature-dependent χ correction
+        double surface_density_per_m2   = 1.7e19;  //!< Active surface site density [#/m2]
+        bool   surface_density_correction = false;  //!< Temperature-dependent correction.
         double surf_dens_a1 = 12.65;    //!< Correction coefficient A1 [-]
         double surf_dens_a2 = -0.00563; //!< Correction coefficient A2 [1/K]
         double surf_dens_b1 = -1.38;   //!< Correction coefficient B1 [-]
@@ -245,7 +212,7 @@ public:
         // ---- Additional process model selection -----------------------------
         int continuous_coagulation_model = 1; //!< Coagulation (continuum) model
 
-        // ---- HACA kinetics (A in cm³/mol/s, E in kJ/mol) ------------------
+        // ---- HACA kinetics (A in cm3/mol/s, E in kJ/mol) -----------------
         double A1f = 6.72e1;  double n1f =  3.33; double E1f =   6.09;
         double A1b = 6.44e-1; double n1b =  3.79; double E1b =  27.96;
         double A2f = 1.00e8;  double n2f =  1.80; double E2f =  68.42;
@@ -263,32 +230,20 @@ public:
     /**
      * @brief Constructs HMOM bound to the given thermodynamics map.
      *
-     * Does not allocate computational memory.  Call `SetupFromConfig()` or
-     * the individual `Set*` methods, then call `ComputeSources()` each
-     * cell iteration.
-     *
      * @param thermo  Const reference to the thermodynamics map (must outlive this object).
      */
     explicit HMOM(const Thermo& thermo);
     explicit HMOM(const Thermo&&) = delete; ///< Prevents binding a temporary as thermo (dangling ref).
 
-    HMOM(const HMOM&)            = delete; ///< Non-copyable — holds external thermo reference.
+    HMOM(const HMOM&)            = delete; ///< Non-copyable: holds external thermo reference.
     HMOM& operator=(const HMOM&) = delete;
     HMOM(HMOM&&)            = default; ///< Move-constructible for placement in std::variant.
-    HMOM& operator=(HMOM&&) = delete;  ///< Not move-assignable — const Thermo& member cannot be reseated.
+    HMOM& operator=(HMOM&&) = delete;  ///< Not move-assignable: const Thermo& member cannot be reseated.
 
     /**
-     * @brief Configure all HMOM parameters from a plain configuration struct.
-     *
-     * Applies every field of @p cfg by calling the corresponding `Set*()`
-     * methods.  This is the primary programmatic setup path; it has no
-     * dependency on external parsing frameworks.
-     *
-     * Calling this method is equivalent to calling the individual `Set*()`
-     * methods in the same order, followed by `PrintSummary()`.
-     *
-     * @param cfg  Configuration struct.  Default-constructed @c Config
-     *             reproduces the constructor defaults exactly.
+     * @brief Configures the model from a plain configuration struct.
+     * @param cfg Configuration values. A default-constructed `Config` applies
+     *            the model defaults.
      */
     void SetupFromConfig(const Config& cfg);
 
@@ -296,27 +251,18 @@ public:
     /**
      * @brief Parse an OpenSMOKE++ dictionary into an HMOM Config.
      *
-     * Reads every HMOM grammar key from @p dict, performs unit conversions
-     * (kg/m³ ↔ g/cm³, kJ/mol → stored as kJ/mol, etc.) and returns the
-     * populated struct.
-     *
-     * @tparam DictType  OpenSMOKE++ dictionary type.  The concrete type is
-     *                   provided by the caller; this header does not include
-     *                   any OpenSMOKE++ headers.
-     * @param  dict      Mutable reference to the dictionary to parse.
-     * @return           Populated @c Config on success; error string on failure.
+     * @tparam DictType OpenSMOKE++ dictionary type.
+     * @param dict Input dictionary.
+     * @return Parsed configuration, or an error string for invalid keyword values.
      */
     template <typename DictType>
     [[nodiscard]] static std::expected<Config, std::string> ParseConfig(DictType& dict);
 #endif // MOM_USE_DICTIONARY
 
-    // -- MomentMethod concept — state injection -------------------------------
+    // -- MomentMethod concept: state injection --------------------------------
 
     /**
      * @brief Inject the thermodynamic state for the current computational cell.
-     *
-     * Extracts and caches species concentrations required by HMOM:
-     * H, OH, O2, H2, H2O, C2H2, and the PAH precursor.
      *
      * @param T    Gas temperature [K].
      * @param P_Pa Gas pressure [Pa].
@@ -325,48 +271,39 @@ public:
     void SetState(double T, double P_Pa, const double* Y) noexcept;
 
     /**
-     * @brief Set moment values via a generic span (satisfies MomentMethod concept).
-     *
      * @param m  Span of size 4: `[M00_norm, M10_norm, M01_norm, N0_norm]` [mol/m3].
-     *           Indices match the transported variable order in the CFD solver.
-     * @note Prefer `SetNormalizedMoments()` in HMOM-aware code for clarity.
      */
     void SetMoments(std::span<const double> m) noexcept;
 
     /**
-     * @brief Set moment values by name (preferred in HMOM-aware code).
+     * @brief Sets normalized moment values by name.
      *
-     * @param M00_norm  Normalised zeroth-order moment [mol/m3].
-     * @param M10_norm  Normalised first-order volume moment [mol/m3].
-     * @param M01_norm  Normalised first-order surface moment [mol/m3].
-     * @param N0_norm   Normalised small-particle number density [mol/m3].
+     * @param M00_norm  Normalized zeroth-order moment [mol/m3].
+     * @param M10_norm  Normalized first-order volume moment [mol/m3].
+     * @param M01_norm  Normalized first-order surface moment [mol/m3].
+     * @param N0_norm   Normalized small-particle number density [mol/m3].
      */
     void SetNormalizedMoments(double M00_norm, double M10_norm, double M01_norm, double N0_norm) noexcept;
 
-    // -- MomentMethod concept — core computation ------------------------------
+    // -- MomentMethod concept: core computation -------------------------------
 
     /**
      * @brief Compute all moment source terms for the current cell state.
      *
-     * Updates `source_all_`, `source_nucleation_`, `source_growth_`,
-     * `source_oxidation_`, `source_condensation_`, the nine coagulation
-     * sub-vectors, and `omega_gas_`.  Must be called after `SetState()`
-     * and `SetMoments()` each cell iteration.
+     * Must be called after `SetState()` and `SetMoments()` for each cell.
      */
     void ComputeSources() noexcept;
 
     /**
      * @brief Compute only the gas-phase consumption terms (`omega_gas_`).
      *
-     * Called internally by `ComputeSources()`.  Exposed separately for
-     * operator-split solvers where source terms are already known and only gas
-     * coupling needs to be updated.
+     * Called internally by `ComputeSources()`.
      */
     void CalculateOmegaGas() noexcept;
 
-    // -- MomentMethod concept — particle properties ---------------------------
+    // -- MomentMethod concept: particle properties ----------------------------
 
-    /** @brief Soot volume fraction fv = M10 * WC / ρ_s [-]. */
+    /** @brief Soot volume fraction [-]. */
     [[nodiscard]] double volume_fraction() const noexcept;
 
     /** @brief Mean primary particle diameter dp [m]. */
@@ -378,7 +315,7 @@ public:
     /** @brief Total soot number density N = N0 + NL [#/m3]. */
     [[nodiscard]] double particle_number_density() const noexcept;
 
-    /** @brief Soot mass fraction Ys = M10 * WC / (ρ_mix) [-]. */
+    /** @brief Soot mass fraction [-]. */
     [[nodiscard]] double mass_fraction() const noexcept;
 
     /** @brief Soot specific surface area Ss = M01 [m2/m3]. */
@@ -390,24 +327,21 @@ public:
     /** @brief Effective particle diffusion coefficient D_p [kg/m/s]. */
     [[nodiscard]] double diffusion_coefficient() const noexcept;
 
-    // -- MomentMethod concept — initial conditions ----------------------------
+    // -- MomentMethod concept: initial conditions -----------------------------
 
     /**
      * @brief Returns near-zero initial moment values for solver initialisation.
      *
-     * Computed once during setup from the nucleated particle geometry and cached.
-     * Repeated calls incur no allocation.
-     *
-     * @return Span of size 4: `[M00₀, M10₀, M01₀, N0₀]` [mol/m3].
+     * @return Span of size 4: `[M00, M10, M01, N0]` [mol/m3].
      */
     [[nodiscard]] std::span<const double> initial_moments() const noexcept
     {
         return {initial_moments_cache_.data(), 4u};
     }
 
-    // -- MomentMethod concept — precursor -------------------------------------
+    // -- MomentMethod concept: precursor --------------------------------------
 
-    /** @brief 0-based index of the PAH precursor species in the thermo map (−1 if unset). */
+    /** @brief 0-based index of the PAH precursor species, or -1 if unset. */
     [[nodiscard]] int precursor_index() const noexcept { return pah_index_; }
 
     /** @brief Molar concentration of the PAH precursor [kmol/m3]. */
@@ -416,25 +350,17 @@ public:
     /** @brief Name of the PAH precursor species (e.g. "C16H10"). */
     [[nodiscard]] const std::string& precursor_species() const noexcept { return pah_species_; }
 
-    // -- MomentMethod concept — diagnostics -----------------------------------
+    // -- MomentMethod concept: diagnostics ------------------------------------
 
     /** @brief Print a human-readable summary of the HMOM configuration to stdout. */
     void PrintSummary() const;
 
     /**
-     * @name CRTP extension points — per-process source storage
+     * @name Per-process source storage accessors
      *
-     * Each `sources_X_impl()` method signals to MomentMethodBase that HMOM
-     * models process X.  The base class `sources_X()` getter detects these at
-     * compile time via `if constexpr (requires(...))` and forwards here with
-     * zero overhead — no virtual dispatch, no runtime branch.
-     *
-     * `sources_sintering_impl()` is intentionally absent: HMOM does not model
-     * sintering, so `sources_sintering()` returns a zero span automatically.
-     *
-     * @note These are `public` because MomentMethodBase accesses them through the
-     *       CRTP down-cast from a base-class context.  They are not part of the
-     *       intended user-facing API; prefer the base-class `sources_X()` wrappers.
+     * Returned spans are valid after `ComputeSources()`. HMOM does not model
+     * sintering; the base-class `sources_sintering()` getter therefore returns
+     * its zero fallback span.
      * @{
      */
 
@@ -468,7 +394,7 @@ public:
         return {source_oxidation_.data(), this->n_equations};
     }
 
-    /** @brief Oxidation-only gas-phase source terms [kg/m³/s] for operator splitting. */
+    /** @brief Oxidation-only gas-phase source terms [kg/m3/s] for operator splitting. */
     [[nodiscard, gnu::always_inline]] std::span<const double> omega_gas_oxidation_impl() const noexcept
     {
         return {omega_gas_oxidation_.data(),
@@ -480,8 +406,8 @@ public:
     /**
      * @name HMOM coagulation sub-breakdown accessors
      *
-     * Detailed decomposition of coagulation into discrete (small–small,
-     * small–large, large–large) and continuous contributions.
+     * Detailed decomposition of coagulation into discrete (small-small,
+     * small-large, large-large) and continuous contributions.
      * All returned spans have size = n_equations and are valid after
      * `ComputeSources()`.
      * @{
@@ -490,25 +416,25 @@ public:
     /** @brief Discrete coagulation total [mol/m3/s]. */
     [[nodiscard]] std::span<const double> sources_coagulation_discrete() const noexcept;
 
-    /** @brief Discrete small–small coagulation [mol/m3/s]. */
+    /** @brief Discrete small-small coagulation [mol/m3/s]. */
     [[nodiscard]] std::span<const double> sources_coagulation_discrete_ss() const noexcept;
 
-    /** @brief Discrete small–large coagulation [mol/m3/s]. */
+    /** @brief Discrete small-large coagulation [mol/m3/s]. */
     [[nodiscard]] std::span<const double> sources_coagulation_discrete_sl() const noexcept;
 
-    /** @brief Discrete large–large coagulation [mol/m3/s]. */
+    /** @brief Discrete large-large coagulation [mol/m3/s]. */
     [[nodiscard]] std::span<const double> sources_coagulation_discrete_ll() const noexcept;
 
     /** @brief Continuous coagulation total [mol/m3/s]. */
     [[nodiscard]] std::span<const double> sources_coagulation_continuous() const noexcept;
 
-    /** @brief Continuous small–small coagulation [mol/m3/s]. */
+    /** @brief Continuous small-small coagulation [mol/m3/s]. */
     [[nodiscard]] std::span<const double> sources_coagulation_continuous_ss() const noexcept;
 
-    /** @brief Continuous small–large coagulation [mol/m3/s]. */
+    /** @brief Continuous small-large coagulation [mol/m3/s]. */
     [[nodiscard]] std::span<const double> sources_coagulation_continuous_sl() const noexcept;
 
-    /** @brief Continuous large–large coagulation [mol/m3/s]. */
+    /** @brief Continuous large-large coagulation [mol/m3/s]. */
     [[nodiscard]] std::span<const double> sources_coagulation_continuous_ll() const noexcept;
 
     /** @} */
@@ -519,7 +445,7 @@ public:
      * @brief Returns the two-node NDF reconstruction.
      *
      * Node 0 = small (nucleation) mode; Node 1 = large (growth/coagulation) mode.
-     * See Mueller et al. (2009), §3.2.
+     * See Mueller et al. (2009), Section 3.2.
      *
      * @return Array of two NDFNode structs, valid after `ComputeSources()`.
      */
@@ -530,10 +456,8 @@ public:
     /**
      * @brief Compute the bimodal smeared-log-normal NDF reconstruction parameters.
      *
-     * Converts the two-delta HMOM representation (N0·δ(v−V₀) + NL·δ(v−VL))
-     * into a pair of narrow log-normal kernels of equal width σ = kNDFSmearSigmaLnV
-     * for visualization purposes.  See @c NDFReconstructionData for the full
-     * mathematical specification.
+     * Converts the two-delta HMOM representation into two narrow log-normal
+     * kernels with fixed log-volume width `kNDFSmearSigmaLnV`.
      *
      * @par Precondition
      * Should be called after ComputeSources() so that N0_, NL_, NLVL_
@@ -549,36 +473,32 @@ public:
     ReconstructedNDFData(bool use_regularized_moments = false) const;
 
     /**
-     * @brief Normalised smeared NDF  nbar(v) = n_vis(v) / (N0 + NL)  [1/m³].
-     *
-     * Satisfies the MOM::HasReconstructedNDF concept — same call signature as
-     * ThreeEquations and MetalOxide, enabling transparent dispatch through
-     * MomentMethodReporter::WriteReconstructedNDF().
+     * @brief Normalized smeared NDF nbar(v) = n_vis(v) / (N0 + NL) [1/m3].
      *
      * @par Formula
      * @code
-     *   nbar(v) = (N0 · LN(v; μ₀, σ) + NL · LN(v; μL, σ)) / (N0 + NL)
+     *   nbar(v) = (N0 * LN(v; mu0, sigma) + NL * LN(v; muL, sigma)) / (N0 + NL)
      * @endcode
-     * where LN denotes the log-normal PDF and σ = kNDFSmearSigmaLnV.
+     * where LN denotes the log-normal PDF.
      *
-     * @param nu                       Particle volume query point [m³].
+     * @param nu                       Particle volume query point [m3].
      * @param use_regularized_moments  Forwarded to ReconstructedNDFData().
-     * @return  nbar(v) [1/m³]; 0 if moments are invalid or v ≤ 0.
+     * @return  nbar(v) [1/m3]; 0 if moments are invalid or v <= 0.
      */
     [[nodiscard]] double ReconstructedNormalizedNDF(
         double nu, bool use_regularized_moments = false) const;
 
     /**
-     * @brief Dimensional smeared NDF  n_vis(v) [#/m³_gas / m³_particle].
+     * @brief Dimensional smeared NDF n_vis(v) [#/m3_gas / m3_particle].
      *
      * @par Formula
      * @code
-     *   n_vis(v) = N0 · LN(v; μ₀, σ)  +  NL · LN(v; μL, σ)
+     *   n_vis(v) = N0 * LN(v; mu0, sigma) + NL * LN(v; muL, sigma)
      * @endcode
      *
-     * @param nu                       Particle volume query point [m³].
+     * @param nu                       Particle volume query point [m3].
      * @param use_regularized_moments  Forwarded to ReconstructedNDFData().
-     * @return  n(v) [#/m³_gas / m³_particle]; 0 if moments are invalid or v ≤ 0.
+     * @return  n(v) [#/m3_gas / m3_particle]; 0 if moments are invalid or v <= 0.
      */
     [[nodiscard]] double ReconstructedNDF(
         double nu, bool use_regularized_moments = false) const;
@@ -586,8 +506,8 @@ public:
     /**
      * @brief Vectorized form of ReconstructedNDF.
      *
-     * @param nu                       Input volume grid [m³], size n.
-     * @param n                        Output NDF values [#/m³/m³], resized to n.
+     * @param nu                       Input volume grid [m3], size n.
+     * @param n                        Output NDF values [#/m3/m3], resized to n.
      * @param use_regularized_moments  Forwarded to each scalar call.
      */
     void ReconstructedNDF(const Eigen::VectorXd& nu,
@@ -600,10 +520,10 @@ public:
     /** @brief Large-particle number density NL [#/m3]. */
     [[nodiscard]] double soot_large_number_density() const noexcept;
 
-    /** @brief Large-mode number fraction αL = NL/(N0+NL) [-]. */
+    /** @brief Large-mode number fraction alphaL = NL/(N0+NL) [-]. */
     [[nodiscard]] double soot_large_fraction() const noexcept;
 
-    /** @brief Small-mode number fraction α0 = N0/(N0+NL) [-]. */
+    /** @brief Small-mode number fraction alpha0 = N0/(N0+NL) [-]. */
     [[nodiscard]] double soot_small_fraction() const noexcept;
 
     /** @brief Mean volume of large-mode particles VL [m3/#]. */
@@ -618,27 +538,27 @@ public:
     /** @brief Mean primary particle count per large-mode aggregate np,L [-]. */
     [[nodiscard]] double soot_large_primary_particle_number() const noexcept;
 
-    /** @brief Mean particle volume over both modes vs = (M10·WC/Nav) / (M00·WC/Nav·ρ_s) [m3/#]. */
+    /** @brief Mean particle volume over both modes vs = M10/M00 [m3/#]. */
     [[nodiscard]] double soot_mean_volume() const noexcept;
 
     /** @brief Mean particle surface over both modes ss = M01/(M00) [m2/#]. */
     [[nodiscard]] double soot_mean_surface() const noexcept;
 
     /**
-     * @brief Log geometric std dev of primary particle diameter σg,dp (Mueller 2009, Eq. 44).
-     * @return σ_g [-] (natural log scale).
+     * @brief Log geometric standard deviation of primary particle diameter.
+     * @return sigma_g [-] on the natural-log scale.
      */
     [[nodiscard]] double soot_log_geom_std_dev_primary_particle_diameter() const noexcept;
 
     /**
-     * @brief Log geometric std dev of primary particle count σg,np (Mueller 2009, Eq. 45).
-     * @return σ_g [-] (natural log scale).
+     * @brief Log geometric standard deviation of primary particle count.
+     * @return sigma_g [-] on the natural-log scale.
      */
     [[nodiscard]] double soot_log_geom_std_dev_primary_particle_number() const noexcept;
 
     /**
-     * @brief Scattering effective diameter d₆₃ = 6·(M₄,₋₃/M₁,₀)^{1/3} (Mueller 2009, Eq. 46).
-     * @return d₆₃ [m].
+     * @brief Scattering effective diameter d63.
+     * @return d63 [m].
      */
     [[nodiscard]] double soot_d63() const noexcept;
 
@@ -679,13 +599,13 @@ public:
     {
         std::span<const double> all;        //!< Discrete + continuous total [mol/m3/s].
         std::span<const double> discrete;   //!< Discrete sub-total.
-        std::span<const double> disc_ss;    //!< Discrete small–small.
-        std::span<const double> disc_sl;    //!< Discrete small–large.
-        std::span<const double> disc_ll;    //!< Discrete large–large.
+        std::span<const double> disc_ss;    //!< Discrete small-small.
+        std::span<const double> disc_sl;    //!< Discrete small-large.
+        std::span<const double> disc_ll;    //!< Discrete large-large.
         std::span<const double> continuous; //!< Continuous sub-total.
-        std::span<const double> cont_ss;    //!< Continuous small–small.
-        std::span<const double> cont_sl;    //!< Continuous small–large.
-        std::span<const double> cont_ll;    //!< Continuous large–large.
+        std::span<const double> cont_ss;    //!< Continuous small-small.
+        std::span<const double> cont_sl;    //!< Continuous small-large.
+        std::span<const double> cont_ll;    //!< Continuous large-large.
     };
 
     /**
@@ -710,33 +630,17 @@ public:
     }
 
     /**
-     * @name Reporter output hooks — MomentMethodReporter extensibility protocol
+     * @name Reporter output hooks
      *
-     * These two template methods make HMOM self-describing with respect to output.
-     * `MomentMethodReporter` detects them at compile time via
-     * `if constexpr (requires(...))` and calls them with a callback:
-     * @code
-     *   cb(std::string_view label, double value)
-     * @endcode
-     * - In **header mode** the reporter supplies a lambda that uses the @p label
-     *   to register a new output column.
-     * - In **row mode** the reporter supplies a lambda that uses the @p value to
-     *   write data.
-     * The variant implementation is **identical** for both modes.
-     *
-     * - `variant_prefix_output` 
-     * - `variant_suffix_output` 
-     *
-     * To add or remove columns: edit only these two methods.
-     * `MomentMethodReporter` requires no modification.
+     * Optional HMOM columns emitted through `MomentMethodReporter`.
      * @{
      */
 
     /**
      * @brief HMOM-specific prefix columns: bimodal NDF statistics.
      *
-     * Emits: np, ss, vs, N0, NL, αL, dp,L, np,L, d63, σ(dp), σ(np),
-     * σL(dp), σL(np), gsd(dp), gsd(np), gsdL(dp), gsdL(np).
+     * Emits aggregate statistics, bimodal node properties, and soot gas-source
+     * columns.
      *
      * @tparam CB  Callable with signature `void(std::string_view, double)`.
      * @param  cb  Callback invoked once per column.
@@ -768,18 +672,8 @@ public:
     /**
      * @brief HMOM-specific NDF extra columns: two-node reconstruction parameters.
      *
-     * Called by MomentMethodReporter::WriteReconstructedNDF() via
-     * `if constexpr (requires(...))` detection — the same extensibility
-     * protocol used by variant_prefix_output / variant_suffix_output.
-     *
-     * Emits seven scalar columns that characterise the HMOM two-node NDF:
-     *   - N0, V0, dp0: nucleation-mode density, volume, and sphere-equivalent diameter.
-     *   - NL, VL, dpL_mean: large-mode density, mean volume, and sphere-equivalent diameter.
-     *   - sigma_ndf: the cosmetic smearing half-width (log-volume) used for visualization.
-     *
-     * These scalars are the **same for every nu grid point** in the NDF output
-     * file — they are node properties, not functions of v.  They are repeated
-     * in each row to make every row of the output file self-contained.
+     * Emits node densities, node volumes, sphere-equivalent diameters, and the
+     * fixed log-volume width used for diagnostic smearing.
      *
      * @tparam CB  Callable with signature `void(std::string_view, double)`.
      * @param  cb  In header mode: uses the label to register the column.
@@ -803,9 +697,9 @@ public:
     }
 
     /**
-     * @brief HMOM-specific suffix columns: detailed coagulation sub-breakdown.
+     * @brief HMOM-specific suffix columns: detailed coagulation breakdown.
      *
-     * Emits 9 groups × n_equations columns: ScoaTot, ScoaDis, ScoaDisSS,
+     * Emits 9 groups x n_equations columns: ScoaTot, ScoaDis, ScoaDisSS,
      * ScoaDisSL, ScoaDisLL, ScoaCon, ScoaConSS, ScoaConSL, ScoaConLL.
      *
      * @tparam CB  Callable with signature `void(std::string_view, double)`.
@@ -1069,7 +963,7 @@ private:
     int index_O2_ = -1;
     int index_H2_   = -1;
     int index_H2O_  = -1;
-    int index_CO_   = -1; //!< CO — oxidation product (both channels)
+    int index_CO_   = -1; //!< CO oxidation product.
     int index_C2H2_ = -1;
 
     // Mass fractions (needed for some surface rate expressions)
@@ -1120,7 +1014,7 @@ private:
     double surface_density_          = 1.7e19; //!< [#/m2]
     double surf_dens_a1_ = 0., surf_dens_a2_ = 0.;
     double surf_dens_b1_ = 0., surf_dens_b2_ = 0.;
-    double alpha_ = 1.; //!< correction factor α
+    double alpha_ = 1.; //!< Surface-density correction factor.
 
     // -- Model flags ------------------------------------------------------------
     int nucleation_model_             = 0;
@@ -1138,15 +1032,7 @@ private:
     bool is_debug_mode_          = false; //!< enable verbose diagnostic output
     bool is_simplified_pah_mass_ = false; //!< use Nc*WC instead of full PAH MW
 
-    // -- Per-process source storage (owned by HMOM, not inherited from base) ---
-    //
-    // Only processes HMOM actually models are declared here.  The compile-time
-    // CRTP dispatch in MomentMethodBase::sources_X() detects which _impl()
-    // methods exist via `if constexpr (requires ...)` and selects the right
-    // implementation (or a zero-span fallback) with no runtime overhead.
-    //
-    // HMOM models: nucleation, coagulation, condensation, growth, oxidation.
-    // HMOM does NOT model: sintering → base class returns zero span automatically.
+    // -- Per-process source storage -------------------------------------------
 
     MomentVector source_nucleation_   = MomentVector::Zero();
     MomentVector source_coagulation_  = MomentVector::Zero();
@@ -1154,7 +1040,7 @@ private:
     MomentVector source_growth_       = MomentVector::Zero();
     MomentVector source_oxidation_    = MomentVector::Zero();
 
-    Eigen::VectorXd omega_gas_oxidation_; //!< Oxidation-only gas-phase sources [kg/m³/s].
+    Eigen::VectorXd omega_gas_oxidation_; //!< Oxidation-only gas-phase sources [kg/m3/s].
 
     // -- HMOM-specific coagulation source breakdown -----------------------------
     //
@@ -1183,40 +1069,21 @@ private:
     double A5_ = 0., n5_ = 0., E5_ = 0.;
     double eff6_ = 0.;
 
-    // -- Numerical floors (constexpr — zero cost) -------------------------------
+    // -- Numerical floors ------------------------------------------------------
     static constexpr double kTinyNumberDensity = 1.e-30; //!< [#/m3]
     static constexpr double kSootNumberFloor   = 1.e3;   //!< [#/m3]
     static constexpr double kSootVolumeFloor   = 1.e-40; //!< [-]
     static constexpr double kSootSurfaceFloor  = 1.e-30; //!< [m2/m3]
     static constexpr double kMomentEps         = 1.e-300;
 
-    // -- NDF visualization constant --------------------------------------------
-    //
-    /// Log-volume standard deviation used to smear the two HMOM delta-function
-    /// nodes into narrow log-normal kernels for diagnostic visualization.
-    ///
-    /// @par Value choice
-    /// σ_ln(v) = 0.5 corresponds to a geometric standard deviation in primary-
-    /// particle diameter of σ_g,dp = exp(0.5/3) ≈ 1.18, i.e. roughly ±18%
-    /// variation in dp.  On a six-decade log-volume axis this produces a peak
-    /// FWHM of ~0.51 decades (~8 % of the axis), which is clearly visible but
-    /// easily identifiable as a spike rather than a broad mode.
-    ///
-    /// @par Important caveat
-    /// This constant has **no physical meaning**.  HMOM carries no information
-    /// about within-mode polydispersity.  The only physically meaningful
-    /// quantities are the node weights (N0, NL) and positions (V0, VL).
-    /// The smearing is a pure visualization aid to prevent the two delta masses
-    /// from being invisible on a continuous NDF plot.
+    /** @brief Fixed log-volume width used only for diagnostic NDF smearing. */
     static constexpr double kNDFSmearSigmaLnV = 0.5;
 };
 
 } // namespace MOM
 
 #if defined(MOM_USE_DICTIONARY)
-// Grammar header — pulls in OpenSMOKE++ internals.  Included only when
-// MOM_USE_DICTIONARY is defined so that the core library stays dependency-free.
-// Must appear before HMOM.tpp, where ParseConfig<> is defined.
+// Dictionary grammar is available only when dictionary support is enabled.
 #include "HMOM_Grammar.h"
 #endif
 

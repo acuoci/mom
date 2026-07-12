@@ -35,67 +35,10 @@
 
 #pragma once
 
-// ============================================================================
-// MomentMethodReporter
-// ============================================================================
-//
-// Single-Responsibility: formats and writes output for any MOM variant.
-//
-// Design contract
-// ---------------
-// • Accepts any model satisfying MomentMethod<M> via a read-only const&.
-// • Reads state exclusively through the public interface — no private access,
-//   no friend declarations, no casts.
-// • Variant-specific columns are provided BY THE VARIANT, not detected here.
-//   The reporter is fully closed to modification when new variants are added.
-// • Owns no model and performs no numerical computation.
-// • The caller (CFD code) is responsible for calling SetState,
-//   SetMoments, and ComputeSources before every WriteRow.
-//   The reporter only observes — it never mutates the model.
-//
-// Extensibility protocol — variant_output hooks
-// ---------------------------------------------
-// Each variant may optionally implement one or both of these template methods:
-//
-//   template <typename CB>
-//   void variant_prefix_output(CB&& cb) const;   // extra cols BEFORE omega_gas
-//
-//   template <typename CB>
-//   void variant_suffix_output(CB&& cb) const;   // extra cols AFTER source terms
-//
-// The callback signature is: cb(std::string_view label, double value).
-// It is called once per extra column.  The reporter supplies the lambda:
-//   • in WriteHeader mode — uses the label to register the column
-//   • in WriteRow mode    — uses the value to write the data
-// The variant calls cb identically in both modes; the reporter controls
-// which dimension of the (label, value) pair is used.
-//
-// To ADD a new variant with custom columns:
-//   1. Implement variant_prefix_output / variant_suffix_output in the new class.
-//   2. No changes to MomentMethodReporter are required.
-//
-// Usage sketch
-// ------------
-//   MOM::OutputFileColumns file("soot.out");
-//   MOM::MomentMethodReporter reporter(file, thermo.names);
-//   reporter.WriteHeader(model);    // invokes variant's hooks automatically
-//   file.Complete();
-//
-//   for (auto& cell : grid) {
-//       model.SetState(cell.T, cell.P, cell.Y.data());
-//       model.SetMoments(cell.M);
-//       model.ComputeSources();
-//       // ... apply sources to CFD residuals ...
-//       if (output_step)
-//           reporter.WriteRow(model);  // pure observer — never mutates model
-//   }
-//
-// AnyMomentMethod shims
-// ---------------------
-// std::visit is called ONCE per WriteHeader/WriteRow, not per cell.
-// For high-frequency use, prefer the direct template overloads.
-//
-// ============================================================================
+/**
+ * @file MomentMethodReporter.hpp
+ * @brief Output-column reporter for MOM particle state, sources, and NDF data.
+ */
 
 #include "MomentMethodConcept.hpp"
 #include "AnyMomentMethod.hpp"
@@ -111,24 +54,37 @@
 namespace MOM
 {
 
+/**
+ * @class MomentMethodReporter
+ * @brief Writes diagnostic columns for any type satisfying `MomentMethod`.
+ *
+ * The reporter is a read-only observer. The caller must update the model state
+ * and call `ComputeSources()` before each `WriteRow()`. Variant-specific columns
+ * are supplied through optional callback hooks detected by concepts.
+ *
+ * @note `OutputFileColumns` and the optional species-name list are not owned by
+ *       the model. The output object passed to the constructor must outlive the
+ *       reporter.
+ */
 class MomentMethodReporter
 {
 public:
 
     // -- Construction ----------------------------------------------------------
 
-    /// @param out            Output file managed externally. Must outlive the reporter.
-    /// @param species_names  (optional) Species names from the thermo map, used to
-    ///                       label per-species gas-consumption columns.
-    ///                       If empty, only the total omega_gas column is written.
-    /// Default constructor — reporter is in a disconnected state.
-    /// Call is a no-op until connected via the non-default constructor or move-assignment.
+    /**
+     * @brief Constructs a disconnected reporter.
+     *
+     * The reporter must be assigned from a connected reporter before output is
+     * written.
+     */
     MomentMethodReporter() = default;
 
-    /// @param out            Output file managed externally. Must outlive the reporter.
-    /// @param species_names  (optional) Species names from the thermo map, used to
-    ///                       label per-species gas-consumption columns.
-    ///                       If empty, only the total omega_gas column is written.
+    /**
+     * @brief Constructs a reporter bound to an output file.
+     * @param out Output file object. Must outlive the reporter.
+     * @param species_names Species names used to label gas-source columns.
+     */
     explicit MomentMethodReporter(OutputFileColumns& out, std::vector<std::string> species_names = {})
         : out_(&out), species_names_(std::move(species_names))
     {
@@ -139,70 +95,76 @@ public:
     MomentMethodReporter(MomentMethodReporter&&)                 = default;
     MomentMethodReporter& operator=(MomentMethodReporter&&)      = default;
 
-    // -- Static-dispatch API (preferred — zero overhead) -----------------------
+    // -- Static-dispatch API ---------------------------------------------------
 
-    /// Register all output columns for variant Model.
-    /// Call exactly once, before OutputFileColumns::Complete() and WriteRow.
+    /**
+     * @brief Registers all columns required by @p model.
+     * @param model Configured moment method instance.
+     * @param precision Numeric precision used by `OutputFileColumns`.
+     *
+     * Call once before `OutputFileColumns::Complete()` and before any row output.
+     */
     template <MomentMethod Model> void WriteHeader(const Model& model, unsigned precision = 8);
 
-    /// Write one output row from the current model state.
-    /// Precondition: ComputeSources() has been called by the CFD code.
-    /// This method is a pure observer — it never calls SetState/SetMoments
-    /// or ComputeSources on the model.
+    /**
+     * @brief Writes one row from the current model state.
+     * @param model Moment method instance whose sources have already been computed.
+     *
+     * @pre `ComputeSources()` has been called for the current cell/state.
+     */
     template <MomentMethod Model> void WriteRow(const Model& model);
 
     // -- Runtime-dispatch API (AnyMomentMethod) --------------------------------
 
+    /**
+     * @brief Runtime-dispatch overload of `WriteHeader()`.
+     * @param any Runtime-selected model.
+     * @param precision Numeric precision used by `OutputFileColumns`.
+     */
     template <ThermoMap Thermo>
     void WriteHeader(const AnyMomentMethod<Thermo>& any, unsigned precision = 8)
     {
         std::visit([&](const auto& m) { this->WriteHeader(m, precision); }, any);
     }
 
+    /**
+     * @brief Runtime-dispatch overload of `WriteRow()`.
+     * @param any Runtime-selected model whose sources have already been computed.
+     */
     template <ThermoMap Thermo> void WriteRow(const AnyMomentMethod<Thermo>& any)
     {
         std::visit([&](const auto& m) { this->WriteRow(m); }, any);
     }
 
-    // -- NDF snapshot API (ThreeEquations, MetalOxide, HMOM) ------------------------
-    //
-    // Writes a self-contained NDF output file: header + Complete() + data rows.
-    // The caller is responsible for opening @p ndf_out before calling and for
-    // closing it afterwards.
-    //
-    // Core column layout (all in nm / nm³ units):
-    //   nu[nm3]        particle volume              [nm³]
-    //   n[#/m3/nm3]   dimensional NDF n(v)         [#/m³_gas / nm³_particle]
-    //   nbar[1/nm3]   normalised NDF nbar(v)       [1/nm³]
-    //   dsph[nm]      sphere-equivalent diameter   [nm]
-    //   nd[#/m3/nm]   diameter-space NDF n_d(d)    [#/m³_gas / nm]
-    //   ndbar[1/nm]   normalised diameter-space NDF [1/nm]
-    //
-    // The diameter-space NDF uses the Jacobian |dv/dd_sph| = (π/2)·d_sph²:
-    //   n_d(d) = n(v) · (π/2) · d_sph²
-    //
-    // Variant-specific extra columns (optional, via ndf_extra_output hook):
-    //   Variants may implement:
-    //     template <typename CB> void ndf_extra_output(CB&&) const;
-    //   which is detected at compile time via HasNDFExtraOutput<Model>.
-    //   If present, additional model-specific columns are appended after the
-    //   six core columns.  Currently only HMOM implements this hook,
-    //   adding: N0, V0, dp0, NL, VL, dpL_mean, sigma_ndf.
-    //
-    //   ThreeEquations and MetalOxide do NOT implement ndf_extra_output; their
-    //   NDF parameters (alpha, sigma, k, …) are already written in the main
-    //   per-timestep reporter output (variant_prefix_output hook).
-    //
-    // Compile error (via `requires HasReconstructedNDF`) if called for
-    // BrookesMoss, which has no NDF reconstruction.
+    // -- NDF snapshot API ------------------------------------------------------
 
+    /**
+     * @brief Registers reconstructed NDF output columns.
+     *
+     * Core columns use nm and nm3 units: particle volume, dimensional NDF,
+     * normalized NDF, sphere-equivalent diameter, diameter-space NDF, and
+     * normalized diameter-space NDF.
+     *
+     * @param model NDF-capable moment method instance.
+     * @param ndf_out Output file object for the NDF table.
+     * @param precision Numeric precision used by `OutputFileColumns`.
+     */
     template <MomentMethod Model>
     requires HasReconstructedNDF<Model>
     void WriteHeaderLineReconstructedNDF(   const Model& model,
                                             OutputFileColumns& ndf_out,
                                             unsigned precision);
 
-    /// Static-dispatch overload — zero overhead, preferred.
+    /**
+     * @brief Writes a complete reconstructed NDF table.
+     *
+     * @param model NDF-capable moment method instance.
+     * @param ndf_out Output file object for the NDF table.
+     * @param nv Number of logarithmically spaced volume points.
+     * @param vmin_nm3 Minimum particle volume [nm3].
+     * @param vmax_nm3 Maximum particle volume [nm3].
+     * @param use_regularized_moments If true, use the model's regularized NDF moments.
+     */
     template <MomentMethod Model>
     requires HasReconstructedNDF<Model>
     void WriteReconstructedNDF(const Model& model,
@@ -212,8 +174,11 @@ public:
                                double vmax_nm3                 = 1.0e6,
                                bool   use_regularized_moments  = false);
 
-    /// Runtime-dispatch overload for AnyMomentMethod.
-    /// Silent no-op for BrookesMoss (no NDF reconstruction available).
+    /**
+     * @brief Runtime-dispatch overload of `WriteHeaderLineReconstructedNDF()`.
+     *
+     * Does nothing when the active variant has no reconstructed NDF.
+     */
     template <ThermoMap Thermo>
     void WriteHeaderLineReconstructedNDF(   const AnyMomentMethod<Thermo>& any,
                                             OutputFileColumns& ndf_out,
@@ -228,8 +193,11 @@ public:
             any);
     }
 
-    /// Runtime-dispatch overload for AnyMomentMethod.
-    /// Silent no-op for BrookesMoss (no NDF reconstruction available).
+    /**
+     * @brief Runtime-dispatch overload of `WriteReconstructedNDF()`.
+     *
+     * Does nothing when the active variant has no reconstructed NDF.
+     */
     template <ThermoMap Thermo>
     void WriteReconstructedNDF(const AnyMomentMethod<Thermo>& any,
                                OutputFileColumns& ndf_out,
@@ -244,16 +212,11 @@ public:
                 if constexpr (HasReconstructedNDF<M>)
                     this->WriteReconstructedNDF(m, ndf_out, nv, vmin_nm3, vmax_nm3,
                                                 use_regularized_moments);
-                // BrookesMoss: silently skip — no NDF reconstruction available.
             },
             any);
     }
 
-    // -- Convenience overloads: use this reporter's own output file ---------------
-    //
-    // When the reporter *is* the distribution file (e.g. reporter_mom_distribution_
-    // connected to fMOMDistribution_), these single-argument overloads avoid having
-    // to pass out_ explicitly.
+    // -- Convenience overloads using this reporter's own output file ------------
 
     template <MomentMethod Model>
     requires HasReconstructedNDF<Model>
@@ -297,7 +260,7 @@ private:
     OutputFileColumns* out_ = nullptr;
     std::vector<std::string> species_names_;
 
-    // Column-label helpers
+    // Column-label helper for moment-source vectors.
     static std::string col(std::string_view prefix,
                            unsigned j,
                            bool zf               = false,
@@ -307,7 +270,7 @@ private:
                std::string(unit) + "]";
     }
 
-    // Write all values of a span to the current row
+    // Write all values of a span to the current row.
     void writeSpan(std::span<const double> s)
     {
         for (auto v : s)
@@ -315,21 +278,12 @@ private:
     }
 };
 
-// ============================================================================
-// WriteHeader — template implementation
-// ============================================================================
-
 template <MomentMethod Model>
 void MomentMethodReporter::WriteHeader(const Model& model, unsigned precision)
 {
     constexpr unsigned N = Model::n_equations;
 
-    // Compile-time per-process ownership flags (for [ZF] tagging).
-    // These are the ONLY compile-time checks in the reporter — they use the
-    // named process-capability concepts defined in MomentMethodConcept.hpp,
-    // which are the single authoritative detection point for which physical
-    // sub-processes each variant actively models.  A [ZF] tag means the column
-    // always contains zero for this variant (structural, not transient zero).
+    // [ZF] marks columns backed by the base-class zero fallback for this variant.
     constexpr bool has_nuc = ModelsNucleation<Model>;
     constexpr bool has_coa = ModelsCoagulation<Model>;
     constexpr bool has_con = ModelsCondensation<Model>;
@@ -337,8 +291,7 @@ void MomentMethodReporter::WriteHeader(const Model& model, unsigned precision)
     constexpr bool has_oxi = ModelsOxidation<Model>;
     constexpr bool has_sin = ModelsSintering<Model>;
 
-    // Lambda passed to variant_prefix_output / variant_suffix_output in header mode.
-    // The variant calls cb(label, value); here we use only the label.
+    // Header-mode callback for optional variant columns.
     auto add_col = [&](std::string_view label, double /*unused_in_header*/)
     {
         out_->AddColumn(std::string(label), precision);
@@ -352,10 +305,7 @@ void MomentMethodReporter::WriteHeader(const Model& model, unsigned precision)
     out_->AddColumn("dp[nm]", precision);
     out_->AddColumn("dc[nm]", precision);
 
-    // -- Variant prefix columns (np, ss, vs, aggregate props, statistics…) -----
-    // The variant self-describes its extra columns by implementing
-    // variant_prefix_output(cb).  Detected at compile time via HasVariantPrefixOutput.
-    // Currently satisfied by all four variants; absent variants are a no-op.
+    // -- Variant prefix columns ------------------------------------------------
     if constexpr (HasVariantPrefixOutput<Model>)
         model.variant_prefix_output(add_col);
 
@@ -381,21 +331,14 @@ void MomentMethodReporter::WriteHeader(const Model& model, unsigned precision)
     for (unsigned j = 0; j < N; ++j)
         out_->AddColumn(col("Ssin", j, !has_sin), precision);
 
-    // -- Variant suffix columns (detailed breakdowns, sub-process vectors…) -----
-    // Same protocol as prefix.  HMOM uses this for the coagulation sub-breakdown.
-    // Detected via HasVariantSuffixOutput; satisfied by HMOM only.
+    // -- Variant suffix columns ------------------------------------------------
     if constexpr (HasVariantSuffixOutput<Model>)
         model.variant_suffix_output(add_col);
 }
 
-// ============================================================================
-// WriteRow — template implementation
-// ============================================================================
-
 template <MomentMethod Model> void MomentMethodReporter::WriteRow(const Model& model)
 {
-    // Lambda passed to variant hooks in row mode.
-    // The variant calls cb(label, value); here we use only the value.
+    // Row-mode callback for optional variant columns.
     auto add_val = [&](std::string_view /*unused_in_row*/, double value)
     {
         *out_ << value;
@@ -434,38 +377,6 @@ template <MomentMethod Model> void MomentMethodReporter::WriteRow(const Model& m
         model.variant_suffix_output(add_val);
 }
 
-// ============================================================================
-// WriteReconstructedNDF — template implementation
-// ============================================================================
-//
-// Writes a complete NDF snapshot to @p ndf_out.  Procedure:
-//   1. Registers the 6 core columns + optional variant-specific columns,
-//      then calls Complete() to lock the layout.
-//   2. Loops over @p nv logarithmically-spaced volumes [vmin_nm3, vmax_nm3].
-//   3. Per point: calls ReconstructedNDF / ReconstructedNormalizedNDF (SI),
-//      converts to nm-based units, computes the diameter-space NDF, writes row.
-//   4. If the model provides an `ndf_extra_output` hook, its values are appended
-//      after the six core values in each row.
-//
-// Callers must open @p ndf_out before the call and close it afterwards.
-//
-// Unit derivations
-// ----------------
-//   nbar_SI  [1/m³]      →  nbar_nm  [1/nm³]      : × 1e-27  (1 m³ = 1e27 nm³)
-//   n_SI     [#/m³/m³]   →  n_nm     [#/m³/nm³]   : × 1e-27
-//   Jacobian  |dv/dd_sph| = (π/2)·d_sph²   where d is in nm and v in nm³
-//     → n_d    [#/m³/nm]  = n_nm    · (π/2) · d_sph²
-//     → ndbar  [1/nm]     = nbar_nm · (π/2) · d_sph²
-//
-// ndf_extra_output hook
-// ----------------------
-// If the model satisfies HasNDFExtraOutput<Model> (see MomentMethodConcept.hpp),
-// then in header mode the hook's labels are registered as extra columns, and in
-// row mode the hook's values are written after the six core values.  The hook
-// is called once per row — variant values that do not depend on v (like HMOM's
-// N0, V0, NL, VL) are repeated identically in every row to make the file
-// self-contained.
-
 template <MomentMethod Model>
 requires HasReconstructedNDF<Model>
 void MomentMethodReporter::WriteHeaderLineReconstructedNDF( const Model& model,
@@ -481,8 +392,7 @@ void MomentMethodReporter::WriteHeaderLineReconstructedNDF( const Model& model,
     ndf_out.AddColumn("nd[#/m3/nm]", precision);  // diameter-space NDF n_d(d) [#/m³_gas/nm]
     ndf_out.AddColumn("ndbar[1/nm]", precision);  // normalised diameter-space NDF [1/nm]
 
-    // Variant-specific extra columns (HMOM: N0, V0, dp0, NL, VL, dpL_mean, sigma_ndf)
-    // Detected via HasNDFExtraOutput; satisfied by HMOM only.
+    // Variant-specific extra NDF columns.
     auto add_col = [&](std::string_view label, double /*value*/)
     {
         ndf_out.AddColumn(std::string(label), precision);
@@ -502,14 +412,14 @@ void MomentMethodReporter::WriteReconstructedNDF(   const Model& model,
                                                     double vmax_nm3,
                                                     bool   use_regularized_moments)
 {
-    // -- Volume grid: nv points log-spaced in [vmin_nm3, vmax_nm3] nm³ -------
+    // -- Volume grid: nv points log-spaced in [vmin_nm3, vmax_nm3] nm3 -------
     constexpr double pi = std::numbers::pi_v<double>;
 
     if (nv < 2)
         nv = 2;
     const double log_ratio = std::log(vmax_nm3 / vmin_nm3) / static_cast<double>(nv - 1);
 
-    // Callback used in row mode for ndf_extra_output (uses value, ignores label)
+    // Row-mode callback for optional NDF columns.
     auto add_val = [&](std::string_view /*label*/, double value)
     {
         ndf_out << value;
@@ -518,20 +428,20 @@ void MomentMethodReporter::WriteReconstructedNDF(   const Model& model,
     for (int i = 0; i < nv; ++i)
     {
         const double nu_nm3 = vmin_nm3 * std::exp(static_cast<double>(i) * log_ratio);
-        const double nu_m3  = nu_nm3 * 1.e-27;   // nm³ → m³
+        const double nu_m3  = nu_nm3 * 1.e-27;   // nm3 -> m3
 
         // Query the model in SI units
         const double n_SI    = model.ReconstructedNDF(nu_m3, use_regularized_moments);
         const double nbar_SI = model.ReconstructedNormalizedNDF(nu_m3, use_regularized_moments);
 
-        // Convert to nm-based units (1 m³ = 1e27 nm³)
+        // Convert to nm-based units (1 m3 = 1e27 nm3)
         const double n_nm    = n_SI    * 1.e-27;   // [#/m³_gas / nm³_particle]
         const double nbar_nm = nbar_SI * 1.e-27;   // [1/nm³]
 
-        // Sphere-equivalent diameter [nm] from volume [nm³]:  d_sph = (6v/π)^(1/3)
+        // Sphere-equivalent diameter [nm] from volume [nm3]: d_sph = (6v/pi)^(1/3)
         const double dsph_nm = std::pow(6. * nu_nm3 / pi, 1. / 3.);
 
-        // Diameter-space NDF via Jacobian |dv/dd_sph| = (π/2)·d_sph²
+        // Diameter-space NDF via Jacobian |dv/dd_sph| = (pi/2) * d_sph^2.
         const double jacobian = (pi / 2.) * dsph_nm * dsph_nm;
         const double nd_nm    = n_nm    * jacobian;   // [#/m³_gas / nm]
         const double ndbar_nm = nbar_nm * jacobian;   // [1/nm]
@@ -544,11 +454,9 @@ void MomentMethodReporter::WriteReconstructedNDF(   const Model& model,
         ndf_out << nd_nm;
         ndf_out << ndbar_nm;
 
-        // Variant-specific extra values (HMOM: N0, V0, dp0, NL, VL, dpL_mean, sigma_ndf)
         if constexpr (HasNDFExtraOutput<Model>)
             model.ndf_extra_output(add_val);
     }
-    // Caller is responsible for ndf_out.Close().
 }
 
 } // namespace MOM

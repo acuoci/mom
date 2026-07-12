@@ -35,6 +35,11 @@
 
 #include "MetalOxide/MetalOxide_Grammar.h"
 
+/**
+ * @file MetalOxide_Grammar.cpp
+ * @brief OpenSMOKE++ dictionary keyword rules for the MetalOxide model.
+ */
+
 namespace MOM
 {
 
@@ -46,9 +51,7 @@ void MetalOxide_Grammar::DefineRules()
         "Solid oxide model: on/off (default: true)",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
     // Process models
-    // ----------------------------------------------------------------------------------------------------------- //
 
     AddKeyWord(
         OpenSMOKEpp::DictionaryKeyWord(
@@ -81,9 +84,7 @@ void MetalOxide_Grammar::DefineRules()
         "Thermophoretic model: 0=off, 1=on (default: 1)",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // Precursor
-    // ----------------------------------------------------------------------------------------------------------- //
+    // Precursor, material, and gas coupling
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@Precursor",
@@ -125,7 +126,7 @@ void MetalOxide_Grammar::DefineRules()
         OpenSMOKEpp::DictionaryKeyWord(
             "@GasConsumption",
             OpenSMOKEpp::SINGLE_BOOL,
-            "Consumption of gaseous species is accounted for (default: false)",
+            "Account for gas-phase species consumption (default: false)",
             true));
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
@@ -140,9 +141,7 @@ void MetalOxide_Grammar::DefineRules()
         "Relative mass-balance tolerance for explicit gas stoichiometry (default: 1e-3)",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
     // Sintering kinetics
-    // ----------------------------------------------------------------------------------------------------------- //
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@As",
@@ -161,14 +160,12 @@ void MetalOxide_Grammar::DefineRules()
         "Sintering activation temperature (K). Default: 31000. K",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
     // Sintering options
-    // ----------------------------------------------------------------------------------------------------------- //
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@SinteringDeferred",
         OpenSMOKEpp::SINGLE_BOOL,
-        "Sintering source term is deferred. Default: false",
+        "Defer the sintering source term to a separate update (default: false)",
         false));
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
@@ -189,9 +186,7 @@ void MetalOxide_Grammar::DefineRules()
         "Sintering maximum relative rate. Default: 1e6 1/s",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
     // Additional options
-    // ----------------------------------------------------------------------------------------------------------- //
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@SchmidtNumber", 
@@ -211,9 +206,7 @@ void MetalOxide_Grammar::DefineRules()
         "Number of solid formula units in the nucleated particle (default: 5)",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // Minimum values for properties calculation
-    // ----------------------------------------------------------------------------------------------------------- //
+    // Numerical floors for property reconstruction
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@MinimumNs",
@@ -227,9 +220,7 @@ void MetalOxide_Grammar::DefineRules()
         "Minimum solid volume fraction for particle property reconstruction (default: 1e-16)",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
     // Debug mode
-    // ----------------------------------------------------------------------------------------------------------- //
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@DebugMode", 

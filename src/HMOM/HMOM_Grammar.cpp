@@ -35,10 +35,16 @@
 
 #include "HMOM/HMOM_Grammar.h"
 
+/**
+ * @file HMOM_Grammar.cpp
+ * @brief Dictionary keyword registration for HMOM configuration.
+ */
+
 namespace MOM
 {
 void HMOM_Grammar::DefineRules()
 {
+    // Process and transport model switches.
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord("@HMOM",
                                               OpenSMOKEpp::SINGLE_BOOL,
                                               "Hybrid Method of Moments: on/off (default: true)",
@@ -79,6 +85,7 @@ void HMOM_Grammar::DefineRules()
                                               "Thermophoretic model: 0=off, 1=on (default: 1)",
                                               false));
 
+    // Geometry and PAH precursor configuration.
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord("@FractalDiameterModel",
                                               OpenSMOKEpp::SINGLE_INT,
                                               "Fractal diameter model: 0=off, 1=on (default: 1)",
@@ -94,6 +101,7 @@ void HMOM_Grammar::DefineRules()
                                               "Species to be assumed as PAH (example: @PAH C10H8;)",
                                               false));
 
+    // Gas-phase coupling and radiative/transport options.
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@GasConsumption",
         OpenSMOKEpp::SINGLE_BOOL,
@@ -126,6 +134,7 @@ void HMOM_Grammar::DefineRules()
         "Simplified calculation of PAH mass, based on C atoms only (default: false)",
         false));
 
+    // Particle material and surface-density parameters.
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord("@SootDensity",
                                               OpenSMOKEpp::SINGLE_MEASURE,
                                               "Density of soot particles (default: 1800 kg/m3)",
@@ -163,9 +172,7 @@ void HMOM_Grammar::DefineRules()
                                        "SurfaceDensityCorrectionCoefficientB2 (default: 0.00068)",
                                        false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
     // Reaction 1: Soot-H + OH = Soot* + H2O
-    // ----------------------------------------------------------------------------------------------------------- //
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@A1f",
         OpenSMOKEpp::SINGLE_MEASURE,
@@ -197,9 +204,7 @@ void HMOM_Grammar::DefineRules()
         "Activation energy reaction 1 (backward): Soot-H + OH = Soot* + H2O (default: 27.96 kJ/mol)",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
     // Reaction 2: Soot-H + H = Soot* + H2
-    // ----------------------------------------------------------------------------------------------------------- //
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@A2f",
         OpenSMOKEpp::SINGLE_MEASURE,
@@ -231,9 +236,7 @@ void HMOM_Grammar::DefineRules()
         "Activation energy reaction 2 (backward): Soot-H + H = Soot* + H2 (default: 25.46 kJ/mol)",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
     // Reaction 3: Soot + H = Soot* + H
-    // ----------------------------------------------------------------------------------------------------------- //
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@A3f",
         OpenSMOKEpp::SINGLE_MEASURE,
@@ -265,9 +268,7 @@ void HMOM_Grammar::DefineRules()
         "Activation energy reaction 3 (backward): Soot + H = Soot* + H (default: 0 kJ/mol)",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
     // Reaction 4: Soot* + C2H2 => Soot-H
-    // ----------------------------------------------------------------------------------------------------------- //
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@A4",
         OpenSMOKEpp::SINGLE_MEASURE,
@@ -284,9 +285,7 @@ void HMOM_Grammar::DefineRules()
         "Activation energy reaction 4: Soot* + C2H2 => Soot-H (default: 17.13 kJ/mol)",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
     // Reaction 5: Soot* + O2 => Soot-H + 2CO
-    // ----------------------------------------------------------------------------------------------------------- //
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@A5",
         OpenSMOKEpp::SINGLE_MEASURE,
@@ -303,19 +302,14 @@ void HMOM_Grammar::DefineRules()
         "Activation energy reaction 5: Soot* + O2 => Soot-H + 2CO (default: 31.38 kJ/mol)",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
     // Reaction 6: Soot-H + OH => Soot-H + CO
-    // ----------------------------------------------------------------------------------------------------------- //
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@Efficiency6",
         OpenSMOKEpp::SINGLE_DOUBLE,
         "Efficiency reaction 6: Soot-H + OH => Soot-H + CO (default: 0.13)",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // Sticking coefficient
-    // ----------------------------------------------------------------------------------------------------------- //
-
+    // Sticking coefficient.
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@StickingCoefficientModel",
         OpenSMOKEpp::SINGLE_STRING,
@@ -328,10 +322,7 @@ void HMOM_Grammar::DefineRules()
         "Sticking coefficient constant [-] (default: 2e-3 for constant model)",
         false));
 
-    // ----------------------------------------------------------------------------------------------------------- //
-    // Debug mode
-    // ----------------------------------------------------------------------------------------------------------- //
-
+    // Diagnostics.
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@DebugMode", OpenSMOKEpp::SINGLE_BOOL, "Debug mode (default: false)", false));
 }
