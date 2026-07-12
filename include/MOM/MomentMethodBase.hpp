@@ -376,18 +376,26 @@ public:
     }
 
     /**
-     * @name Per-process activation flags — CRTP dispatch with zero fallback
+     * @name Per-process instance activation flags — CRTP dispatch with zero fallback
      *
-     * Each method returns the integer model flag (0 = off, >0 = variant index)
-     * for the corresponding physical process.  The query detects at compile time
-     * whether `Derived` exposes the matching getter; if not, 0 (off) is returned.
+     * Each method returns the INTEGER MODEL FLAG (0 = off, >0 = active variant)
+     * configured by the user for the corresponding physical process IN THIS INSTANCE.
+     * The query detects at compile time whether `Derived` exposes the matching
+     * getter; if not, 0 (off) is returned.
      *
-     * This mirrors the `sources_X()` zero-span pattern so that `AnyMomentMethod`
-     * free functions can query process activation uniformly across all variants.
+     * @par This answers the INSTANCE question: "is process X currently enabled?"
+     * The user might set `nucleation_model = 0` in the input file, causing
+     * `model_nucleation()` to return 0 even for a type that is structurally capable
+     * of nucleation.  To ask the TYPE question ("can this model type EVER produce
+     * nucleation sources?"), use `capability_nucleation()` instead — see below.
+     *
+     * @par Naming convention
+     * - `model_X()` (base dispatcher, this group) → reads instance flag, returns `int`
+     * - `nucleation_model()` / `oxidation_model()` / … (derived getter) → same `int`
      * @{
      */
 
-    /** @brief Returns the nucleation model flag (0 = off). */
+    /** @brief Returns the nucleation model flag (0 = off, >0 = active variant). */
     [[nodiscard, gnu::always_inline]] int model_nucleation() const noexcept
     {
         if constexpr (requires(const Derived& d) { d.nucleation_model(); })
@@ -396,7 +404,7 @@ public:
             return 0;
     }
 
-    /** @brief Returns the surface-growth model flag (0 = off). */
+    /** @brief Returns the surface-growth model flag (0 = off, >0 = active variant). */
     [[nodiscard, gnu::always_inline]] int model_growth() const noexcept
     {
         if constexpr (requires(const Derived& d) { d.surface_growth_model(); })
@@ -405,7 +413,7 @@ public:
             return 0;
     }
 
-    /** @brief Returns the coagulation model flag (0 = off). */
+    /** @brief Returns the coagulation model flag (0 = off, >0 = active variant). */
     [[nodiscard, gnu::always_inline]] int model_coagulation() const noexcept
     {
         if constexpr (requires(const Derived& d) { d.coagulation_model(); })
@@ -414,7 +422,7 @@ public:
             return 0;
     }
 
-    /** @brief Returns the condensation model flag (0 = off). */
+    /** @brief Returns the condensation model flag (0 = off, >0 = active variant). */
     [[nodiscard, gnu::always_inline]] int model_condensation() const noexcept
     {
         if constexpr (requires(const Derived& d) { d.condensation_model(); })
@@ -423,7 +431,7 @@ public:
             return 0;
     }
 
-    /** @brief Returns the oxidation model flag (0 = off). */
+    /** @brief Returns the oxidation model flag (0 = off, >0 = active variant). */
     [[nodiscard, gnu::always_inline]] int model_oxidation() const noexcept
     {
         if constexpr (requires(const Derived& d) { d.oxidation_model(); })
@@ -439,6 +447,90 @@ public:
             return derived().sintering_model();
         else
             return 0;
+    }
+
+    /** @} */
+
+    /**
+     * @name Per-process TYPE capability accessors — always `constexpr`, never reads instance state
+     *
+     * These methods answer the STRUCTURAL question: "does this model TYPE implement
+     * process X?" — not "is process X currently enabled in this instance?".
+     *
+     * @par This answers the TYPE question: "can this model type EVER produce X sources?"
+     * The value is a `constexpr bool` derived from the same `requires(...)` check
+     * used by `sources_X()`.  It is resolved entirely at compile time for each
+     * concrete variant; the `static` keyword makes the type-level nature explicit.
+     *
+     * @par Comparison with instance activation (model_X())
+     * @code
+     *   // Type capability — always the same for a given model type:
+     *   constexpr bool can_oxidise = mm.capability_oxidation(); // true for HMOM/3Eq/BM
+     *
+     *   // Instance activation — depends on the user's input configuration:
+     *   const int oxi_flag = mm.model_oxidation(); // 0 if user wrote oxidation_model 0
+     *
+     *   // Use capability for structural decisions (output columns, static_assert):
+     *   if constexpr (mm.capability_oxidation())
+     *       register_oxidation_columns();           // compile-time branch
+     *
+     *   // Use activation for runtime decisions (should we do operator splitting?):
+     *   if (mm.model_oxidation() > 0)
+     *       apply_operator_splitting();             // runtime branch
+     * @endcode
+     *
+     * @par Capability matrix (as of 2026-07)
+     * | Method                    | HMOM | BrookesMoss | ThreeEq | MetalOxide |
+     * |---------------------------|------|-------------|---------|------------|
+     * | `capability_nucleation()` |  Y   |      Y      |    Y    |     Y      |
+     * | `capability_growth()`     |  Y   |      Y      |    Y    |     N      |
+     * | `capability_coagulation()`|  Y   |      Y      |    Y    |     Y      |
+     * | `capability_condensation()`|  Y  |      N      |    Y    |     Y      |
+     * | `capability_oxidation()`  |  Y   |      Y      |    Y    |     N      |
+     * | `capability_sintering()`  |  N   |      N      |    N    |     Y      |
+     *
+     * @note This mirrors the `ModelsNucleation<Derived>` / `ModelsOxidation<Derived>`
+     *       process-capability concepts in `MomentMethodConcept.hpp`.  Those concepts
+     *       are the recommended way to ask the TYPE question when the concrete type is
+     *       statically known; `capability_X()` is the way to ask it when you only have
+     *       an instance (or an `AnyMomentMethod` wrapper that hides the type).
+     * @{
+     */
+
+    /** @brief `true` if this model TYPE can compute nucleation source terms. */
+    [[nodiscard]] static constexpr bool capability_nucleation() noexcept
+    {
+        return requires(const Derived& d) { d.sources_nucleation_impl(); };
+    }
+
+    /** @brief `true` if this model TYPE can compute surface-growth source terms. */
+    [[nodiscard]] static constexpr bool capability_growth() noexcept
+    {
+        return requires(const Derived& d) { d.sources_growth_impl(); };
+    }
+
+    /** @brief `true` if this model TYPE can compute coagulation source terms. */
+    [[nodiscard]] static constexpr bool capability_coagulation() noexcept
+    {
+        return requires(const Derived& d) { d.sources_coagulation_impl(); };
+    }
+
+    /** @brief `true` if this model TYPE can compute condensation source terms. */
+    [[nodiscard]] static constexpr bool capability_condensation() noexcept
+    {
+        return requires(const Derived& d) { d.sources_condensation_impl(); };
+    }
+
+    /** @brief `true` if this model TYPE can compute oxidation source terms. */
+    [[nodiscard]] static constexpr bool capability_oxidation() noexcept
+    {
+        return requires(const Derived& d) { d.sources_oxidation_impl(); };
+    }
+
+    /** @brief `true` if this model TYPE can compute sintering source terms (MetalOxide only). */
+    [[nodiscard]] static constexpr bool capability_sintering() noexcept
+    {
+        return requires(const Derived& d) { d.sources_sintering_impl(); };
     }
 
     /** @} */

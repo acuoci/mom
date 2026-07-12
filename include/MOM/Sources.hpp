@@ -47,22 +47,35 @@
  *   `n_equations` — the caller never needs to check for model type.
  * - Process activation flag queries — return the integer model flag
  *   (0 = off, >0 = active variant index) for each physical process.
+ * - Process capability queries — return a `bool` constant for whether the
+ *   active variant TYPE can ever model the process, regardless of configuration.
  *
  * Included automatically by `MOM/MOM.hpp`.
  *
- * @par Distinguishing capability from activation
- * Two separate questions can be asked per process:
+ * @par Two distinct questions per process
  *
- * - **Type capability** (compile time): `MOM::ModelsOxidation<M>` — does this
- *   model *type* support the process at all?  Answered by the capability
- *   concepts in `MomentMethodConcept.hpp`.
+ * Every physical process can be interrogated at two orthogonal levels:
  *
- * - **Instance activation** (runtime): `MOM::GetOxidationModel(m) > 0` — is
- *   the process currently enabled in this model *instance*?  Answered by the
- *   functions in this file.
+ * **Type capability** — answers "can this model TYPE ever produce X sources?"
+ * - Compile-time property of the concrete variant, not the instance.
+ * - `MOM::ModelsOxidation<M>` concept (when static type is known).
+ * - `MOM::GetOxidationCapability(m)` free function (for `AnyMomentMethod`).
+ * - Wraps the same `requires(sources_oxidation_impl)` detection as `sources_X()`.
+ * - Never changes; MetalOxide will always return `false` for `capability_oxidation()`.
  *
- * Always prefer the activation check in CFD code; the capability check is
- * primarily used by `MomentMethodReporter` for zero-fallback column tagging.
+ * **Instance activation** — answers "is X currently enabled in this instance?"
+ * - Runtime property; reads the integer model flag set by the user's input file.
+ * - `MOM::GetOxidationModel(m) > 0` free function.
+ * - A model with oxidation capability may still return 0 if the user wrote
+ *   `oxidation_model 0` in their dictionary.
+ *
+ * @par Which to use
+ * | Use case | Question | API |
+ * |---|---|---|
+ * | Output column layout, `[ZF]` tagging | Does the type model X? | `GetXxxCapability()` |
+ * | Operator splitting decision in CFD loop | Is X enabled now? | `GetXxxModel() > 0` |
+ * | `static_assert`, concept check | Structural | `ModelsOxidation<M>` |
+ * | Debug log, diagnostic print | Both | both, with clear labels |
  *
  * @par Operator-splitting source functions
  * The oxidation-specific splitting functions (`GetOxidationSources`,
@@ -219,6 +232,82 @@ template <ThermoMap Thermo>
 [[nodiscard]] inline int GetSinteringModel(const AnyMomentMethod<Thermo>& m) noexcept
 {
     return std::visit([](const auto& mm) { return mm.model_sintering(); }, m);
+}
+
+/** @} */
+
+/**
+ * @name Process capability queries (type-level, constexpr per variant)
+ *
+ * These functions answer the STRUCTURAL question about the active variant TYPE:
+ * "can this model type EVER produce X sources?"
+ *
+ * The result is `constexpr bool` for each concrete variant — resolved at compile
+ * time inside the `std::visit` lambda, then "lowered" to a runtime `bool` only
+ * because `AnyMomentMethod` hides the concrete type behind a `std::variant`.
+ *
+ * @par Difference from `GetXxxModel()` (activation)
+ *
+ * | Function | Question | Return | Example |
+ * |---|---|---|---|
+ * | `GetOxidationCapability(m)` | "type capable?" | `bool` | always `false` for MetalOxide |
+ * | `GetOxidationModel(m)` | "instance enabled?" | `int` | `0` if user disabled it |
+ *
+ * MetalOxide always returns `false` for `GetOxidationCapability` — oxidation is
+ * structurally absent from that model type.  HMOM always returns `true` —
+ * oxidation is structurally present even if `GetOxidationModel` returns `0`
+ * because the user wrote `oxidation_model 0` in the input file.
+ *
+ * @par Recommended use
+ * - **Output / reporting**: use capability to decide whether to register `[ZF]`
+ *   columns.  `MomentMethodReporter` already uses `ModelsOxidation<M>` for this;
+ *   these functions provide the same information through `AnyMomentMethod`.
+ * - **CFD hot path**: use `GetXxxModel() > 0` — it reflects the user's actual
+ *   configuration and avoids wasting compute on a disabled process.
+ * - **Static known type**: prefer `MOM::ModelsOxidation<MyModel>` directly.
+ * @{
+ */
+
+/** @brief `true` if the active variant TYPE can compute nucleation sources. */
+template <ThermoMap Thermo>
+[[nodiscard]] inline bool GetNucleationCapability(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.capability_nucleation(); }, m);
+}
+
+/** @brief `true` if the active variant TYPE can compute surface-growth sources. */
+template <ThermoMap Thermo>
+[[nodiscard]] inline bool GetGrowthCapability(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.capability_growth(); }, m);
+}
+
+/** @brief `true` if the active variant TYPE can compute coagulation sources. */
+template <ThermoMap Thermo>
+[[nodiscard]] inline bool GetCoagulationCapability(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.capability_coagulation(); }, m);
+}
+
+/** @brief `true` if the active variant TYPE can compute condensation sources. */
+template <ThermoMap Thermo>
+[[nodiscard]] inline bool GetCondensationCapability(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.capability_condensation(); }, m);
+}
+
+/** @brief `true` if the active variant TYPE can compute oxidation sources. */
+template <ThermoMap Thermo>
+[[nodiscard]] inline bool GetOxidationCapability(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.capability_oxidation(); }, m);
+}
+
+/** @brief `true` if the active variant TYPE can compute sintering sources (MetalOxide only). */
+template <ThermoMap Thermo>
+[[nodiscard]] inline bool GetSinteringCapability(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.capability_sintering(); }, m);
 }
 
 /** @} */
