@@ -43,6 +43,7 @@
 #include "Eigen/Dense"
 
 #include "MOM/MomentMethodBase.hpp"
+#include "MOM/MOMConfig.hpp"
 #include "MOM/ThermoProxy.hpp"
 
 #if defined(MOM_USE_DICTIONARY)
@@ -82,6 +83,10 @@ namespace MOM
  * - **Condensation**: no PAH surface adsorption term; `sources_condensation()`
  *   returns a zero span.
  * - **Sintering**: `sources_sintering()` returns a zero span.
+ *
+ * @par Thread safety
+ * Not thread-safe — one instance per OpenMP thread.
+ * See `MomentMethodBase` for the complete thread-safety contract.
  *
  * @tparam Thermo  Must satisfy the MOM::ThermoMap concept.
  */
@@ -125,30 +130,19 @@ public:
      * 0 = off, 1 = BrookesMoss, 2 = BrookesMossHall.
      * @note No external dependencies: only standard C++ types.
      */
-    struct Config
+    struct Config : CommonConfig<0>,
+                    BrookesMossProcessConfig,
+                    GasConsumptionConfig<false>,
+                    SootDensityConfig,
+                    SootRadiationConfig
     {
-        // ---- Activation ----------------------------------------------------
-        bool is_active = true; //!< Enable this variant
-
-        // ---- Process model selection (integer codes) -----------------------
-        int nucleation_model     = 1; //!< 0=off, 1=BrookesMoss, 2=BrookesMossHall
-        int surface_growth_model = 1; //!< Surface growth model index
-        int oxidation_model      = 1; //!< 0=off, 1=BrookesMoss, 2=BrookesMossHall
-        int coagulation_model    = 1; //!< Coagulation model index
-        int thermophoretic_model = 0; //!< Thermophoretic model
-
         // ---- Gas species ---------------------------------------------------
         std::string precursors_species     = "C2H2"; //!< Nucleation precursor species
         std::string surface_growth_species = "C2H2"; //!< Surface growth species
         std::string benzene_species        = "C6H6";
         std::string phenylradical_species  = "C6H5";
 
-        // ---- Gas consumption / closure -------------------------------------
-        bool        gas_consumption           = false;  //!< Consume gas-phase species
-        std::string gas_closure_dummy_species = "none"; //!< Dummy mass-closure species
-
         // ---- Soot/particle properties --------------------------------------
-        double soot_density_kg_m3       = 1800.; //!< Soot density          [kg/m3]
         double soot_particle_diameter_m = 1.e-9; //!< Mean particle diameter [m]
         double soot_particle_mw_kg_kmol = 144.;  //!< Particle MW            [kg/kmol]
         double ns_norm                  = 1.e15; //!< Ns normalisation value  [#/m3]
@@ -175,25 +169,17 @@ public:
         double comega2_bmh   = 8903.51;                 //!< Oxidation pre-exponential    [kg*m/kmol/s/sqrt(K)]
         double tomega2_bmh   = 19778;                   //!< Oxidation activation temp.   [K]
         
-        // ---- Radiation -----------------------------------------------------
-        bool        radiative_heat_transfer = true;     //!< Optically-thin radiation
-        std::string planck_coefficient      = "Smooke"; //!< Planck mean absorption coefficient
-
-        // ---- Transport -----------------------------------------------------
-        double schmidt_number = 50.; //!< Soot Schmidt number
-
-        // ---- Debug ---------------------------------------------------------
-        bool debug_mode = false; //!< Verbose diagnostic output
     };
 
     // -- Construction ---------------------------------------------------------
 
     explicit BrookesMoss(const Thermo& thermo);
+    explicit BrookesMoss(const Thermo&&) = delete; ///< Prevents binding a temporary as thermo (dangling ref).
 
     BrookesMoss(const BrookesMoss&)            = delete;
     BrookesMoss& operator=(const BrookesMoss&) = delete;
-    BrookesMoss(BrookesMoss&&)                 = default;
-    BrookesMoss& operator=(BrookesMoss&&)      = default;
+    BrookesMoss(BrookesMoss&&)            = default; ///< Move-constructible for placement in std::variant.
+    BrookesMoss& operator=(BrookesMoss&&) = delete;  ///< Not move-assignable — const Thermo& member cannot be reseated.
 
     /**
      * @brief Configure all BrookesMoss parameters from a plain configuration struct.
@@ -244,7 +230,8 @@ public:
     [[nodiscard]] double mass_fraction() const noexcept;          //!< = Ys_
     [[nodiscard]] double specific_surface() const noexcept;       //!< [m2/m3]
     [[nodiscard]] double diffusion_coefficient() const noexcept;  //!< [kg/m/s]
-
+    [[nodiscard]] double number_primary_particles() const noexcept;
+    
     // -- MomentMethod concept — initial conditions -----------------------------
 
     [[nodiscard]] std::span<const double> initial_moments() const noexcept
@@ -274,32 +261,25 @@ public:
     /// BrookesMoss-specific prefix columns: gas-phase source diagnostics.
     template <typename CB> void variant_prefix_output(CB&& cb) const
     {
-        const auto omega = [this](int idx) noexcept -> double
-        {
-            if (idx < 0 || static_cast<Eigen::Index>(idx) >= this->omega_gas_.size())
-                return 0.;
-            return this->omega_gas_[idx];
-        };
-
         cb("omegaTot[kg/m3/s]", this->omega_gas_.sum());
-        cb("omegaPrec[kg/m3/s]", omega(prec_index_));
-        cb("omegaSg[kg/m3/s]", omega(sg_index_));
-        cb("omegaH2[kg/m3/s]", omega(index_H2_));
-        cb("omegaC2H2[kg/m3/s]", omega(index_C2H2_));
-        cb("omegaOH[kg/m3/s]", omega(index_OH_));
-        cb("omegaO2[kg/m3/s]", omega(index_O2_));
+        this->EmitOmegaGas(cb, "omegaPrec[kg/m3/s]", prec_index_);
+        this->EmitOmegaGas(cb, "omegaSg[kg/m3/s]", sg_index_);
+        this->EmitOmegaGas(cb, "omegaH2[kg/m3/s]", index_H2_);
+        this->EmitOmegaGas(cb, "omegaC2H2[kg/m3/s]", index_C2H2_);
+        this->EmitOmegaGas(cb, "omegaOH[kg/m3/s]", index_OH_);
+        this->EmitOmegaGas(cb, "omegaO2[kg/m3/s]", index_O2_);
 
         if (nucleation_variant_ == NucleationVariant::BrookesMossHall)
         {
-            cb("omegaC6H5[kg/m3/s]", omega(index_C6H5_));
-            cb("omegaC6H6[kg/m3/s]", omega(index_C6H6_));
+            this->EmitOmegaGas(cb, "omegaC6H5[kg/m3/s]", index_C6H5_);
+            this->EmitOmegaGas(cb, "omegaC6H6[kg/m3/s]", index_C6H6_);
         }
         else
         {
             cb("omegaC6H5[kg/m3/s]", 0.);
             cb("omegaC6H6[kg/m3/s]", 0.);
-        }        
-    }    
+        }
+    }
 
     // -- Model switches --------------------------------------------------------
 
@@ -426,6 +406,13 @@ public:
         return {source_oxidation_.data(), this->n_equations};
     }
 
+    /** @brief Oxidation-only gas-phase source terms [kg/m³/s] for operator splitting. */
+    [[nodiscard, gnu::always_inline]] std::span<const double> omega_gas_oxidation_impl() const noexcept
+    {
+        return {omega_gas_oxidation_.data(),
+                static_cast<std::size_t>(omega_gas_oxidation_.size())};
+    }
+
     /** @} */
 
 private:
@@ -544,6 +531,8 @@ private:
     MomentVector source_coagulation_ = MomentVector::Zero();
     MomentVector source_growth_      = MomentVector::Zero();
     MomentVector source_oxidation_   = MomentVector::Zero();
+
+    Eigen::VectorXd omega_gas_oxidation_; //!< Oxidation-only gas-phase sources [kg/m³/s].
 
     // -- Initial moments cache --------------------------------------------------
     MomentVector initial_moments_cache_ = MomentVector::Zero();

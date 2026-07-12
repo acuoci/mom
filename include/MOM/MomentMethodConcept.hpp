@@ -153,6 +153,7 @@ concept MomentMethod =
         { cm.particle_diameter() } -> std::same_as<double>;
         { cm.collision_diameter() } -> std::same_as<double>;
         { cm.particle_number_density() } -> std::same_as<double>;
+        { cm.number_primary_particles() } -> std::same_as<double>;
         { cm.mass_fraction() } -> std::same_as<double>;
         { cm.particle_density() } -> std::same_as<double>;
         { cm.specific_surface() } -> std::same_as<double>;
@@ -183,10 +184,11 @@ concept MomentMethod =
 
 /**
  * @concept HasReconstructedNDF
- * @brief Satisfied by models that provide a Pareto + log-normal NDF reconstruction.
+ * @brief Satisfied by models that provide a continuous NDF reconstruction.
  *
- * Currently satisfied by ThreeEquations and MetalOxide.  Not satisfied by HMOM or
- * BrookesMoss, which do not reconstruct the particle size distribution.
+ * Currently satisfied by ThreeEquations, MetalOxide, and HMOM (smeared
+ * bimodal log-normal).  Not satisfied by BrookesMoss, which carries no NDF
+ * reconstruction.
  *
  * Used by MomentMethodReporter::WriteReconstructedNDF to conditionally enable
  * NDF output for capable variants without any modification to the reporter or
@@ -197,6 +199,124 @@ concept HasReconstructedNDF =
     requires(const M& cm) {
         { cm.ReconstructedNDF(0.0, false) }           -> std::same_as<double>;
         { cm.ReconstructedNormalizedNDF(0.0, false) } -> std::same_as<double>;
+    };
+
+// ============================================================================
+// Process-capability concepts
+// ============================================================================
+//
+// These concepts formally encode which physical sub-processes a variant
+// actively models.  They are used by MomentMethodReporter::WriteHeader to
+// apply [ZF] ("zero-fallback") tags to columns whose values are always zero
+// for a particular variant — alerting post-processing tools that the column
+// is structurally empty, not just transiently zero.
+//
+// Detection mechanism
+// -------------------
+// Each variant signals that it models process X by declaring a public
+// `sources_X_impl()` method, which MomentMethodBase detects via CRTP to
+// route the `sources_X()` accessor.  Variants that do NOT model X omit the
+// `_impl()` method; MomentMethodBase then returns a compile-time zero span.
+//
+// These concepts are the single, named, documented detection point for that
+// distinction.  They replace ad-hoc inline requires-expressions scattered
+// across the reporter, making the detection logic:
+//   1. Centralized — defined here, used everywhere.
+//   2. Stable       — if the `_impl()` naming convention ever changes, only
+//                     these definitions need updating, not every consumer.
+//   3. Readable     — `ModelsNucleation<M>` is self-documenting; an inline
+//                     requires-expression is not.
+//
+// Concept matrix (as of 2026-07)
+// ---------------------------------------------------------------
+//   Concept              | HMOM | BrookesMoss | ThreeEq | MetalOxide
+//   ModelsNucleation     |  Y   |      Y      |    Y    |     Y
+//   ModelsCoagulation    |  Y   |      Y      |    Y    |     Y
+//   ModelsCondensation   |  Y   |      N      |    Y    |     Y
+//   ModelsSurfaceGrowth  |  Y   |      Y      |    Y    |     N
+//   ModelsOxidation      |  Y   |      Y      |    Y    |     N
+//   ModelsSintering      |  N   |      N      |    N    |     Y
+// ---------------------------------------------------------------
+
+/**
+ * @concept ModelsNucleation
+ * @brief Satisfied by variants that compute and own nucleation source terms.
+ *
+ * A variant satisfies this concept when it declares `sources_nucleation_impl()`,
+ * signalling to MomentMethodBase that `sources_nucleation()` should return the
+ * variant's own data rather than a static zero span.
+ *
+ * Satisfied by: HMOM, BrookesMoss, ThreeEquations, MetalOxide.
+ */
+template <typename M>
+concept ModelsNucleation =
+    requires(const M& cm) {
+        { cm.sources_nucleation_impl() } -> std::convertible_to<std::span<const double>>;
+    };
+
+/**
+ * @concept ModelsCoagulation
+ * @brief Satisfied by variants that compute and own coagulation source terms.
+ *
+ * Satisfied by: HMOM, BrookesMoss, ThreeEquations, MetalOxide.
+ */
+template <typename M>
+concept ModelsCoagulation =
+    requires(const M& cm) {
+        { cm.sources_coagulation_impl() } -> std::convertible_to<std::span<const double>>;
+    };
+
+/**
+ * @concept ModelsCondensation
+ * @brief Satisfied by variants that compute and own condensation source terms.
+ *
+ * Satisfied by: HMOM, ThreeEquations, MetalOxide.
+ * NOT satisfied by: BrookesMoss (condensation not modelled; zero span returned).
+ */
+template <typename M>
+concept ModelsCondensation =
+    requires(const M& cm) {
+        { cm.sources_condensation_impl() } -> std::convertible_to<std::span<const double>>;
+    };
+
+/**
+ * @concept ModelsSurfaceGrowth
+ * @brief Satisfied by variants that compute and own surface-growth source terms.
+ *
+ * Satisfied by: HMOM, BrookesMoss, ThreeEquations.
+ * NOT satisfied by: MetalOxide (surface growth not modelled; zero span returned).
+ */
+template <typename M>
+concept ModelsSurfaceGrowth =
+    requires(const M& cm) {
+        { cm.sources_growth_impl() } -> std::convertible_to<std::span<const double>>;
+    };
+
+/**
+ * @concept ModelsOxidation
+ * @brief Satisfied by variants that compute and own oxidation source terms.
+ *
+ * Satisfied by: HMOM, BrookesMoss, ThreeEquations.
+ * NOT satisfied by: MetalOxide (particles are already fully oxidised;
+ *                   zero span returned).
+ */
+template <typename M>
+concept ModelsOxidation =
+    requires(const M& cm) {
+        { cm.sources_oxidation_impl() } -> std::convertible_to<std::span<const double>>;
+    };
+
+/**
+ * @concept ModelsSintering
+ * @brief Satisfied by variants that compute and own sintering source terms.
+ *
+ * Satisfied by: MetalOxide.
+ * NOT satisfied by: HMOM, BrookesMoss, ThreeEquations (zero span returned).
+ */
+template <typename M>
+concept ModelsSintering =
+    requires(const M& cm) {
+        { cm.sources_sintering_impl() } -> std::convertible_to<std::span<const double>>;
     };
 
 /**

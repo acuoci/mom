@@ -121,14 +121,23 @@ public:
     /// @param species_names  (optional) Species names from the thermo map, used to
     ///                       label per-species gas-consumption columns.
     ///                       If empty, only the total omega_gas column is written.
+    /// Default constructor — reporter is in a disconnected state.
+    /// Call is a no-op until connected via the non-default constructor or move-assignment.
+    MomentMethodReporter() = default;
+
+    /// @param out            Output file managed externally. Must outlive the reporter.
+    /// @param species_names  (optional) Species names from the thermo map, used to
+    ///                       label per-species gas-consumption columns.
+    ///                       If empty, only the total omega_gas column is written.
     explicit MomentMethodReporter(OutputFileColumns& out, std::vector<std::string> species_names = {})
-        : out_(out), species_names_(std::move(species_names))
+        : out_(&out), species_names_(std::move(species_names))
     {
     }
 
     MomentMethodReporter(const MomentMethodReporter&)            = delete;
     MomentMethodReporter& operator=(const MomentMethodReporter&) = delete;
     MomentMethodReporter(MomentMethodReporter&&)                 = default;
+    MomentMethodReporter& operator=(MomentMethodReporter&&)      = default;
 
     // -- Static-dispatch API (preferred — zero overhead) -----------------------
 
@@ -187,6 +196,12 @@ public:
     // Compile error (via `requires HasReconstructedNDF`) if called for
     // BrookesMoss, which has no NDF reconstruction.
 
+    template <MomentMethod Model>
+    requires HasReconstructedNDF<Model>
+    void WriteHeaderLineReconstructedNDF(   const Model& model,
+                                            OutputFileColumns& ndf_out,
+                                            unsigned precision);
+
     /// Static-dispatch overload — zero overhead, preferred.
     template <MomentMethod Model>
     requires HasReconstructedNDF<Model>
@@ -195,8 +210,23 @@ public:
                                int    nv                       = 100,
                                double vmin_nm3                 = 1.0,
                                double vmax_nm3                 = 1.0e6,
-                               bool   use_regularized_moments  = false,
-                               unsigned precision              = 16);
+                               bool   use_regularized_moments  = false);
+
+    /// Runtime-dispatch overload for AnyMomentMethod.
+    /// Silent no-op for BrookesMoss (no NDF reconstruction available).
+    template <ThermoMap Thermo>
+    void WriteHeaderLineReconstructedNDF(   const AnyMomentMethod<Thermo>& any,
+                                            OutputFileColumns& ndf_out,
+                                            unsigned precision = 16)
+    {
+        std::visit(
+            [&](const auto& m) {
+                using M = std::decay_t<decltype(m)>;
+                if constexpr (HasReconstructedNDF<M>)
+                    this->WriteHeaderLineReconstructedNDF(m, ndf_out, precision);
+            },
+            any);
+    }
 
     /// Runtime-dispatch overload for AnyMomentMethod.
     /// Silent no-op for BrookesMoss (no NDF reconstruction available).
@@ -206,25 +236,65 @@ public:
                                int    nv                       = 100,
                                double vmin_nm3                 = 1.0,
                                double vmax_nm3                 = 1.0e6,
-                               bool   use_regularized_moments  = false,
-                               unsigned precision              = 16)
+                               bool   use_regularized_moments  = false)
     {
         std::visit(
             [&](const auto& m) {
                 using M = std::decay_t<decltype(m)>;
                 if constexpr (HasReconstructedNDF<M>)
                     this->WriteReconstructedNDF(m, ndf_out, nv, vmin_nm3, vmax_nm3,
-                                                use_regularized_moments, precision);
+                                                use_regularized_moments);
                 // BrookesMoss: silently skip — no NDF reconstruction available.
             },
             any);
+    }
+
+    // -- Convenience overloads: use this reporter's own output file ---------------
+    //
+    // When the reporter *is* the distribution file (e.g. reporter_mom_distribution_
+    // connected to fMOMDistribution_), these single-argument overloads avoid having
+    // to pass out_ explicitly.
+
+    template <MomentMethod Model>
+    requires HasReconstructedNDF<Model>
+    void WriteHeaderLineReconstructedNDF(const Model& model, unsigned precision = 16)
+    {
+        WriteHeaderLineReconstructedNDF(model, *out_, precision);
+    }
+
+    template <ThermoMap Thermo>
+    void WriteHeaderLineReconstructedNDF(const AnyMomentMethod<Thermo>& any,
+                                         unsigned precision = 16)
+    {
+        WriteHeaderLineReconstructedNDF(any, *out_, precision);
+    }
+
+    template <MomentMethod Model>
+    requires HasReconstructedNDF<Model>
+    void WriteReconstructedNDF(const Model& model,
+                               int    nv                      = 100,
+                               double vmin_nm3                = 1.0,
+                               double vmax_nm3                = 1.0e6,
+                               bool   use_regularized_moments = false)
+    {
+        WriteReconstructedNDF(model, *out_, nv, vmin_nm3, vmax_nm3, use_regularized_moments);
+    }
+
+    template <ThermoMap Thermo>
+    void WriteReconstructedNDF(const AnyMomentMethod<Thermo>& any,
+                               int    nv                      = 100,
+                               double vmin_nm3                = 1.0,
+                               double vmax_nm3                = 1.0e6,
+                               bool   use_regularized_moments = false)
+    {
+        WriteReconstructedNDF(any, *out_, nv, vmin_nm3, vmax_nm3, use_regularized_moments);
     }
 
 private:
 
     // -- Internals -------------------------------------------------------------
 
-    OutputFileColumns& out_;
+    OutputFileColumns* out_ = nullptr;
     std::vector<std::string> species_names_;
 
     // Column-label helpers
@@ -241,7 +311,7 @@ private:
     void writeSpan(std::span<const double> s)
     {
         for (auto v : s)
-            out_ << v;
+            *out_ << v;
     }
 };
 
@@ -255,29 +325,32 @@ void MomentMethodReporter::WriteHeader(const Model& model, unsigned precision)
     constexpr unsigned N = Model::n_equations;
 
     // Compile-time per-process ownership flags (for [ZF] tagging).
-    // These are the ONLY compile-time checks in the reporter — they query the
-    // concept-mandated process interface, not variant identity.
-    constexpr bool has_nuc = requires(const Model& m) { m.sources_nucleation_impl(); };
-    constexpr bool has_coa = requires(const Model& m) { m.sources_coagulation_impl(); };
-    constexpr bool has_con = requires(const Model& m) { m.sources_condensation_impl(); };
-    constexpr bool has_gro = requires(const Model& m) { m.sources_growth_impl(); };
-    constexpr bool has_oxi = requires(const Model& m) { m.sources_oxidation_impl(); };
-    constexpr bool has_sin = requires(const Model& m) { m.sources_sintering_impl(); };
+    // These are the ONLY compile-time checks in the reporter — they use the
+    // named process-capability concepts defined in MomentMethodConcept.hpp,
+    // which are the single authoritative detection point for which physical
+    // sub-processes each variant actively models.  A [ZF] tag means the column
+    // always contains zero for this variant (structural, not transient zero).
+    constexpr bool has_nuc = ModelsNucleation<Model>;
+    constexpr bool has_coa = ModelsCoagulation<Model>;
+    constexpr bool has_con = ModelsCondensation<Model>;
+    constexpr bool has_gro = ModelsSurfaceGrowth<Model>;
+    constexpr bool has_oxi = ModelsOxidation<Model>;
+    constexpr bool has_sin = ModelsSintering<Model>;
 
     // Lambda passed to variant_prefix_output / variant_suffix_output in header mode.
     // The variant calls cb(label, value); here we use only the label.
     auto add_col = [&](std::string_view label, double /*unused_in_header*/)
     {
-        out_.AddColumn(std::string(label), precision);
+        out_->AddColumn(std::string(label), precision);
     };
 
     // -- Block 1: Core particle state (concept-mandated, truly common) ---------
-    out_.AddColumn("Ys[-]", precision);
-    out_.AddColumn("Ns[#/m3]", precision);
-    out_.AddColumn("Ss[m2/m3]", precision);
-    out_.AddColumn("fv[-]", precision);
-    out_.AddColumn("dp[nm]", precision);
-    out_.AddColumn("dc[nm]", precision);
+    out_->AddColumn("Ys[-]", precision);
+    out_->AddColumn("Ns[#/m3]", precision);
+    out_->AddColumn("Ss[m2/m3]", precision);
+    out_->AddColumn("fv[-]", precision);
+    out_->AddColumn("dp[nm]", precision);
+    out_->AddColumn("dc[nm]", precision);
 
     // -- Variant prefix columns (np, ss, vs, aggregate props, statistics…) -----
     // The variant self-describes its extra columns by implementing
@@ -290,25 +363,25 @@ void MomentMethodReporter::WriteHeader(const Model& model, unsigned precision)
 
 
     // -- Block 3: Transport (concept-mandated) ---------------------------------
-    out_.AddColumn("D[kg/m/s]", precision);
+    out_->AddColumn("D[kg/m/s]", precision);
 
     // -- Block 4: Total source terms (concept-mandated) ------------------------
     for (unsigned j = 0; j < N; ++j)
-        out_.AddColumn(col("Sall", j, false, "mol/m3/s"), precision);
+        out_->AddColumn(col("Sall", j, false, "mol/m3/s"), precision);
 
     // -- Block 5: Per-process source terms ([ZF]-tagged for zero-fallback) ------
     for (unsigned j = 0; j < N; ++j)
-        out_.AddColumn(col("Snuc", j, !has_nuc), precision);
+        out_->AddColumn(col("Snuc", j, !has_nuc), precision);
     for (unsigned j = 0; j < N; ++j)
-        out_.AddColumn(col("Scoa", j, !has_coa), precision);
+        out_->AddColumn(col("Scoa", j, !has_coa), precision);
     for (unsigned j = 0; j < N; ++j)
-        out_.AddColumn(col("Scon", j, !has_con), precision);
+        out_->AddColumn(col("Scon", j, !has_con), precision);
     for (unsigned j = 0; j < N; ++j)
-        out_.AddColumn(col("Sgro", j, !has_gro), precision);
+        out_->AddColumn(col("Sgro", j, !has_gro), precision);
     for (unsigned j = 0; j < N; ++j)
-        out_.AddColumn(col("Soxi", j, !has_oxi), precision);
+        out_->AddColumn(col("Soxi", j, !has_oxi), precision);
     for (unsigned j = 0; j < N; ++j)
-        out_.AddColumn(col("Ssin", j, !has_sin), precision);
+        out_->AddColumn(col("Ssin", j, !has_sin), precision);
 
     // -- Variant suffix columns (detailed breakdowns, sub-process vectors…) -----
     // Same protocol as prefix.  HMOM uses this for the coagulation sub-breakdown.
@@ -328,17 +401,17 @@ template <MomentMethod Model> void MomentMethodReporter::WriteRow(const Model& m
     // The variant calls cb(label, value); here we use only the value.
     auto add_val = [&](std::string_view /*unused_in_row*/, double value)
     {
-        out_ << value;
+        *out_ << value;
     };
 
 
     // -- Block 1: Core particle state (concept-mandated) -----------------------
-    out_ << model.mass_fraction();
-    out_ << model.particle_number_density();
-    out_ << model.specific_surface();
-    out_ << model.volume_fraction();
-    out_ << model.particle_diameter() * 1.e9;  // m → nm
-    out_ << model.collision_diameter() * 1.e9; // m → nm
+    *out_ << model.mass_fraction();
+    *out_ << model.particle_number_density();
+    *out_ << model.specific_surface();
+    *out_ << model.volume_fraction();
+    *out_ << model.particle_diameter() * 1.e9;  // m → nm
+    *out_ << model.collision_diameter() * 1.e9; // m → nm
 
     // -- Variant prefix values -------------------------------------------------
     if constexpr (requires(const Model& m) {
@@ -348,7 +421,7 @@ template <MomentMethod Model> void MomentMethodReporter::WriteRow(const Model& m
 
 
     // -- Block 3: Transport (concept-mandated) ---------------------------------
-    out_ << model.diffusion_coefficient();
+    *out_ << model.diffusion_coefficient();
 
     // -- Block 4: Total source terms (concept-mandated) ------------------------
     writeSpan(model.sources());
@@ -403,13 +476,9 @@ template <MomentMethod Model> void MomentMethodReporter::WriteRow(const Model& m
 
 template <MomentMethod Model>
 requires HasReconstructedNDF<Model>
-void MomentMethodReporter::WriteReconstructedNDF(const Model& model,
-                                                  OutputFileColumns& ndf_out,
-                                                  int    nv,
-                                                  double vmin_nm3,
-                                                  double vmax_nm3,
-                                                  bool   use_regularized_moments,
-                                                  unsigned precision)
+void MomentMethodReporter::WriteHeaderLineReconstructedNDF( const Model& model,
+                                                            OutputFileColumns& ndf_out,
+                                                            unsigned precision)
 {
     // -- Header ---------------------------------------------------------------
     // Core columns (same for all NDF-capable variants)
@@ -428,10 +497,20 @@ void MomentMethodReporter::WriteReconstructedNDF(const Model& model,
     if constexpr (requires(const Model& m) {
                       m.ndf_extra_output([](std::string_view, double) {});
                   })
-        model.ndf_extra_output(add_col);
+    model.ndf_extra_output(add_col);
 
     ndf_out.Complete();
+}
 
+template <MomentMethod Model>
+requires HasReconstructedNDF<Model>
+void MomentMethodReporter::WriteReconstructedNDF(   const Model& model,
+                                                    OutputFileColumns& ndf_out,
+                                                    int    nv,
+                                                    double vmin_nm3,
+                                                    double vmax_nm3,
+                                                    bool   use_regularized_moments)
+{
     // -- Volume grid: nv points log-spaced in [vmin_nm3, vmax_nm3] nm³ -------
     constexpr double pi = std::numbers::pi_v<double>;
 

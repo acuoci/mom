@@ -36,6 +36,7 @@
 #pragma once
 
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -43,6 +44,7 @@
 #include "Eigen/Dense"
 
 #include "MOM/MomentMethodBase.hpp"
+#include "MOM/MOMConfig.hpp"
 #include "MOM/ThermoProxy.hpp"
 
 #if defined(MOM_USE_DICTIONARY)
@@ -89,6 +91,10 @@ namespace MOM
  *       base class because no `_impl()` methods are declared.
  * @note When sintering is stiff relative to the flow time step, use
  *       `SinteringDeferredUpdate()` to integrate it separately via an ODE sub-step.
+ *
+ * @par Thread safety
+ * Not thread-safe — one instance per OpenMP thread.
+ * See `MomentMethodBase` for the complete thread-safety contract.
  *
  * @tparam Thermo  Must satisfy the MOM::ThermoMap concept.
  */
@@ -163,10 +169,9 @@ public:
      * @c "none" | @c "binary" (default) | @c "fixed-cluster".
      * @note No external dependencies: only standard C++ types.
      */
-    struct Config
+    struct Config : CommonConfig<1>, GasConsumptionConfig<false>
     {
         // ---- Activation / precursor ----------------------------------------
-        bool        is_active         = true;   //!< Enable this variant
         std::string precursor_species = "none"; //!< Solid oxide precursor species
 
         // ---- Solid material -------------------------------------------------
@@ -176,8 +181,6 @@ public:
         double      solid_formula_units_per_precursor = 1.;      //!< Solid formula units formed per precursor molecule
 
         // ---- Gas consumption / closure -------------------------------------
-        bool        gas_consumption           = false;  //!< Consume gas-phase species
-        std::string gas_closure_dummy_species = "none"; //!< Dummy mass-closure species
         std::vector<GasStoichiometryTerm> gas_stoichiometry; //!< Explicit gas reaction terms
         double gas_stoichiometry_mass_tolerance = 1.e-3; //!< Relative mass-balance tolerance
 
@@ -187,7 +190,6 @@ public:
         int sintering_model          = 1; //!< Sintering model index
         int coagulation_model        = 1; //!< Coagulation model index
         int condensation_model       = 1; //!< Condensation model index
-        int thermophoretic_model     = 1; //!< Thermophoretic model index
 
         // ---- Particle cluster sizes ----------------------------------------
         int minimum_formula_units            = 2; //!< Minimum solid formula units per aggregate
@@ -208,21 +210,17 @@ public:
         double ns_minimum_per_m3 = 1.e3;   //!< Minimum number density floor [#/m³]
         double fv_minimum        = 1.e-16; //!< Minimum volume fraction floor [-]
 
-        // ---- Transport -----------------------------------------------------
-        double schmidt_number = 50.; //!< Schmidt number for moment transport
-
-        // ---- Debug ---------------------------------------------------------
-        bool debug_mode = false; //!< Verbose diagnostic output
     };
 
     // -- Construction ---------------------------------------------------------
 
     explicit MetalOxide(const Thermo& thermo);
+    explicit MetalOxide(const Thermo&&) = delete; ///< Prevents binding a temporary as thermo (dangling ref).
 
     MetalOxide(const MetalOxide&)            = delete;
     MetalOxide& operator=(const MetalOxide&) = delete;
-    MetalOxide(MetalOxide&&)                 = default;
-    MetalOxide& operator=(MetalOxide&&)      = default;
+    MetalOxide(MetalOxide&&)            = default; ///< Move-constructible for placement in std::variant.
+    MetalOxide& operator=(MetalOxide&&) = delete;  ///< Not move-assignable — const Thermo& member cannot be reseated.
 
     /**
      * @brief Configure all solid oxide parameters from a plain configuration struct.
@@ -350,20 +348,14 @@ public:
         cb("nu2mean[m3/#]", ndf.nu2mean);
         cb("mu[log(m3)]", ndf.mu);
 
-        const auto omega_at = [this](int idx) noexcept {
-            if (idx < 0 || static_cast<Eigen::Index>(idx) >= this->omega_gas_.size())
-                return 0.;
-            return this->omega_gas_[idx];
-        };
-
         cb("omegaTot[kg/m3/s]", this->omega_gas_.sum());
-        cb("omegaPrecursor[kg/m3/s]", omega_at(precursor_index_));
+        this->EmitOmegaGas(cb, "omegaPrecursor[kg/m3/s]", precursor_index_);
         for (const auto& term : gas_stoichiometry_)
         {
             if (term.index == precursor_index_)
                 continue;
             const std::string label = "omegaGas(" + term.species + ")[kg/m3/s]";
-            cb(std::string_view{label}, omega_at(term.index));
+            this->EmitOmegaGas(cb, std::string_view{label}, term.index);
         }
     }
 
@@ -406,16 +398,37 @@ public:
 
     // -- Model switches --------------------------------------------------------
 
-    void SetNucleation(int flag) noexcept
+    void SetNucleation(int flag)
     {
+        if (flag != 0 && flag != 1 && flag != 2)
+            throw std::invalid_argument(
+                "[MetalOxide] Invalid nucleation model flag. Allowed values: 0, 1, 2.");
         nucleation_variant_ = static_cast<NucleationVariant>(flag);
     }
 
-    void SetCoagulation(int flag) noexcept { coagulation_model_ = flag; }
+    void SetCoagulation(int flag)
+    {
+        if (flag != 0 && flag != 1)
+            throw std::invalid_argument(
+                "[MetalOxide] Invalid coagulation model flag. Allowed values: 0, 1.");
+        coagulation_model_ = flag;
+    }
 
-    void SetCondensation(int flag) noexcept { condensation_model_ = flag; }
+    void SetCondensation(int flag)
+    {
+        if (flag != 0 && flag != 1)
+            throw std::invalid_argument(
+                "[MetalOxide] Invalid condensation model flag. Allowed values: 0, 1.");
+        condensation_model_ = flag;
+    }
 
-    void SetSintering(int flag) noexcept { sintering_model_ = flag; }
+    void SetSintering(int flag)
+    {
+        if (flag != 0 && flag != 1)
+            throw std::invalid_argument(
+                "[MetalOxide] Invalid sintering model flag. Allowed values: 0, 1.");
+        sintering_model_ = flag;
+    }
 
     void SetSolidMaterial(std::string_view name, double molecular_weight_kg_kmol, double density_kg_m3);
 

@@ -185,6 +185,26 @@ template <ThermoMap Thermo>
                                                           std::string_view label);
 
 /**
+ * @brief Deleted overload — prevents a temporary Thermo from being silently bound.
+ *
+ * `const Thermo&&` is NOT a forwarding reference (it is const-qualified), so it
+ * matches rvalues and moved objects but never plain lvalues.  The live lvalue
+ * overload above therefore remains reachable for all valid call sites.
+ *
+ * @note Use this pattern to diagnose mistakes early:
+ * @code
+ *   // BAD  — thermo lifetime ends before the returned variant is used:
+ *   auto m = MOM::MakeAnyMomentMethod(MOM::BasicThermoData{...}, "HMOM"); // deleted ✓
+ *
+ *   // GOOD — thermo outlives the variant:
+ *   MOM::BasicThermoData thermo{...};
+ *   auto m = MOM::MakeAnyMomentMethod(thermo, "HMOM");                    // OK ✓
+ * @endcode
+ */
+template <ThermoMap Thermo>
+AnyMomentMethod<Thermo> MakeAnyMomentMethod(const Thermo&&, std::string_view) = delete;
+
+/**
  * @name Runtime dispatch helpers for AnyMomentMethod
  *
  * These free functions reproduce the full `MomentMethod` concept interface as
@@ -357,11 +377,295 @@ template <ThermoMap Thermo>
     return std::visit([](const auto& mm) { return mm.sources(); }, m);
 }
 
+/**
+ * @brief Returns a zero-copy span over the **oxidation-only** source vector.
+ *
+ * The span points directly into the model's internal `source_oxidation_` storage,
+ * so the call is zero-overhead.  Use together with GetSourcesWithoutOxidation()
+ * and GetOxidationRateCoefficients() to implement operator splitting.
+ *
+ * @pre  Compute() must have been called at the current state.
+ * @return Span of size `n_equations`; valid until next Compute().
+ */
+template <ThermoMap Thermo>
+[[nodiscard]] inline std::span<const double>
+GetOxidationSources(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.sources_oxidation(); }, m);
+}
+
+/**
+ * @name Per-process activation queries
+ *
+ * Return the integer model flag for each physical process (0 = off, >0 = active variant).
+ * These route through the `model_X()` CRTP dispatchers in `MomentMethodBase`, so the
+ * return value is always 0 for models that do not implement that process (e.g.
+ * `GetSinteringModel` returns 0 for all soot models; `GetCondensationModel` returns 0
+ * for BrookesMoss).
+ *
+ * Typical CFD usage:
+ * @code
+ *   if (MOM::GetOxidationModel(mom_) > 0) {
+ *       // oxidation is active — apply operator splitting
+ *   }
+ *   if (MOM::GetSinteringModel(mom_) > 0) {
+ *       // sintering sources are available
+ *       auto s = MOM::GetSinteringSources(mom_);
+ *   }
+ * @endcode
+ * @{
+ */
+
+/** @brief Returns the nucleation model flag (0 = off, >0 = active variant). */
+template <ThermoMap Thermo>
+[[nodiscard]] inline int GetNucleationModel(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.model_nucleation(); }, m);
+}
+
+/** @brief Returns the surface-growth model flag (0 = off, >0 = active variant). */
+template <ThermoMap Thermo>
+[[nodiscard]] inline int GetGrowthModel(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.model_growth(); }, m);
+}
+
+/** @brief Returns the coagulation model flag (0 = off, >0 = active variant). */
+template <ThermoMap Thermo>
+[[nodiscard]] inline int GetCoagulationModel(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.model_coagulation(); }, m);
+}
+
+/** @brief Returns the condensation model flag (0 = off, >0 = active variant). */
+template <ThermoMap Thermo>
+[[nodiscard]] inline int GetCondensationModel(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.model_condensation(); }, m);
+}
+
+/** @brief Returns the oxidation model flag (0 = off, >0 = active variant). */
+template <ThermoMap Thermo>
+[[nodiscard]] inline int GetOxidationModel(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.model_oxidation(); }, m);
+}
+
+/** @brief Returns the sintering model flag (0 = off, >0 = active; MetalOxide only). */
+template <ThermoMap Thermo>
+[[nodiscard]] inline int GetSinteringModel(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.model_sintering(); }, m);
+}
+
+/** @} */
+
+/**
+ * @name Per-process source term accessors
+ *
+ * Zero-copy spans into the model's internal per-process source storage.
+ * For models that do not implement a given process, the base-class CRTP fallback
+ * returns a span over a static constexpr zero array — no runtime branch, no
+ * allocation, same size as `n_equations`.
+ *
+ * Always check the corresponding `GetXxxModel() > 0` before consuming these
+ * values to distinguish "process off" from "process on but rate happens to be zero".
+ * @{
+ */
+
+/** @brief Zero-copy span over the nucleation source terms [model-specific units]. */
+template <ThermoMap Thermo>
+[[nodiscard]] inline std::span<const double>
+GetNucleationSources(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.sources_nucleation(); }, m);
+}
+
+/** @brief Zero-copy span over the surface-growth source terms. */
+template <ThermoMap Thermo>
+[[nodiscard]] inline std::span<const double>
+GetGrowthSources(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.sources_growth(); }, m);
+}
+
+/** @brief Zero-copy span over the coagulation source terms. */
+template <ThermoMap Thermo>
+[[nodiscard]] inline std::span<const double>
+GetCoagulationSources(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.sources_coagulation(); }, m);
+}
+
+/** @brief Zero-copy span over the condensation source terms. */
+template <ThermoMap Thermo>
+[[nodiscard]] inline std::span<const double>
+GetCondensationSources(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.sources_condensation(); }, m);
+}
+
+/** @brief Zero-copy span over the sintering source terms (MetalOxide only). */
+template <ThermoMap Thermo>
+[[nodiscard]] inline std::span<const double>
+GetSinteringSources(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.sources_sintering(); }, m);
+}
+
+/** @} */
+
+/**
+ * @brief Writes `source_all[i] - source_oxidation[i]` into @p out for each moment.
+ *
+ * For operator splitting of the stiff oxidation terms: pass these reduced sources
+ * to the stiff ODE solver instead of the full GetSources() vector, then apply the
+ * oxidation sub-step analytically with GetOxidationRateCoefficients().
+ *
+ * @par Operator-splitting usage pattern
+ * @code
+ *   // --- inside Equations() ---
+ *   MOM::Compute(mom);
+ *   double src_buf[MAX_MOM];
+ *   MOM::GetSourcesWithoutOxidation(mom, {src_buf, n_mom});
+ *   for (int i = 0; i < n_mom; ++i)
+ *       dy(NC + 1 + i) = src_buf[i];   // stiff-safe: no oxidation eigenvalue
+ *
+ *   // --- after the outer CFD timestep dt has completed ---
+ *   double kappa[MAX_MOM], mvals[MAX_MOM];
+ *   for (int i = 0; i < n_mom; ++i) mvals[i] = M[i];
+ *   MOM::GetOxidationRateCoefficients(mom, {mvals, n_mom}, {kappa, n_mom});
+ *   for (int i = 0; i < n_mom; ++i)
+ *       M[i] *= std::exp(-kappa[i] * dt);   // exact first-order decay
+ * @endcode
+ *
+ * @pre  Compute() must have been called at the current state.
+ * @param[in]  m    Model variant.
+ * @param[out] out  Caller-allocated buffer; size must be >= n_equations().
+ */
+template <ThermoMap Thermo>
+inline void GetSourcesWithoutOxidation(const AnyMomentMethod<Thermo>& m,
+                                        std::span<double> out) noexcept
+{
+    std::visit([&out](const auto& mm)
+    {
+        const auto total = mm.sources();           // source_all_ — zero-copy
+        const auto ox    = mm.sources_oxidation(); // source_oxidation_ — zero-copy
+        const std::size_t N = std::min(total.size(), out.size());
+        for (std::size_t i = 0; i < N; ++i)
+            out[i] = total[i] - ox[i];
+    }, m);
+}
+
+/**
+ * @brief Computes the effective first-order oxidation rate coefficient [1/s] per moment.
+ *
+ * Linearises the (generally nonlinear) oxidation depletion as a first-order decay:
+ *
+ *   κ_i = max(-source_oxidation_[i], 0) / max(|M_i|, ε)
+ *
+ * The exact analytical solution for the oxidation sub-step then reads:
+ *
+ *   M_i(t + Δt) = M_i(t) · exp(−κ_i · Δt)
+ *
+ * This is unconditionally stable regardless of how large κ_i is — it removes the
+ * stiff oxidation eigenvalue from the ODE system entirely.
+ *
+ * @note  κ_i is evaluated at the **current** stored state (the last Compute() call).
+ *        For Lie–Trotter splitting, call this after the ODE step has finished.
+ *        For the symmetric Strang splitting, call it at half-time t + Δt/2.
+ *
+ * @pre   Compute() must have been called at the current state.
+ * @param[in]  m                Model variant.
+ * @param[in]  current_moments  Transported moment values M_i as they appear in the
+ *                              ODE state vector.  Size must be >= n_equations().
+ * @param[out] kappa_out        Output buffer for κ_i [1/s].  Size >= n_equations().
+ */
+template <ThermoMap Thermo>
+inline void GetOxidationRateCoefficients(const AnyMomentMethod<Thermo>& m,
+                                          std::span<const double>        current_moments,
+                                          std::span<double>              kappa_out) noexcept
+{
+    std::visit([&current_moments, &kappa_out](const auto& mm)
+    {
+        const auto ox = mm.sources_oxidation();
+        const std::size_t N =
+            std::min({ox.size(), current_moments.size(), kappa_out.size()});
+        constexpr double eps = 1.e-300;
+        for (std::size_t i = 0; i < N; ++i)
+        {
+            // Oxidation is a sink: source_ox[i] ≤ 0.  Rate coeff is non-negative.
+            const double neg_src = -ox[i];
+            const double M       = std::max(std::abs(current_moments[i]), eps);
+            kappa_out[i] = (neg_src > 0.) ? neg_src / M : 0.;
+        }
+    }, m);
+}
+
 /** @brief Returns a zero-copy span over gas-phase consumption terms [kg/m³/s]. */
 template <ThermoMap Thermo>
 [[nodiscard]] inline std::span<const double> GetOmegaGas(const AnyMomentMethod<Thermo>& m) noexcept
 {
     return std::visit([](const auto& mm) { return mm.omega_gas(); }, m);
+}
+
+/**
+ * @brief Returns a zero-copy span over the **oxidation-only** gas-phase source vector [kg/m³/s].
+ *
+ * Points directly into internal storage — zero-overhead.
+ * Empty span for models without oxidation gas coupling (TiO2/MetalOxide).
+ *
+ * @pre Compute() must have been called at the current state.
+ */
+template <ThermoMap Thermo>
+[[nodiscard]] inline std::span<const double>
+GetOmegaGasOxidation(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.omega_gas_oxidation(); }, m);
+}
+
+/**
+ * @brief Writes `omega_gas[k] − omega_gas_oxidation[k]` into @p out for each species.
+ *
+ * For operator splitting: pass these reduced gas sources inside `Equations()`,
+ * then apply the oxidation sub-step analytically after the ODE step completes.
+ *
+ * @par Post-step gas-phase correction
+ * After the outer CFD timestep @p dt has completed and the soot moments have been
+ * updated with the exponential decay, apply the integrated oxidation effect on gas
+ * species using a correction factor that accounts for the decreasing oxidation rate
+ * as soot is consumed:
+ *
+ * @code
+ *   // kappa_eff = effective soot-mass oxidation rate [1/s] from GetOxidationRateCoefficients()
+ *   //             (use the mass-fraction moment index: 0 for ThreeEquations, 1 for HMOM)
+ *   const double x = kappa_eff * dt;
+ *   const double phi = (x > 1e-8) ? (1. - std::exp(-x)) / x : 1.;
+ *   auto ox_gas = MOM::GetOmegaGasOxidation(mom_);
+ *   for (int k = 0; k < n_species; ++k)
+ *       Y[k] += ox_gas[k] / rho * dt * phi;
+ * @endcode
+ *
+ * The factor `phi` ∈ (0, 1] collapses to 1 for small `kappa_eff * dt` (first-order
+ * approximation) and falls toward `1/(kappa_eff*dt)` for fast oxidation, correctly
+ * bounding the integrated gas consumption to at most the available reactant mass.
+ *
+ * @pre  Compute() must have been called at the current state.
+ * @param[in]  m    Model variant.
+ * @param[out] out  Caller-allocated buffer; size must be >= n_species.
+ */
+template <ThermoMap Thermo>
+inline void GetOmegaGasWithoutOxidation(const AnyMomentMethod<Thermo>& m,
+                                         std::span<double> out) noexcept
+{
+    std::visit([&out](const auto& mm)
+    {
+        const auto total = mm.omega_gas();            // full omega_gas_  — zero-copy
+        const auto ox    = mm.omega_gas_oxidation();  // oxidation-only   — zero-copy
+        const std::size_t N = std::min(total.size(), out.size());
+        for (std::size_t k = 0; k < N; ++k)
+            out[k] = total[k] - (k < ox.size() ? ox[k] : 0.);
+    }, m);
 }
 
 /** @brief Returns the particle volume fraction [-]. */
@@ -390,6 +694,27 @@ template <ThermoMap Thermo>
 [[nodiscard]] inline double GetMassFraction(const AnyMomentMethod<Thermo>& m) noexcept
 {
     return std::visit([](const auto& mm) { return mm.mass_fraction(); }, m);
+}
+
+/** @brief Returns the specific surface area [m2/m3]. */
+template <ThermoMap Thermo>
+[[nodiscard]] inline double GetSpecificSurfaceArea(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.specific_surface(); }, m);
+}
+
+/** @brief Returns the collision diameter [m]. */
+template <ThermoMap Thermo>
+[[nodiscard]] inline double GetCollisionDiameter(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.collision_diameter(); }, m);
+}
+
+/** @brief Returns the number of primary particles [-]. */
+template <ThermoMap Thermo>
+[[nodiscard]] inline double GetNumberPrimaryParticles(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.number_primary_particles(); }, m);
 }
 
 /** @brief Returns the particle Schmidt number [-]. */
@@ -441,6 +766,13 @@ template <ThermoMap Thermo>
 [[nodiscard]] inline bool GetClosureDummySpeciesIsActive(const AnyMomentMethod<Thermo>& m) noexcept
 {
     return std::visit([](const auto& mm) { return mm.is_closure_dummy_species(); }, m);
+}
+
+/** @brief Returns `true` if the object is active. */
+template <ThermoMap Thermo>
+[[nodiscard]] inline bool GetIsActive(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.is_active(); }, m);
 }
 
 /** @brief Returns the 0-based index of the gas-closure dummy species (−1 if inactive). */

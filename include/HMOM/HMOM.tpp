@@ -144,7 +144,7 @@ template <ThermoMap Thermo> HMOM<Thermo>::HMOM(const Thermo& thermo) : thermo_(t
 
 template <ThermoMap Thermo> void HMOM<Thermo>::MemoryAllocation()
 {
-    this->ZeroSources();          // zeros source_all_, omega_gas_ (base class)
+    this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by HMOM
     source_coagulation_.setZero();
     source_condensation_.setZero();
@@ -161,7 +161,8 @@ template <ThermoMap Thermo> void HMOM<Thermo>::MemoryAllocation()
     source_coagulation_cont_ll_    = MomentVector::Zero();
     source_coagulation_all_        = MomentVector::Zero();
 
-    this->omega_gas_ = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(thermo_.NumberOfSpecies()));
+    this->omega_gas_     = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(thermo_.NumberOfSpecies()));
+    omega_gas_oxidation_ = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(thermo_.NumberOfSpecies()));
 
     NL_   = 0.;
     NLVL_ = 0.;
@@ -216,22 +217,35 @@ template <ThermoMap Thermo> void HMOM<Thermo>::Precalculations()
 
 template <ThermoMap Thermo> void HMOM<Thermo>::SetPAH(std::string_view name)
 {
-    pah_species_ = std::string(name);
-    pah_index_   = thermo_.IndexOfSpecies(name);
-    ncpah_       = static_cast<double>(thermo_.NumberOfCarbonAtoms(pah_index_));
-    nhpah_       = static_cast<double>(thermo_.NumberOfHydrogenAtoms(pah_index_));
+    const auto pah_index = thermo_.IndexOfSpecies(name);
+    if (pah_index < 0)
+        throw std::runtime_error("[HMOM] PAH species not found in mechanism: " + std::string(name));
+
+    const auto pah_index_u = static_cast<unsigned>(pah_index);
+    const auto ncpah       = static_cast<double>(thermo_.NumberOfCarbonAtoms(pah_index_u));
+    const auto nhpah       = static_cast<double>(thermo_.NumberOfHydrogenAtoms(pah_index_u));
 
     // -- PAH mass and geometry ---------------------------------------------
-    mwpah_ = thermo_.MolecularWeight(pah_index_); // [kg/kmol]
+    auto mwpah = thermo_.MolecularWeight(pah_index_u); // [kg/kmol]
     if (is_simplified_pah_mass_)
-        mwpah_ = ncpah_ * this->WC_;
+        mwpah = ncpah * this->WC_;
 
-    vpah_ = mwpah_ / this->rho_particle_ / this->Nav_kmol_; // [m3]
-    dpah_ = std::pow(6. / this->pi_ * vpah_, 1. / 3.);      // [m]
-    spah_ = this->pi_ * dpah_ * dpah_;                      // [m2]
-    mpah_ = mwpah_ / this->Nav_kmol_;                       // [kg]
+    const auto vpah = mwpah / this->rho_particle_ / this->Nav_kmol_; // [m3]
+    const auto dpah = std::pow(6. / this->pi_ * vpah, 1. / 3.);      // [m]
+    const auto spah = this->pi_ * dpah * dpah;                       // [m2]
+    const auto mpah = mwpah / this->Nav_kmol_;                       // [kg]
 
     const double K_spher = K_spher_HMOM(this->pi_);
+
+    pah_species_ = std::string(name);
+    pah_index_   = pah_index;
+    ncpah_       = ncpah;
+    nhpah_       = nhpah;
+    mwpah_       = mwpah;
+    vpah_        = vpah;
+    dpah_        = dpah;
+    spah_        = spah;
+    mpah_        = mpah;
 
     dimer_volume_  = 2. * vpah_;
     dimer_surface_ = K_spher * std::pow(dimer_volume_, 2. / 3.);
@@ -291,48 +305,22 @@ template <ThermoMap Thermo> void HMOM<Thermo>::SetStickingCoefficientModel(std::
 template <ThermoMap Thermo>
 void HMOM<Thermo>::SetStatus(double T, double P_Pa, const double* Y) noexcept
 {
-    this->T_    = T;
-    this->P_Pa_ = P_Pa;
-
-    // MW from mass fractions
-    double invMW = 0.;
-    for (unsigned i = 0; i < thermo_.NumberOfSpecies(); ++i)
-        invMW += Y[i] / thermo_.MolecularWeight(i);
-    this->MW_ = 1. / invMW;
-
-    const double cTot = P_Pa / (this->Rgas_ * T); // [kmol/m3]
-    this->rho_        = cTot * this->MW_;
+    const double cTot = this->template UpdateMixtureState<>(
+        T, P_Pa, Y, thermo_);
 
     // Save mass fractions needed for HACA threshold
     mass_fraction_H_  = (index_H_ >= 0) ? std::max(Y[index_H_], 0.) : 0.;
     mass_fraction_OH_ = (index_OH_ >= 0) ? std::max(Y[index_OH_], 0.) : 0.;
 
-    // Helper: concentration in [mol/cm3] = [kmol/m3] / 1e3
-    auto concMolCm3 = [&](int idx) -> double
-    {
-        if (idx < 0)
-            return 0.;
-        return cTot * std::max(Y[idx], 0.) * this->MW_ /
-               thermo_.MolecularWeight(static_cast<unsigned>(idx)) / 1.e3;
-    };
-
-    conc_H_    = concMolCm3(index_H_);
-    conc_OH_   = concMolCm3(index_OH_);
-    conc_O2_   = concMolCm3(index_O2_);
-    conc_H2_   = concMolCm3(index_H2_);
-    conc_H2O_  = concMolCm3(index_H2O_);
-    conc_C2H2_ = concMolCm3(index_C2H2_);
+    conc_H_    = this->SpeciesConcentrationMolCm3(index_H_, Y, cTot, thermo_);
+    conc_OH_   = this->SpeciesConcentrationMolCm3(index_OH_, Y, cTot, thermo_);
+    conc_O2_   = this->SpeciesConcentrationMolCm3(index_O2_, Y, cTot, thermo_);
+    conc_H2_   = this->SpeciesConcentrationMolCm3(index_H2_, Y, cTot, thermo_);
+    conc_H2O_  = this->SpeciesConcentrationMolCm3(index_H2O_, Y, cTot, thermo_);
+    conc_C2H2_ = this->SpeciesConcentrationMolCm3(index_C2H2_, Y, cTot, thermo_);
 
     // PAH [mol/cm3]
-    if (pah_index_ >= 0)
-    {
-        conc_PAH_ = cTot * std::max(Y[pah_index_], 0.) * this->MW_ /
-                    thermo_.MolecularWeight(static_cast<unsigned>(pah_index_)) / 1.e3;
-    }
-    else
-    {
-        conc_PAH_ = 0.;
-    }
+    conc_PAH_ = this->SpeciesConcentrationMolCm3(pah_index_, Y, cTot, thermo_);
 }
 
 // ============================================================================
@@ -630,8 +618,25 @@ template <ThermoMap Thermo> void HMOM<Thermo>::SootKineticConstants()
     if (ratio > 0.)
         conc_sootStar = (k1f * conc_OH_ + k2f * conc_H_ + k3f) / ratio;
 
-    if (mass_fraction_H_ < 2.e-9 && mass_fraction_OH_ < 2.e-8)
-        conc_sootStar = 0.;
+    // Original hard cutoff: if (mass_fraction_H_ < 2e-9 && mass_fraction_OH_ < 2e-8)
+    //     conc_sootStar = 0.
+    // This Heaviside on species mass fractions was a step discontinuity in the ODE
+    // Jacobian: when the numerical Jacobian probed a slightly different T, the
+    // thresholds could flip, producing a spurious spike in ∂kox/∂T that caused the
+    // Gear solver to drastically reduce dt or fail.
+    // Fix: replace with a smooth product of two sigmoid ramps, one for YH and one for
+    // YOH.  Width = 50% of each threshold keeps the damping onset physically faithful.
+    {
+        constexpr double YH_threshold  = 2.e-9;
+        constexpr double YOH_threshold = 2.e-8;
+        const double rampH  = 0.5 * (1. + std::tanh((mass_fraction_H_  - YH_threshold)
+                                                     / (0.5 * YH_threshold)));
+        const double rampOH = 0.5 * (1. + std::tanh((mass_fraction_OH_ - YOH_threshold)
+                                                     / (0.5 * YOH_threshold)));
+        // Original logic: zero when BOTH are below threshold → multiply the two ramps.
+        // For numerical Jacobian safety: smooth approach to zero, C¹ everywhere.
+        conc_sootStar *= rampH * rampOH;
+    }
 
     conc_sootStar = conc_sootStar / (1. + conc_sootStar);
     conc_sootStar = std::max(conc_sootStar, 0.);
@@ -945,7 +950,7 @@ template <ThermoMap Thermo> void HMOM<Thermo>::SootCoagulationContinuousLargeLar
 
 template <ThermoMap Thermo> void HMOM<Thermo>::CalculateSourceMoments() noexcept
 {
-    this->ZeroSources();          // zeros source_all_, omega_gas_ (base class)
+    this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by HMOM — must be zeroed explicitly
     source_coagulation_.setZero();
     source_condensation_.setZero();
@@ -963,7 +968,11 @@ template <ThermoMap Thermo> void HMOM<Thermo>::CalculateSourceMoments() noexcept
     source_coagulation_all_        = MomentVector::Zero();
 
     if (!this->is_active_)
+    {
+        if (this->gas_consumption_)
+            this->omega_gas_.setZero();
         return;
+    }
 
     if (surface_density_correction_)
         CalculateAlphaCoefficient();
@@ -1041,6 +1050,7 @@ template <ThermoMap Thermo> void HMOM<Thermo>::CalculateSourceMoments() noexcept
 template <ThermoMap Thermo> void HMOM<Thermo>::CalculateOmegaGas() noexcept
 {
     this->omega_gas_.setZero();
+    omega_gas_oxidation_.setZero();
     if (!this->gas_consumption_)
         return;
 
@@ -1076,6 +1086,9 @@ template <ThermoMap Thermo> void HMOM<Thermo>::CalculateOmegaGas() noexcept
 
     if (oxidation_model_ > 0 && VC2_ > 0.)
     {
+        // Snapshot for oxidation-only extraction (operator splitting support).
+        const Eigen::VectorXd omega_snap_before_ox = this->omega_gas_;
+
         // R_oxid_C2 [mol C2-pairs/m3/s] = rate of soot C2 pairs removed by oxidation.
         const double R_oxid_C2 = -this->source_oxidation_(1) * V0_ / VC2_;
         if (R_oxid_C2 > 0. && std::isfinite(R_oxid_C2))
@@ -1129,6 +1142,9 @@ template <ThermoMap Thermo> void HMOM<Thermo>::CalculateOmegaGas() noexcept
                 }
             }
         }
+
+        // Capture oxidation-only gas contribution (before closure).
+        omega_gas_oxidation_ = this->omega_gas_ - omega_snap_before_ox;
     }
 
     if (this->is_closure_dummy_species_ && this->closure_dummy_index_ >= 0)
@@ -1138,6 +1154,13 @@ template <ThermoMap Thermo> void HMOM<Thermo>::CalculateOmegaGas() noexcept
             if (i != static_cast<Eigen::Index>(this->closure_dummy_index_))
                 sum += this->omega_gas_[i];
         this->omega_gas_[this->closure_dummy_index_] = -sum;
+
+        // Apply the same closure to the oxidation-only vector.
+        double sum_ox = 0.;
+        for (Eigen::Index i = 0; i < omega_gas_oxidation_.size(); ++i)
+            if (i != static_cast<Eigen::Index>(this->closure_dummy_index_))
+                sum_ox += omega_gas_oxidation_[i];
+        omega_gas_oxidation_[static_cast<Eigen::Index>(this->closure_dummy_index_)] = -sum_ox;
     }
 }
 

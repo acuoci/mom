@@ -35,12 +35,15 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <numbers>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "Eigen/Dense"
@@ -138,6 +141,22 @@ namespace MOM
  * `sources_X() → derived().sources_X_impl()` is collapsed to a direct memory
  * access at **all** optimisation levels, including debug (`-O0`) and profiling
  * (`-Og`) builds.
+ *
+ * @par Thread safety
+ * **One instance per thread — never shared across threads.**
+ *
+ * Each concrete instance holds mutable internal state that is overwritten on
+ * every call to `CalculateSourceMoments()` (moment values, intermediate species
+ * concentrations, source vectors).  Concurrent access to the same instance from
+ * multiple threads is undefined behaviour.
+ *
+ * For MPI+OpenMP or pure-OpenMP CFD solvers:
+ * - Allocate **one model instance per OpenMP thread** (e.g. in a `#pragma omp threadprivate`
+ *   variable or via an `std::vector<Model>` of size `omp_get_max_threads()`).
+ * - The shared `Thermo` reference may be safely read from multiple threads
+ *   simultaneously, provided no thread writes to it during the parallel region.
+ * - `MomentMethodReporter` and `OutputFileColumns` carry the same constraint —
+ *   use one reporter instance per thread, or serialise output behind a mutex.
  */
 template <class Derived, unsigned NEq> class MomentMethodBase
 {
@@ -177,9 +196,16 @@ public:
     /**
      * @brief Enables or disables gas-phase precursor consumption.
      * @param flag If `true` (default), `omega_gas_` is computed and the precursor
-     *             source term is added to the gas-phase chemistry residual.
+     *             source term is added to the gas-phase chemistry residual.  If
+     *             `false`, the gas source vector is cleared once and then left
+     *             untouched by the per-cell moment-source reset.
      */
-    void SetGasConsumption(bool flag) noexcept { gas_consumption_ = flag; }
+    void SetGasConsumption(bool flag) noexcept
+    {
+        gas_consumption_ = flag;
+        if (!gas_consumption_)
+            omega_gas_.setZero();
+    }
 
     /**
      * @brief Enables or disables particle contribution to radiative heat transfer.
@@ -192,8 +218,11 @@ public:
      * @brief Sets the thermophoretic drift model by integer flag.
      * @param flag 0 = off, 1 = standard (drift encoded in effective diffusion coefficient).
      */
-    void SetThermophoreticModel(int flag) noexcept
+    void SetThermophoreticModel(int flag)
     {
+        if (flag != 0 && flag != 1)
+            throw std::invalid_argument(
+                "[MomentMethodBase] Invalid thermophoretic model flag. Allowed values: 0, 1.");
         thermophoretic_model_ = static_cast<ThermophoreticModel>(flag);
     }
 
@@ -346,6 +375,93 @@ public:
             return {kZeroData, NEq};
     }
 
+    /**
+     * @name Per-process activation flags — CRTP dispatch with zero fallback
+     *
+     * Each method returns the integer model flag (0 = off, >0 = variant index)
+     * for the corresponding physical process.  The query detects at compile time
+     * whether `Derived` exposes the matching getter; if not, 0 (off) is returned.
+     *
+     * This mirrors the `sources_X()` zero-span pattern so that `AnyMomentMethod`
+     * free functions can query process activation uniformly across all variants.
+     * @{
+     */
+
+    /** @brief Returns the nucleation model flag (0 = off). */
+    [[nodiscard, gnu::always_inline]] int model_nucleation() const noexcept
+    {
+        if constexpr (requires(const Derived& d) { d.nucleation_model(); })
+            return derived().nucleation_model();
+        else
+            return 0;
+    }
+
+    /** @brief Returns the surface-growth model flag (0 = off). */
+    [[nodiscard, gnu::always_inline]] int model_growth() const noexcept
+    {
+        if constexpr (requires(const Derived& d) { d.surface_growth_model(); })
+            return derived().surface_growth_model();
+        else
+            return 0;
+    }
+
+    /** @brief Returns the coagulation model flag (0 = off). */
+    [[nodiscard, gnu::always_inline]] int model_coagulation() const noexcept
+    {
+        if constexpr (requires(const Derived& d) { d.coagulation_model(); })
+            return derived().coagulation_model();
+        else
+            return 0;
+    }
+
+    /** @brief Returns the condensation model flag (0 = off). */
+    [[nodiscard, gnu::always_inline]] int model_condensation() const noexcept
+    {
+        if constexpr (requires(const Derived& d) { d.condensation_model(); })
+            return derived().condensation_model();
+        else
+            return 0;
+    }
+
+    /** @brief Returns the oxidation model flag (0 = off). */
+    [[nodiscard, gnu::always_inline]] int model_oxidation() const noexcept
+    {
+        if constexpr (requires(const Derived& d) { d.oxidation_model(); })
+            return derived().oxidation_model();
+        else
+            return 0;
+    }
+
+    /** @brief Returns the sintering model flag (0 = off; non-zero for MetalOxide). */
+    [[nodiscard, gnu::always_inline]] int model_sintering() const noexcept
+    {
+        if constexpr (requires(const Derived& d) { d.sintering_model(); })
+            return derived().sintering_model();
+        else
+            return 0;
+    }
+
+    /** @} */
+
+    /**
+     * @brief Oxidation-only gas-phase source terms [kg/m³/s].
+     *
+     * Returns the subset of `omega_gas_` due exclusively to soot oxidation
+     * (O2/OH surface attack).  Non-oxidation contributions (nucleation, surface
+     * growth, condensation) are excluded.  Used by the operator-splitting API
+     * (GetOmegaGasOxidation / GetOmegaGasWithoutOxidation) to remove the stiff
+     * oxidation eigenvalue from the ODE system and integrate it analytically.
+     *
+     * Returns an empty span for models without oxidation gas coupling (e.g. TiO2).
+     */
+    [[nodiscard]] std::span<const double> omega_gas_oxidation() const noexcept
+    {
+        if constexpr (requires(const Derived& d) { d.omega_gas_oxidation_impl(); })
+            return derived().omega_gas_oxidation_impl();
+        else
+            return {};   // empty span — model has no oxidation gas coupling
+    }
+
     /** @} */
 
     /**
@@ -445,6 +561,64 @@ protected:
      */
     Eigen::VectorXd omega_gas_;
 
+    // -- Shared thermodynamic-state helpers --------------------------------
+
+    /**
+     * @brief Update common gas state from temperature, pressure, and mass fractions.
+     *
+     * Computes the mixture molecular weight, total molar concentration, and
+     * density using the same convention as the concrete variants:
+     * `1/MW = sum_k Y_k/MW_k`, `cTot = P/(R T)`, `rho = cTot * MW`.
+     * @return Total molar concentration [kmol/m3].
+     */
+    template <typename Thermo>
+    [[nodiscard]] double UpdateMixtureState(double T,
+                                            double P_Pa,
+                                            const double* Y,
+                                            const Thermo& thermo,
+                                            double gas_constant = Rgas_) noexcept
+    {
+        T_    = T;
+        P_Pa_ = P_Pa;
+
+        double invMW = 0.;
+        for (unsigned k = 0; k < thermo.NumberOfSpecies(); ++k)
+            invMW += Y[k] / thermo.MolecularWeight(k);
+        MW_ = 1. / invMW;
+
+        const double cTot = P_Pa_ / (gas_constant * T_);
+        rho_              = cTot * MW_;
+        return cTot;
+    }
+
+    /**
+     * @brief Species molar concentration from a mass fraction vector.
+     * @return Concentration [kmol/m3], or zero when @p idx is absent.
+     */
+    template <typename Thermo>
+    [[nodiscard]] double SpeciesConcentrationKmolM3(int idx,
+                                                    const double* Y,
+                                                    double cTot,
+                                                    const Thermo& thermo) const noexcept
+    {
+        if (idx < 0)
+            return 0.;
+        return cTot * std::max(Y[idx], 0.) * MW_ /
+               thermo.MolecularWeight(static_cast<unsigned>(idx));
+    }
+
+    /**
+     * @brief Species molar concentration in [mol/cm3], used by HMOM HACA rates.
+     */
+    template <typename Thermo>
+    [[nodiscard]] double SpeciesConcentrationMolCm3(int idx,
+                                                    const double* Y,
+                                                    double cTot,
+                                                    const Thermo& thermo) const noexcept
+    {
+        return SpeciesConcentrationKmolM3(idx, Y, cTot, thermo) / 1.e3;
+    }
+
     // -- Helpers for zero-initialising source vectors between time steps -----
 
     /**
@@ -452,12 +626,77 @@ protected:
      *
      * Each `Derived::CalculateSourceMoments()` implementation must call this
      * first, then zero its own per-process vectors (`source_nucleation_`, etc.)
-     * before accumulating new source terms.
+     * before accumulating new source terms.  This deliberately does not clear
+     * `omega_gas_`; gas source vectors can be large and are reset only when gas
+     * consumption is enabled.
      */
     void ZeroSources() noexcept
     {
         source_all_.setZero();
-        omega_gas_.setZero();
+    }
+
+    // -- Safe gas-source accessor (for use in variant output hooks) ----------
+
+    /**
+     * @brief Safe accessor for a single gas-phase source term by species index.
+     *
+     * Returns `omega_gas_[idx]` when @p idx is a valid (non-negative,
+     * in-range) species index, and 0.0 otherwise.  Specifically:
+     * - Returns 0.0 if @p idx < 0.  The convention throughout the library is
+     *   that species absent in the user's mechanism are assigned index −1 by
+     *   `ThermoMap::IndexOfSpecies`.  Treating absent-species output as zero
+     *   is correct: no contribution means no source term.
+     * - Returns 0.0 if `idx >= omega_gas_.size()`.  This cannot occur after a
+     *   correct `MemoryAllocation()` call (which sizes `omega_gas_` to
+     *   `n_species`), but the guard makes the accessor unconditionally safe
+     *   even in partially-initialised states.
+     * - Returns 0.0 if `omega_gas_` is empty (not yet allocated).
+     *
+     * @par Intended use
+     * Call this inside `variant_prefix_output` / `variant_suffix_output` hooks
+     * instead of direct `omega_gas_[idx]` subscripting.  This prevents undefined
+     * behaviour if a species listed in the output hook (e.g. OH, H2) is absent
+     * from the user's reaction mechanism, which is a perfectly valid configuration.
+     *
+     * BrookesMoss and MetalOxide previously defined equivalent local lambdas
+     * inside their output hooks; this method is the canonical, documented
+     * replacement for that pattern.
+     *
+     * @param idx  Species index as returned by `ThermoMap::IndexOfSpecies`.
+     *             −1 signals "species not present in mechanism".
+     * @return     Gas-phase source term [kg/m³/s], or 0.0 if unavailable.
+     */
+    [[nodiscard]] double safe_omega_gas(int idx) const noexcept
+    {
+        if (idx < 0 || static_cast<Eigen::Index>(idx) >= omega_gas_.size())
+            return 0.;
+        return omega_gas_[idx];
+    }
+
+    /** @brief Emit a single labelled gas-source diagnostic column safely. */
+    template <typename CB, typename Label>
+    void EmitOmegaGas(CB&& cb, Label&& label, int idx) const
+    {
+        cb(std::forward<Label>(label), safe_omega_gas(idx));
+    }
+
+    /** @brief Emit gas-source diagnostics common to soot variants. */
+    template <typename CB>
+    void EmitStandardSootOmegaGas(CB&& cb,
+                                  int precursor_index,
+                                  int c2h2_index,
+                                  int h2_index,
+                                  int o2_index,
+                                  int h2o_index,
+                                  int oh_index) const
+    {
+        cb("omegaTot[kg/m3/s]", omega_gas_.sum());
+        EmitOmegaGas(cb, "omegaPrec[kg/m3/s]", precursor_index);
+        EmitOmegaGas(cb, "omegaC2H2[kg/m3/s]", c2h2_index);
+        EmitOmegaGas(cb, "omegaH2[kg/m3/s]", h2_index);
+        EmitOmegaGas(cb, "omegaO2[kg/m3/s]", o2_index);
+        EmitOmegaGas(cb, "omegaH2O[kg/m3/s]", h2o_index);
+        EmitOmegaGas(cb, "omegaOH[kg/m3/s]", oh_index);
     }
 
     // -- CRTP down-cast helpers ---------------------------------------------

@@ -446,6 +446,28 @@ static bool validateAnyMomentMethodAccessors(const MOM::BasicThermoData& th)
     return ok;
 }
 
+static bool validateHMOMSpeciesValidation()
+{
+    const auto th = buildSootThermo();
+
+    bool ok = false;
+    try
+    {
+        MOM::HMOM<MOM::BasicThermoData> model(th);
+        model.SetPAH("MISSING_PAH");
+    }
+    catch (const std::runtime_error& e)
+    {
+        ok = std::string(e.what()).find("MISSING_PAH") != std::string::npos;
+    }
+
+    std::cout << "\n=== HMOM species validation ===\n";
+    std::cout << (ok ? "  [PASS] Missing PAH species is rejected during setup\n"
+                     : "  [FAIL] Missing PAH species was not reported clearly\n");
+
+    return ok;
+}
+
 static bool validateThreeEquationsSpeciesValidation()
 {
     auto th = buildSootThermo();
@@ -705,6 +727,153 @@ static bool validateBrookesMossInvalidModelFlags()
     return ok;
 }
 
+static bool validateIntegerModelFlagValidation()
+{
+    const auto th_soot        = buildSootThermo();
+    const auto th_metaloxide = buildMetalOxideThermo();
+
+    auto throws_invalid_argument = [](auto&& fn)
+    {
+        try
+        {
+            fn();
+        }
+        catch (const std::invalid_argument&)
+        {
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+        return false;
+    };
+
+    const bool hmom_ok = [&]
+    {
+        MOM::HMOM<MOM::BasicThermoData> model(th_soot);
+        return throws_invalid_argument([&] { model.SetNucleation(99); }) &&
+               throws_invalid_argument([&] { model.SetCondensation(99); }) &&
+               throws_invalid_argument([&] { model.SetSurfaceGrowth(99); }) &&
+               throws_invalid_argument([&] { model.SetOxidation(99); }) &&
+               throws_invalid_argument([&] { model.SetCoagulation(99); }) &&
+               throws_invalid_argument([&] { model.SetCoagulationContinuous(99); }) &&
+               throws_invalid_argument([&] { model.SetFractalDiameterModel(99); }) &&
+               throws_invalid_argument([&] { model.SetCollisionDiameterModel(99); });
+    }();
+
+    const bool three_equations_ok = [&]
+    {
+        MOM::ThreeEquations<MOM::BasicThermoData> model(th_soot);
+        return throws_invalid_argument([&] { model.SetNucleation(99); }) &&
+               throws_invalid_argument([&] { model.SetCondensation(99); }) &&
+               throws_invalid_argument([&] { model.SetSurfaceGrowth(99); }) &&
+               throws_invalid_argument([&] { model.SetOxidation(99); }) &&
+               throws_invalid_argument([&] { model.SetCoagulation(99); });
+    }();
+
+    const bool metaloxide_ok = [&]
+    {
+        MOM::MetalOxide<MOM::BasicThermoData> model(th_metaloxide);
+        return throws_invalid_argument([&] { model.SetNucleation(99); }) &&
+               throws_invalid_argument([&] { model.SetCondensation(99); }) &&
+               throws_invalid_argument([&] { model.SetCoagulation(99); }) &&
+               throws_invalid_argument([&] { model.SetSintering(99); }) &&
+               throws_invalid_argument(
+                   [&]
+                   {
+                       MOM::MetalOxide<MOM::BasicThermoData>::Config cfg;
+                       cfg.nucleation_model = "unknown";
+                       model.SetupFromConfig(cfg);
+                   });
+    }();
+
+    const bool thermophoretic_ok =
+        throws_invalid_argument(
+            [&]
+            {
+                MOM::HMOM<MOM::BasicThermoData> model(th_soot);
+                model.SetThermophoreticModel(99);
+            });
+
+    const bool ok = hmom_ok && three_equations_ok && metaloxide_ok && thermophoretic_ok;
+
+    std::cout << "\n=== Integer model flag validation across variants ===\n";
+    std::cout << (hmom_ok ? "  [PASS] HMOM rejects invalid integer model flags\n"
+                         : "  [FAIL] HMOM accepted at least one invalid integer model flag\n");
+    std::cout << (three_equations_ok
+                      ? "  [PASS] ThreeEquations rejects invalid integer model flags\n"
+                      : "  [FAIL] ThreeEquations accepted at least one invalid integer model flag\n");
+    std::cout << (metaloxide_ok
+                      ? "  [PASS] MetalOxide rejects invalid integer/string model flags\n"
+                      : "  [FAIL] MetalOxide accepted at least one invalid model flag\n");
+    std::cout << (thermophoretic_ok
+                      ? "  [PASS] Shared thermophoretic model rejects invalid integer flags\n"
+                      : "  [FAIL] Shared thermophoretic model accepted an invalid integer flag\n");
+
+    return ok;
+}
+
+static bool validateHMOMGasConsumptionDisableClearsOutput()
+{
+    const auto th = buildSootThermo();
+    const auto Y  = X2Y({0.010, 0.020, 0.180, 0.010, 0.100, 0.060, 0.620}, th);
+
+    bool produced_gas_sources = false;
+    bool cleared_on_disable = false;
+    bool stayed_clear_after_calculation = false;
+
+    try
+    {
+        MOM::HMOM<MOM::BasicThermoData> model(th);
+        model.SetNucleation(1);
+        model.SetCoagulation(1);
+        model.SetCondensation(1);
+        model.SetSurfaceGrowth(1);
+        model.SetOxidation(1);
+        model.SetStatus(1800., 101325., Y.data());
+        model.SetMoments(model.initial_moments());
+        model.CalculateSourceMoments();
+
+        const auto gas_enabled = model.omega_gas();
+        produced_gas_sources =
+            std::any_of(gas_enabled.begin(), gas_enabled.end(), [](double v) { return v != 0.; });
+
+        model.SetGasConsumption(false);
+        const auto gas_disabled = model.omega_gas();
+        cleared_on_disable = std::all_of(
+            gas_disabled.begin(), gas_disabled.end(), [](double v) { return v == 0.; });
+
+        model.CalculateSourceMoments();
+        const auto gas_after_calculation = model.omega_gas();
+        stayed_clear_after_calculation =
+            std::all_of(gas_after_calculation.begin(),
+                        gas_after_calculation.end(),
+                        [](double v) { return v == 0.; });
+    }
+    catch (const std::runtime_error&)
+    {
+        produced_gas_sources = false;
+        cleared_on_disable = false;
+        stayed_clear_after_calculation = false;
+    }
+
+    const bool ok = produced_gas_sources && cleared_on_disable && stayed_clear_after_calculation;
+
+    std::cout << "\n=== HMOM gas-consumption disabled output handling ===\n";
+    std::cout << (produced_gas_sources
+                      ? "  [PASS] Enabled gas consumption produced non-zero gas sources\n"
+                      : "  [FAIL] Enabled gas consumption did not produce a testable gas source\n");
+    std::cout << (cleared_on_disable
+                      ? "  [PASS] Disabling gas consumption clears omega_gas\n"
+                      : "  [FAIL] Disabling gas consumption left stale omega_gas values\n");
+    std::cout << (stayed_clear_after_calculation
+                      ? "  [PASS] Disabled gas consumption remains zero after source evaluation\n"
+                      : "  [FAIL] Disabled gas consumption was modified during source evaluation\n");
+
+    return ok;
+}
+
 // ============================================================================
 // main
 // ============================================================================
@@ -726,11 +895,14 @@ int main()
     bool all_ok = true;
 
     all_ok &= validateAnyMomentMethodAccessors(thS);
+    all_ok &= validateHMOMSpeciesValidation();
     all_ok &= validateThreeEquationsSpeciesValidation();
     all_ok &= validateBrookesMossHallSpeciesValidation();
     all_ok &= validateBrookesMossReporterMissingSpecies();
     all_ok &= validateBrookesMossHallConfigDefaults();
     all_ok &= validateBrookesMossInvalidModelFlags();
+    all_ok &= validateIntegerModelFlagValidation();
+    all_ok &= validateHMOMGasConsumptionDisableClearsOutput();
 
     // ════════════════════════════════════════════════════════════════════
     // 1. HMOM  (NEq = 4)

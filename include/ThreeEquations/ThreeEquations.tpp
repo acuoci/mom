@@ -118,7 +118,7 @@ ThreeEquations<Thermo>::ThreeEquations(const Thermo& thermo) : thermo_(thermo)
 
 template <ThermoMap Thermo> void ThreeEquations<Thermo>::MemoryAllocation()
 {
-    this->ZeroSources();          // zeros source_all_, omega_gas_ (base class)
+    this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by ThreeEquations — zeroed explicitly
     source_coagulation_.setZero();
     source_condensation_.setZero();
@@ -126,7 +126,8 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::MemoryAllocation()
     source_oxidation_.setZero();
 
     // Gas source vector — dynamic size (depends on mechanism).
-    this->omega_gas_ = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(thermo_.NumberOfSpecies()));
+    this->omega_gas_     = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(thermo_.NumberOfSpecies()));
+    omega_gas_oxidation_ = Eigen::VectorXd::Zero(static_cast<Eigen::Index>(thermo_.NumberOfSpecies()));
 }
 
 // ============================================================================
@@ -265,47 +266,21 @@ void ThreeEquations<Thermo>::SetStickingCoefficientModel(std::string_view label)
 template <ThermoMap Thermo>
 void ThreeEquations<Thermo>::SetStatus(double T, double P_Pa, const double* Y) noexcept
 {
-    this->T_    = T;
-    this->P_Pa_ = P_Pa;
-
-    // Mixture molecular weight [kg/kmol]  (1/MW = sum Yi/MWi)
-    {
-        const int nsp = thermo_.NumberOfSpecies();
-        double inv_MW = 0.;
-        for (int k = 0; k < nsp; ++k)
-            inv_MW += Y[k] / thermo_.MolecularWeight(k);
-        this->MW_ = (inv_MW > 1.e-300) ? 1. / inv_MW : 1.;
-    }
-
     // Gas constant: R [J/kmol/K] = kB * Nav_kmol
     const double R_J_kmol = this->kB_ * this->Nav_kmol_;
-    const double cTot     = this->P_Pa_ / (R_J_kmol * this->T_); // [kmol/m3]
-    this->rho_            = cTot * this->MW_;                    // [kg/m3]
+    const double cTot = this->template UpdateMixtureState<>(T, P_Pa, Y, thermo_, R_J_kmol);
 
     // Mass fractions of HACA-relevant species (for active-site cutoff)
     mass_fraction_OH_ = std::max(Y[index_OH_], 0.);
     mass_fraction_H_  = std::max(Y[index_H_], 0.);
 
-    // PAH mole fraction → concentration [kmol/m3]
-    {
-        const double Y_PAH = std::max(Y[pah_index_], 0.);
-        const double X_PAH =
-            Y_PAH * this->MW_ / thermo_.MolecularWeight(static_cast<unsigned>(pah_index_));
-        conc_PAH_          = cTot * X_PAH;
-    }
-
-    // Concentrations of key species [kmol/m3]
-    auto conc = [&](int idx) -> double
-    {
-        return cTot * std::max(Y[idx], 0.) * this->MW_ /
-               thermo_.MolecularWeight(static_cast<unsigned>(idx));
-    };
-    conc_H_    = conc(index_H_);
-    conc_OH_   = conc(index_OH_);
-    conc_O2_   = conc(index_O2_);
-    conc_H2_   = conc(index_H2_);
-    conc_H2O_  = conc(index_H2O_);
-    conc_C2H2_ = conc(index_C2H2_);
+    conc_PAH_  = this->SpeciesConcentrationKmolM3(pah_index_, Y, cTot, thermo_);
+    conc_H_    = this->SpeciesConcentrationKmolM3(index_H_, Y, cTot, thermo_);
+    conc_OH_   = this->SpeciesConcentrationKmolM3(index_OH_, Y, cTot, thermo_);
+    conc_O2_   = this->SpeciesConcentrationKmolM3(index_O2_, Y, cTot, thermo_);
+    conc_H2_   = this->SpeciesConcentrationKmolM3(index_H2_, Y, cTot, thermo_);
+    conc_H2O_  = this->SpeciesConcentrationKmolM3(index_H2O_, Y, cTot, thermo_);
+    conc_C2H2_ = this->SpeciesConcentrationKmolM3(index_C2H2_, Y, cTot, thermo_);
 
     if (is_debug_mode_)
     {
@@ -840,9 +815,19 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::CoagulationSourceTerms(
     const double Beta2  = 8. * this->kB_ * this->T_ / 3. / this->mu_ * Cu;
     const double Betavs = Beta1 * Beta2 / (Beta1 + Beta2);
 
-    // Coagulation threshold: FORTRAN skips below 100 #/cm3 = 1e8 #/m3
-    static constexpr double Ns_coag_threshold = 1.e8;
-    const double OmegaNs = (Ns > Ns_coag_threshold) ? -0.5 * Betavs * Ns * Ns : 0.;
+    // Smooth activation at the FORTRAN-heritage threshold (100 #/cm3 = 1e8 #/m3).
+    // The original hard step (Heaviside) created a Dirac-delta-like discontinuity
+    // in the ODE Jacobian as Ns crossed the threshold, forcing the stiff solver to
+    // bracket the crossing and shrink dt drastically.  Replacing it with a tanh
+    // transition of width 20 % of the threshold makes the source C¹-continuous
+    // while preserving the correct asymptotic behaviour (zero well below, full
+    // -½βNs² well above).  This also prevents unbounded Ns accumulation in
+    // nucleation-onset cells where Ns < threshold and no other sink is active.
+    static constexpr double Ns_coag_threshold = 1.e8;   // #/m3  (100 #/cm3)
+    static constexpr double Ns_coag_width     = 2.e7;   // #/m3  (20 % transition)
+    const double smooth_coag =
+        0.5 * (1. + std::tanh((Ns - Ns_coag_threshold) / Ns_coag_width));
+    const double OmegaNs = -0.5 * Betavs * Ns * Ns * smooth_coag;
 
     this->source_coagulation_(0) = 0.;
     this->source_coagulation_(1) = OmegaNs / N0_scaling_;
@@ -906,7 +891,10 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::OxidationSourceTerms()
 
     if (smooth_heaviside_oxidation_)
     {
-        const double eps_v = 0.1 * vc2_;
+        // Wider bandwidth (50 % of vc2_) compared to the original 10 %.
+        // The narrower band produced a near-discontinuous ∂OmegaNs/∂vs that
+        // contributed to stiffness when the average particle volume hovered near vc2_.
+        const double eps_v = 0.5 * vc2_;
         const double H     = SmoothHeaviside(vs_oxid - vc2_, eps_v);
         double destroy_sw  = 1. - H;
         if (ss_oxid <= deltas_sph)
@@ -925,7 +913,7 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::OxidationSourceTerms()
 
 template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateSourceMoments() noexcept
 {
-    this->ZeroSources();          // zeros source_all_, omega_gas_ (base class)
+    this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by ThreeEquations — zeroed explicitly
     source_coagulation_.setZero();
     source_condensation_.setZero();
@@ -964,7 +952,8 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateSourceMoments(
                                this->source_condensation_(i);
     }
 
-    CalculateOmegaGas();
+    if (this->gas_consumption_)
+        CalculateOmegaGas();
 }
 
 // ============================================================================
@@ -974,6 +963,7 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateSourceMoments(
 template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateOmegaGas() noexcept
 {
     this->omega_gas_.setZero();
+    omega_gas_oxidation_.setZero();
     if (!this->gas_consumption_)
         return;
 
@@ -1025,6 +1015,8 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateOmegaGas() noe
             //   OH channel: C + OH  → CO + ½H2
             if (oxidation_model_ > 0 && Ys_ > 0.)
             {
+                // Snapshot for oxidation-only extraction (operator splitting support).
+                const Eigen::VectorXd omega_snap_before_ox = this->omega_gas_;
                 const double R_O2 = lambda * std::max(r.ko2, 0.) * Ss; // [#/m3/s]
                 const double R_OH = lambda * std::max(r.koh, 0.) * Ss; // [#/m3/s]
 
@@ -1045,6 +1037,9 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateOmegaGas() noe
                     if (index_H2_ >= 0)
                         AddMolar(index_H2_, +0.5 * R_OH / this->Nav_kmol_);
                 }
+
+                // Capture oxidation-only gas contribution (before closure).
+                omega_gas_oxidation_ = this->omega_gas_ - omega_snap_before_ox;
             }
         }
     }
@@ -1059,6 +1054,13 @@ template <ThermoMap Thermo> void ThreeEquations<Thermo>::CalculateOmegaGas() noe
             if (i != this->closure_dummy_index_)
                 sum += this->omega_gas_[i];
         this->omega_gas_[this->closure_dummy_index_] = -sum;
+
+        // Apply the same closure to the oxidation-only vector.
+        double sum_ox = 0.;
+        for (int i = 0; i < nsp; ++i)
+            if (i != this->closure_dummy_index_)
+                sum_ox += omega_gas_oxidation_[i];
+        omega_gas_oxidation_[this->closure_dummy_index_] = -sum_ox;
     }
 
     if (is_debug_mode_)

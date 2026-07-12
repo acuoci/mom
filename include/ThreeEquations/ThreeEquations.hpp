@@ -36,12 +36,14 @@
 #pragma once
 
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
 #include "Eigen/Dense"
 
 #include "MOM/MomentMethodBase.hpp"
+#include "MOM/MOMConfig.hpp"
 #include "MOM/ThermoProxy.hpp"
 
 #if defined(MOM_USE_DICTIONARY)
@@ -89,6 +91,10 @@ namespace MOM
  * Reconstruction parameters are available via `ReconstructedNDFData()`.
  *
  * @note Sintering is not modelled; `sources_sintering()` returns a zero span.
+ *
+ * @par Thread safety
+ * Not thread-safe — one instance per OpenMP thread.
+ * See `MomentMethodBase` for the complete thread-safety contract.
  *
  * @tparam Thermo  Must satisfy the MOM::ThermoMap concept.
  */
@@ -158,56 +164,25 @@ public:
      * @brief Plain configuration parameters for the ThreeEquations variant.
      * @note No external dependencies: only standard C++ types.
      */
-    struct Config
+    struct Config : CommonConfig<1>,
+                    PAHConfig,
+                    BinarySootProcessConfig,
+                    CollisionEnhancementConfig,
+                    StickingConfig,
+                    GasConsumptionConfig<false>,
+                    SootRadiationConfig
     {
-        // ---- Activation / PAH setup ----------------------------------------
-        bool        is_active           = true;    //!< Enable this variant
-        std::string pah_species         = "C2H2";  //!< PAH growth species name
-        bool        simplified_pah_mass = false;   //!< Use Nc × WC instead of full PAH MW
-
-        // ---- Soot/particle properties --------------------------------------
-        double soot_density_kg_m3 = 1800.; //!< Soot density [kg/m³]
-
-        // ---- Process model selection ---------------------------------------
-        int nucleation_model     = 1; //!< Nucleation model
-        int condensation_model   = 1; //!< Condensation model
-        int surface_growth_model = 1; //!< Surface growth model
-        int oxidation_model      = 1; //!< Oxidation model
-        int coagulation_model    = 1; //!< Coagulation model
-        int thermophoretic_model = 1; //!< Thermophoretic model
-
         /// Surface chemistry model: "rcpah" | "hmom"
         std::string surface_chemistry_model = "rcpah";
 
         /// Dimer concentration model: "qssa-rodrigues" (currently only option)
         std::string dimer_model = "qssa-rodrigues";
 
-        // ---- Collision enhancement factors ---------------------------------
-        double eps_nucleation         = 2.5; //!< Nucleation enhancement factor   [-]
-        double eps_condensation       = 1.3; //!< Condensation enhancement factor [-]
-        double eps_coagulation        = 2.2; //!< Coagulation enhancement factor  [-]
+        // ---- Collision correction ------------------------------------------
         double correction_coeff_pah_pah = 4.4; //!< PAH–PAH correction coefficient [-]
 
         // ---- Numerical floors ----------------------------------------------
         double ns_minimum_per_m3 = 1.e6; //!< Minimum soot number density [#/m³]
-
-        // ---- Sticking coefficient ------------------------------------------
-        std::string sticking_model          = "constant"; //!< "constant" or "golaut"
-        double      sticking_coeff_constant = 2.e-3;      //!< Constant sticking coefficient [-]
-
-        // ---- Gas consumption / closure -------------------------------------
-        bool        gas_consumption           = false;  //!< Consume gas-phase species
-        std::string gas_closure_dummy_species = "none"; //!< Dummy mass-closure species
-
-        // ---- Radiation -----------------------------------------------------
-        bool        radiative_heat_transfer = true;     //!< Optically-thin radiation
-        std::string planck_coefficient      = "Smooke"; //!< Planck mean absorption coefficient
-
-        // ---- Transport -----------------------------------------------------
-        double schmidt_number = 50.; //!< Soot Schmidt number
-
-        // ---- Debug ---------------------------------------------------------
-        bool debug_mode = false; //!< Verbose diagnostic output
     };
 
     // -- Construction ---------------------------------------------------------
@@ -217,11 +192,12 @@ public:
      * @param thermo  Const reference to the thermodynamics map (must outlive this object).
      */
     explicit ThreeEquations(const Thermo& thermo);
+    explicit ThreeEquations(const Thermo&&) = delete; ///< Prevents binding a temporary as thermo (dangling ref).
 
     ThreeEquations(const ThreeEquations&)            = delete;
     ThreeEquations& operator=(const ThreeEquations&) = delete;
-    ThreeEquations(ThreeEquations&&)                 = default;
-    ThreeEquations& operator=(ThreeEquations&&)      = default;
+    ThreeEquations(ThreeEquations&&)            = default; ///< Move-constructible for placement in std::variant.
+    ThreeEquations& operator=(ThreeEquations&&) = delete;  ///< Not move-assignable — const Thermo& member cannot be reseated.
 
     /**
      * @brief Configure all ThreeEquations parameters from a plain configuration struct.
@@ -322,13 +298,8 @@ public:
         cb("nu2mean[m3/#]", ndf.nu2mean);
         cb("mu[log(m3)]", ndf.mu);
 
-        cb("omegaTot[kg/m3/s]", this->omega_gas_.sum());
-        cb("omegaPrec[kg/m3/s]", this->omega_gas_[pah_index_]);
-        cb("omegaC2H2[kg/m3/s]", this->omega_gas_[index_C2H2_]);
-        cb("omegaH2[kg/m3/s]", this->omega_gas_[index_H2_]);
-        cb("omegaO2[kg/m3/s]", this->omega_gas_[index_O2_]);
-        cb("omegaH2O[kg/m3/s]", this->omega_gas_[index_H2O_]);
-        cb("omegaOH[kg/m3/s]", this->omega_gas_[index_OH_]);
+        this->EmitStandardSootOmegaGas(
+            cb, pah_index_, index_C2H2_, index_H2_, index_O2_, index_H2O_, index_OH_);
     }
 
     // -- NDF reconstruction (ThreeEquations-specific) --------------------------
@@ -359,15 +330,45 @@ public:
 
     // -- Model switches --------------------------------------------------------
 
-    void SetNucleation(int flag) noexcept { nucleation_model_ = flag; }
+    void SetNucleation(int flag)
+    {
+        if (flag != 0 && flag != 1)
+            throw std::invalid_argument(
+                "[ThreeEquations] Invalid nucleation model flag. Allowed values: 0, 1.");
+        nucleation_model_ = flag;
+    }
 
-    void SetSurfaceGrowth(int flag) noexcept { surface_growth_model_ = flag; }
+    void SetSurfaceGrowth(int flag)
+    {
+        if (flag != 0 && flag != 1)
+            throw std::invalid_argument(
+                "[ThreeEquations] Invalid surface-growth model flag. Allowed values: 0, 1.");
+        surface_growth_model_ = flag;
+    }
 
-    void SetCondensation(int flag) noexcept { condensation_model_ = flag; }
+    void SetCondensation(int flag)
+    {
+        if (flag != 0 && flag != 1)
+            throw std::invalid_argument(
+                "[ThreeEquations] Invalid condensation model flag. Allowed values: 0, 1.");
+        condensation_model_ = flag;
+    }
 
-    void SetOxidation(int flag) noexcept { oxidation_model_ = flag; }
+    void SetOxidation(int flag)
+    {
+        if (flag != 0 && flag != 1)
+            throw std::invalid_argument(
+                "[ThreeEquations] Invalid oxidation model flag. Allowed values: 0, 1.");
+        oxidation_model_ = flag;
+    }
 
-    void SetCoagulation(int flag) noexcept { coagulation_model_ = flag; }
+    void SetCoagulation(int flag)
+    {
+        if (flag != 0 && flag != 1)
+            throw std::invalid_argument(
+                "[ThreeEquations] Invalid coagulation model flag. Allowed values: 0, 1.");
+        coagulation_model_ = flag;
+    }
 
     void SetSurfaceChemistryModel(std::string_view label);
 
@@ -446,6 +447,13 @@ public:
     [[nodiscard, gnu::always_inline]] std::span<const double> sources_oxidation_impl() const noexcept
     {
         return {source_oxidation_.data(), this->n_equations};
+    }
+
+    /** @brief Oxidation-only gas-phase source terms [kg/m³/s] for operator splitting. */
+    [[nodiscard, gnu::always_inline]] std::span<const double> omega_gas_oxidation_impl() const noexcept
+    {
+        return {omega_gas_oxidation_.data(),
+                static_cast<std::size_t>(omega_gas_oxidation_.size())};
     }
 
     /** @} */
@@ -585,6 +593,8 @@ private:
     MomentVector source_condensation_ = MomentVector::Zero();
     MomentVector source_growth_       = MomentVector::Zero();
     MomentVector source_oxidation_    = MomentVector::Zero();
+
+    Eigen::VectorXd omega_gas_oxidation_; //!< Oxidation-only gas-phase sources [kg/m³/s].
 
     // -- Initial moments cache --------------------------------------------------
     MomentVector initial_moments_cache_ = MomentVector::Zero();

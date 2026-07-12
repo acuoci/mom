@@ -88,7 +88,7 @@ template <ThermoMap Thermo> MetalOxide<Thermo>::MetalOxide(const Thermo& thermo)
 
 template <ThermoMap Thermo> void MetalOxide<Thermo>::MemoryAllocation()
 {
-    this->ZeroSources();          // zeros source_all_, omega_gas_ (base class)
+    this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by MetalOxide — zeroed explicitly
     source_coagulation_.setZero();
     source_condensation_.setZero();
@@ -199,19 +199,7 @@ void MetalOxide<Thermo>::SetMinimumNumberOfFormulaUnits(unsigned n)
 template <ThermoMap Thermo>
 void MetalOxide<Thermo>::SetStatus(double T, double P_Pa, const double* Y) noexcept
 {
-    this->T_    = T;
-    this->P_Pa_ = P_Pa;
-
-    // Mixture molecular weight  (1/MW = sum Yi/MWi)
-    {
-        double inv = 0.;
-        for (unsigned i = 0; i < thermo_.NumberOfSpecies(); ++i)
-            inv += Y[i] / thermo_.MolecularWeight(i);
-        this->MW_ = (inv > 1.e-300) ? 1. / inv : 1.;
-    }
-
-    const double cTot = this->P_Pa_ / (this->Rgas_ * this->T_); // [kmol/m3]
-    this->rho_        = cTot * this->MW_;                       // [kg/m3]
+    const double cTot = this->template UpdateMixtureState<>(T, P_Pa, Y, thermo_);
 
     // Precursor mass fraction and concentration
     Y_precursor_ = 0.;
@@ -219,8 +207,7 @@ void MetalOxide<Thermo>::SetStatus(double T, double P_Pa, const double* Y) noexc
     if (precursor_index_ >= 0)
     {
         Y_precursor_ = std::max(Y[precursor_index_], 0.);
-        c_precursor_ = cTot * Y_precursor_ * this->MW_ /
-                       thermo_.MolecularWeight(static_cast<unsigned>(precursor_index_));
+        c_precursor_ = this->SpeciesConcentrationKmolM3(precursor_index_, Y, cTot, thermo_);
     }
 }
 
@@ -837,14 +824,18 @@ template <ThermoMap Thermo> double MetalOxide<Thermo>::SinteringDeferredUpdate(d
 
 template <ThermoMap Thermo> void MetalOxide<Thermo>::CalculateSourceMoments() noexcept
 {
-    this->ZeroSources();          // zeros source_all_, omega_gas_ (base class)
+    this->ZeroSources();          // zeros source_all_ (base class)
     source_nucleation_.setZero(); // owned by MetalOxide — must be zeroed before early return
     source_coagulation_.setZero();
     source_condensation_.setZero();
     source_sintering_.setZero();
 
     if (!this->is_active_)
+    {
+        if (this->gas_consumption_)
+            this->omega_gas_.setZero();
         return;
+    }
 
     if (nucleation_variant_ != NucleationVariant::Off)
         NucleationSourceTerms();
@@ -1105,6 +1096,9 @@ void MetalOxide<Thermo>::ApplyConfig(const Config& cfg)
         this->SetNucleation(static_cast<int>(NucleationVariant::Binary));
     else if (cfg.nucleation_model == "fixed-cluster" || cfg.nucleation_model == "2")
         this->SetNucleation(static_cast<int>(NucleationVariant::FixedCluster));
+    else
+        throw std::invalid_argument(
+            "[MetalOxide] Invalid nucleation model. Allowed values: none, binary, fixed-cluster.");
 
     // -- Other process models ----------------------------------------------
     this->SetSintering(cfg.sintering_model);
