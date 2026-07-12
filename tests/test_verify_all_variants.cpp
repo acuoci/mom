@@ -509,7 +509,8 @@ static bool validateBrookesMossHallSpeciesValidation()
         MOM::BrookesMoss<MOM::BasicThermoData> model(th);
         model.SetNucleation("BrookesMossHall");
         model.SetOxidation("BrookesMossHall");
-        configured_names_ok = model.nucleation_model() == 2 && model.oxidation_model() == 2;
+        configured_names_ok = model.nucleation_model() == MOM::NucleationModel::Extended
+                           && model.oxidation_model() == MOM::OxidationModel::Extended;
     }
     catch (const std::runtime_error&)
     {

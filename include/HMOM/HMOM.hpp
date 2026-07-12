@@ -978,15 +978,15 @@ public:
 
     // -- Model state queries ---------------------------------------------------
 
-    [[nodiscard]] int nucleation_model() const noexcept { return nucleation_model_; }
+    [[nodiscard]] NucleationModel    nucleation_model()    const noexcept { return static_cast<NucleationModel>(nucleation_model_);         }
 
-    [[nodiscard]] int surface_growth_model() const noexcept { return surface_growth_model_; }
+    [[nodiscard]] SurfaceGrowthModel surface_growth_model() const noexcept { return static_cast<SurfaceGrowthModel>(surface_growth_model_); }
 
-    [[nodiscard]] int condensation_model() const noexcept { return condensation_model_; }
+    [[nodiscard]] CondensationModel  condensation_model()  const noexcept { return static_cast<CondensationModel>(condensation_model_);     }
 
-    [[nodiscard]] int oxidation_model() const noexcept { return oxidation_model_; }
+    [[nodiscard]] OxidationModel     oxidation_model()     const noexcept { return static_cast<OxidationModel>(oxidation_model_);           }
 
-    [[nodiscard]] int coagulation_model() const noexcept { return coagulation_model_; }
+    [[nodiscard]] CoagulationModel   coagulation_model()   const noexcept { return static_cast<CoagulationModel>(coagulation_model_);       }
 
     [[nodiscard]] int continuous_coagulation_model() const noexcept
     {

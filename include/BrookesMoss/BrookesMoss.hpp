@@ -360,19 +360,25 @@ public:
 
     // -- Model state queries ----------------------------------------------------
 
-    [[nodiscard]] int nucleation_model() const noexcept
+    [[nodiscard]] NucleationModel nucleation_model() const noexcept
     {
-        return static_cast<int>(nucleation_variant_);
+        return static_cast<NucleationModel>(static_cast<int>(nucleation_variant_));
     }
 
-    [[nodiscard]] int surface_growth_model() const noexcept { return surface_growth_model_; }
-
-    [[nodiscard]] int oxidation_model() const noexcept
+    [[nodiscard]] SurfaceGrowthModel surface_growth_model() const noexcept
     {
-        return static_cast<int>(oxidation_variant_);
+        return static_cast<SurfaceGrowthModel>(surface_growth_model_);
     }
 
-    [[nodiscard]] int coagulation_model() const noexcept { return coagulation_model_; }
+    [[nodiscard]] OxidationModel oxidation_model() const noexcept
+    {
+        return static_cast<OxidationModel>(static_cast<int>(oxidation_variant_));
+    }
+
+    [[nodiscard]] CoagulationModel coagulation_model() const noexcept
+    {
+        return static_cast<CoagulationModel>(coagulation_model_);
+    }
 
     [[nodiscard]] const std::string& sg_species() const noexcept { return sg_species_; }
 

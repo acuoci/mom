@@ -73,7 +73,7 @@
  * | Use case | Question | API |
  * |---|---|---|
  * | Output column layout, `[ZF]` tagging | Does the type model X? | `GetXxxCapability()` |
- * | Operator splitting decision in CFD loop | Is X enabled now? | `GetXxxModel() > 0` |
+ * | Operator splitting decision in CFD loop | Is X enabled now? | `IsActive(GetXxxModel())` |
  * | `static_assert`, concept check | Structural | `ModelsOxidation<M>` |
  * | Debug log, diagnostic print | Both | both, with clear labels |
  *
@@ -121,7 +121,7 @@ template <ThermoMap Thermo>
  * fallback returns a span over a `static constexpr` zero array — no runtime
  * branch, no allocation, span size equals `n_equations`.
  *
- * Always check `GetXxxModel() > 0` before consuming these values if you need
+ * Always check `IsActive(GetXxxModel())` before consuming these values if you need
  * to distinguish "process is off" from "process is on but rate happens to be zero".
  * @{
  */
@@ -171,65 +171,67 @@ GetSinteringSources(const AnyMomentMethod<Thermo>& m) noexcept
 /**
  * @name Process activation flag queries
  *
- * Return the integer model flag for each physical process (0 = off, >0 = active
- * variant index).  These route through `model_X()` CRTP dispatchers in
- * `MomentMethodBase`, which return 0 for models that do not implement that
- * process (e.g. `GetSinteringModel` always returns 0 for all soot models).
+ * Return the strongly-typed process enum class for each physical process.
+ * These route through `model_X()` CRTP dispatchers in `MomentMethodBase`,
+ * which return `XxxModel::Off` for models that do not implement that process
+ * (e.g. `GetSinteringModel` always returns `SinteringModel::Off` for soot models).
  *
- * @par Interpretation of return values
- * - `0` — process is off (either not supported by the model type, or disabled
- *          at runtime via configuration).
- * - `1` — primary/standard model variant.
- * - `2` — alternative/extended model variant (e.g. BrookesMoss-Hall oxidation).
- *
- * @par Example
+ * @par Checking whether a process is active
+ * Use `MOM::IsActive()` from `ProcessFlags.hpp` for readable boolean tests:
  * @code
- *   if (MOM::GetOxidationModel(mom_) > 0) {
+ *   if (MOM::IsActive(MOM::GetOxidationModel(mom_))) {
  *       // oxidation is active — use operator splitting (see Splitting.hpp)
  *       MOM::GetSourcesWithoutOxidation(mom_, src_buf);
+ *   }
+ * @endcode
+ *
+ * @par Comparing to a specific variant
+ * @code
+ *   if (MOM::GetOxidationModel(mom_) == MOM::OxidationModel::Extended) {
+ *       // BrookesMoss-Hall extended oxidation variant
  *   }
  * @endcode
  * @{
  */
 
-/** @brief Returns the nucleation model flag (0 = off, >0 = active variant). */
+/** @brief Returns the nucleation model flag (`NucleationModel::Off` if not active). */
 template <ThermoMap Thermo>
-[[nodiscard]] inline int GetNucleationModel(const AnyMomentMethod<Thermo>& m) noexcept
+[[nodiscard]] inline NucleationModel GetNucleationModel(const AnyMomentMethod<Thermo>& m) noexcept
 {
     return std::visit([](const auto& mm) { return mm.model_nucleation(); }, m);
 }
 
-/** @brief Returns the surface-growth model flag (0 = off, >0 = active variant). */
+/** @brief Returns the surface-growth model flag (`SurfaceGrowthModel::Off` if not active). */
 template <ThermoMap Thermo>
-[[nodiscard]] inline int GetGrowthModel(const AnyMomentMethod<Thermo>& m) noexcept
+[[nodiscard]] inline SurfaceGrowthModel GetGrowthModel(const AnyMomentMethod<Thermo>& m) noexcept
 {
     return std::visit([](const auto& mm) { return mm.model_growth(); }, m);
 }
 
-/** @brief Returns the coagulation model flag (0 = off, >0 = active variant). */
+/** @brief Returns the coagulation model flag (`CoagulationModel::Off` if not active). */
 template <ThermoMap Thermo>
-[[nodiscard]] inline int GetCoagulationModel(const AnyMomentMethod<Thermo>& m) noexcept
+[[nodiscard]] inline CoagulationModel GetCoagulationModel(const AnyMomentMethod<Thermo>& m) noexcept
 {
     return std::visit([](const auto& mm) { return mm.model_coagulation(); }, m);
 }
 
-/** @brief Returns the condensation model flag (0 = off, >0 = active variant). */
+/** @brief Returns the condensation model flag (`CondensationModel::Off` if not active). */
 template <ThermoMap Thermo>
-[[nodiscard]] inline int GetCondensationModel(const AnyMomentMethod<Thermo>& m) noexcept
+[[nodiscard]] inline CondensationModel GetCondensationModel(const AnyMomentMethod<Thermo>& m) noexcept
 {
     return std::visit([](const auto& mm) { return mm.model_condensation(); }, m);
 }
 
-/** @brief Returns the oxidation model flag (0 = off, >0 = active variant). */
+/** @brief Returns the oxidation model flag (`OxidationModel::Off` if not active). */
 template <ThermoMap Thermo>
-[[nodiscard]] inline int GetOxidationModel(const AnyMomentMethod<Thermo>& m) noexcept
+[[nodiscard]] inline OxidationModel GetOxidationModel(const AnyMomentMethod<Thermo>& m) noexcept
 {
     return std::visit([](const auto& mm) { return mm.model_oxidation(); }, m);
 }
 
-/** @brief Returns the sintering model flag (0 = off, >0 = active; MetalOxide only). */
+/** @brief Returns the sintering model flag (`SinteringModel::Off` unless MetalOxide). */
 template <ThermoMap Thermo>
-[[nodiscard]] inline int GetSinteringModel(const AnyMomentMethod<Thermo>& m) noexcept
+[[nodiscard]] inline SinteringModel GetSinteringModel(const AnyMomentMethod<Thermo>& m) noexcept
 {
     return std::visit([](const auto& mm) { return mm.model_sintering(); }, m);
 }
@@ -262,7 +264,7 @@ template <ThermoMap Thermo>
  * - **Output / reporting**: use capability to decide whether to register `[ZF]`
  *   columns.  `MomentMethodReporter` already uses `ModelsOxidation<M>` for this;
  *   these functions provide the same information through `AnyMomentMethod`.
- * - **CFD hot path**: use `GetXxxModel() > 0` — it reflects the user's actual
+ * - **CFD hot path**: use `IsActive(GetXxxModel())` — it reflects the user's actual
  *   configuration and avoids wasting compute on a disabled process.
  * - **Static known type**: prefer `MOM::ModelsOxidation<MyModel>` directly.
  * @{

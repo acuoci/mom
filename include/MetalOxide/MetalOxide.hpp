@@ -464,16 +464,16 @@ public:
 
     // -- Model state queries ----------------------------------------------------
 
-    [[nodiscard]] int nucleation_model() const noexcept
+    [[nodiscard]] NucleationModel nucleation_model() const noexcept
     {
-        return static_cast<int>(nucleation_variant_);
+        return static_cast<NucleationModel>(static_cast<int>(nucleation_variant_));
     }
 
-    [[nodiscard]] int coagulation_model() const noexcept { return coagulation_model_; }
+    [[nodiscard]] CoagulationModel  coagulation_model()  const noexcept { return static_cast<CoagulationModel>(coagulation_model_);   }
 
-    [[nodiscard]] int condensation_model() const noexcept { return condensation_model_; }
+    [[nodiscard]] CondensationModel condensation_model() const noexcept { return static_cast<CondensationModel>(condensation_model_); }
 
-    [[nodiscard]] int sintering_model() const noexcept { return sintering_model_; }
+    [[nodiscard]] SinteringModel    sintering_model()    const noexcept { return static_cast<SinteringModel>(sintering_model_);       }
 
     [[nodiscard]] bool is_sintering_deferred() const noexcept { return is_sintering_deferred_; }
 

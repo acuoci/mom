@@ -378,75 +378,77 @@ public:
     /**
      * @name Per-process instance activation flags — CRTP dispatch with zero fallback
      *
-     * Each method returns the INTEGER MODEL FLAG (0 = off, >0 = active variant)
-     * configured by the user for the corresponding physical process IN THIS INSTANCE.
-     * The query detects at compile time whether `Derived` exposes the matching
-     * getter; if not, 0 (off) is returned.
+     * Each method returns the strongly-typed process enum class (e.g. `NucleationModel`,
+     * `OxidationModel`) configured by the user for the corresponding physical process
+     * IN THIS INSTANCE.  The query detects at compile time whether `Derived` exposes
+     * the matching getter; if not, `XxxModel::Off` is returned.
      *
      * @par This answers the INSTANCE question: "is process X currently enabled?"
      * The user might set `nucleation_model = 0` in the input file, causing
-     * `model_nucleation()` to return 0 even for a type that is structurally capable
-     * of nucleation.  To ask the TYPE question ("can this model type EVER produce
-     * nucleation sources?"), use `capability_nucleation()` instead — see below.
+     * `model_nucleation()` to return `NucleationModel::Off` even for a type that is
+     * structurally capable of nucleation.  To ask the TYPE question ("can this model
+     * type EVER produce nucleation sources?"), use `capability_nucleation()` instead
+     * — see below.
      *
      * @par Naming convention
-     * - `model_X()` (base dispatcher, this group) → reads instance flag, returns `int`
-     * - `nucleation_model()` / `oxidation_model()` / … (derived getter) → same `int`
+     * - `model_X()` (base dispatcher, this group) → reads instance flag, returns enum class
+     * - `nucleation_model()` / `oxidation_model()` / … (derived getter) → same enum class
+     * - `IsActive(model_X())` → convenience bool predicate (see `ProcessFlags.hpp`)
      * @{
      */
 
-    /** @brief Returns the nucleation model flag (0 = off, >0 = active variant). */
-    [[nodiscard, gnu::always_inline]] int model_nucleation() const noexcept
+    /** @brief Returns the nucleation model flag (`NucleationModel::Off` if not modelled). */
+    [[nodiscard, gnu::always_inline]] NucleationModel model_nucleation() const noexcept
     {
         if constexpr (requires(const Derived& d) { d.nucleation_model(); })
             return derived().nucleation_model();
         else
-            return 0;
+            return NucleationModel::Off;
     }
 
-    /** @brief Returns the surface-growth model flag (0 = off, >0 = active variant). */
-    [[nodiscard, gnu::always_inline]] int model_growth() const noexcept
+    /** @brief Returns the surface-growth model flag (`SurfaceGrowthModel::Off` if not modelled). */
+    [[nodiscard, gnu::always_inline]] SurfaceGrowthModel model_growth() const noexcept
     {
         if constexpr (requires(const Derived& d) { d.surface_growth_model(); })
             return derived().surface_growth_model();
         else
-            return 0;
+            return SurfaceGrowthModel::Off;
     }
 
-    /** @brief Returns the coagulation model flag (0 = off, >0 = active variant). */
-    [[nodiscard, gnu::always_inline]] int model_coagulation() const noexcept
+    /** @brief Returns the coagulation model flag (`CoagulationModel::Off` if not modelled). */
+    [[nodiscard, gnu::always_inline]] CoagulationModel model_coagulation() const noexcept
     {
         if constexpr (requires(const Derived& d) { d.coagulation_model(); })
             return derived().coagulation_model();
         else
-            return 0;
+            return CoagulationModel::Off;
     }
 
-    /** @brief Returns the condensation model flag (0 = off, >0 = active variant). */
-    [[nodiscard, gnu::always_inline]] int model_condensation() const noexcept
+    /** @brief Returns the condensation model flag (`CondensationModel::Off` if not modelled). */
+    [[nodiscard, gnu::always_inline]] CondensationModel model_condensation() const noexcept
     {
         if constexpr (requires(const Derived& d) { d.condensation_model(); })
             return derived().condensation_model();
         else
-            return 0;
+            return CondensationModel::Off;
     }
 
-    /** @brief Returns the oxidation model flag (0 = off, >0 = active variant). */
-    [[nodiscard, gnu::always_inline]] int model_oxidation() const noexcept
+    /** @brief Returns the oxidation model flag (`OxidationModel::Off` if not modelled). */
+    [[nodiscard, gnu::always_inline]] OxidationModel model_oxidation() const noexcept
     {
         if constexpr (requires(const Derived& d) { d.oxidation_model(); })
             return derived().oxidation_model();
         else
-            return 0;
+            return OxidationModel::Off;
     }
 
-    /** @brief Returns the sintering model flag (0 = off; non-zero for MetalOxide). */
-    [[nodiscard, gnu::always_inline]] int model_sintering() const noexcept
+    /** @brief Returns the sintering model flag (`SinteringModel::Off`; non-Off for MetalOxide only). */
+    [[nodiscard, gnu::always_inline]] SinteringModel model_sintering() const noexcept
     {
         if constexpr (requires(const Derived& d) { d.sintering_model(); })
             return derived().sintering_model();
         else
-            return 0;
+            return SinteringModel::Off;
     }
 
     /** @} */
@@ -468,14 +470,14 @@ public:
      *   constexpr bool can_oxidise = mm.capability_oxidation(); // true for HMOM/3Eq/BM
      *
      *   // Instance activation — depends on the user's input configuration:
-     *   const int oxi_flag = mm.model_oxidation(); // 0 if user wrote oxidation_model 0
+     *   OxidationModel oxi = mm.model_oxidation(); // Off if user wrote oxidation_model 0
      *
      *   // Use capability for structural decisions (output columns, static_assert):
      *   if constexpr (mm.capability_oxidation())
      *       register_oxidation_columns();           // compile-time branch
      *
      *   // Use activation for runtime decisions (should we do operator splitting?):
-     *   if (mm.model_oxidation() > 0)
+     *   if (IsActive(mm.model_oxidation()))
      *       apply_operator_splitting();             // runtime branch
      * @endcode
      *

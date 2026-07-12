@@ -318,9 +318,9 @@ void checkHMOMDictionarySetup()
     const auto& hmom = std::get<MOM::HMOM<MOM::BasicThermoData>>(model);
     require(hmom.is_active(), "HMOM model was not activated");
     require(hmom.precursor_species() == "C2H2", "HMOM PAH species was not applied");
-    require(hmom.nucleation_model() == 0, "HMOM nucleation flag was not applied");
-    require(hmom.oxidation_model() == 0, "HMOM oxidation flag was not applied");
-    require(hmom.coagulation_model() == 0, "HMOM coagulation flag was not applied");
+    require(hmom.nucleation_model() == MOM::NucleationModel::Off,  "HMOM nucleation flag was not applied");
+    require(hmom.oxidation_model()   == MOM::OxidationModel::Off,  "HMOM oxidation flag was not applied");
+    require(hmom.coagulation_model() == MOM::CoagulationModel::Off, "HMOM coagulation flag was not applied");
     require(hmom.thermophoretic_model() == 0, "HMOM thermophoretic flag was not applied");
     require(!hmom.gas_consumption(), "HMOM gas-consumption flag was not applied");
     require(!hmom.radiative_heat_transfer(), "HMOM radiation flag was not applied");
@@ -358,9 +358,9 @@ void checkThreeEquationsDictionarySetup()
     const auto& te = std::get<MOM::ThreeEquations<MOM::BasicThermoData>>(model);
     require(te.is_active(), "ThreeEquations model was not activated");
     require(te.precursor_species() == "C2H2", "ThreeEquations PAH species was not applied");
-    require(te.nucleation_model() == 0, "ThreeEquations nucleation flag was not applied");
-    require(te.oxidation_model() == 0, "ThreeEquations oxidation flag was not applied");
-    require(te.coagulation_model() == 0, "ThreeEquations coagulation flag was not applied");
+    require(te.nucleation_model() == MOM::NucleationModel::Off,  "ThreeEquations nucleation flag was not applied");
+    require(te.oxidation_model()   == MOM::OxidationModel::Off,  "ThreeEquations oxidation flag was not applied");
+    require(te.coagulation_model() == MOM::CoagulationModel::Off, "ThreeEquations coagulation flag was not applied");
     require(te.thermophoretic_model() == 0, "ThreeEquations thermophoretic flag was not applied");
     require(!te.gas_consumption(), "ThreeEquations gas-consumption flag was not applied");
     require(!te.radiative_heat_transfer(), "ThreeEquations radiation flag was not applied");
@@ -401,9 +401,9 @@ void checkBrookesMossDictionarySetup()
     require(bm.is_active(), "BrookesMoss model was not activated");
     require(bm.precursor_species() == "C2H2", "BrookesMoss precursor species was not applied");
     require(bm.sg_species() == "C2H2", "BrookesMoss surface-growth species was not applied");
-    require(bm.nucleation_model() == 1, "BrookesMoss nucleation flag was not applied");
-    require(bm.oxidation_model() == 0, "BrookesMoss oxidation flag was not applied");
-    require(bm.coagulation_model() == 0, "BrookesMoss coagulation flag was not applied");
+    require(bm.nucleation_model() == MOM::NucleationModel::Standard, "BrookesMoss nucleation flag was not applied");
+    require(bm.oxidation_model()   == MOM::OxidationModel::Off,       "BrookesMoss oxidation flag was not applied");
+    require(bm.coagulation_model() == MOM::CoagulationModel::Off,     "BrookesMoss coagulation flag was not applied");
     require(bm.thermophoretic_model() == 0, "BrookesMoss thermophoretic flag was not applied");
     require(bm.gas_consumption(), "BrookesMoss gas-consumption flag was not applied");
     require(!bm.radiative_heat_transfer(), "BrookesMoss radiation flag was not applied");
@@ -453,10 +453,10 @@ void checkMetalOxideDictionarySetup()
     requireNear(metaloxide.solid_density(), 4500.0, "MetalOxide solid density was not applied");
     requireNear(metaloxide.solid_formula_units_per_precursor(), 2.0,
                 "MetalOxide formula units per precursor was not applied");
-    require(metaloxide.nucleation_model() == 2, "MetalOxide nucleation flag was not applied");
-    require(metaloxide.sintering_model() == 0, "MetalOxide sintering flag was not applied");
-    require(metaloxide.coagulation_model() == 1, "MetalOxide coagulation flag was not applied");
-    require(metaloxide.condensation_model() == 0, "MetalOxide condensation flag was not applied");
+    require(metaloxide.nucleation_model()  == MOM::NucleationModel::Extended,  "MetalOxide nucleation flag was not applied");
+    require(metaloxide.sintering_model()   == MOM::SinteringModel::Off,         "MetalOxide sintering flag was not applied");
+    require(metaloxide.coagulation_model() == MOM::CoagulationModel::Standard,  "MetalOxide coagulation flag was not applied");
+    require(metaloxide.condensation_model()== MOM::CondensationModel::Off,      "MetalOxide condensation flag was not applied");
     require(metaloxide.thermophoretic_model() == 0, "MetalOxide thermophoretic flag was not applied");
     require(!metaloxide.gas_consumption(), "MetalOxide gas-consumption flag was not applied");
     requireNear(metaloxide.schmidt_number(), 39.0, "MetalOxide Schmidt number was not applied");
