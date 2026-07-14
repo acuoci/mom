@@ -1,4 +1,4 @@
-# OpenSMOKE++ MOM - Method of Moments Library
+# MOM - Method of Moments Library
 
 > Production C++20/23 source-term kernels for particle population models in CFD solvers.
 
