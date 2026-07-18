@@ -199,7 +199,8 @@ void HMOM6<Thermo>::ApplyConfig(const Config& cfg)
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::SetupFromConfig(const Config& cfg)
 {
-    // TODO: implement
+    ApplyConfig(cfg);
+    PrintSummary();
 }
 
 // ===========================================================================
