@@ -10,6 +10,7 @@
 #pragma once
 
 #include <string>
+#include "ProcessFlags.hpp"
 
 namespace MOM
 {
@@ -17,14 +18,15 @@ namespace MOM
 /**
  * @brief Common activation, transport, and diagnostic controls.
  *
- * @tparam ThermophoreticDefault Default thermophoretic model index for the variant.
+ * @tparam ThermophoreticDefault Default thermophoretic model for the variant
+ *         (`ThermophoreticModel::Off` or `ThermophoreticModel::Standard`).
  */
-template <int ThermophoreticDefault> struct CommonConfig
+template <ThermophoreticModel ThermophoreticDefault> struct CommonConfig
 {
     bool is_active = true; //!< Enable this variant.
 
-    int thermophoretic_model = ThermophoreticDefault; //!< Thermophoretic model index.
-    double schmidt_number    = 50.;                   //!< Schmidt number for moment transport.
+    ThermophoreticModel thermophoretic_model = ThermophoreticDefault; //!< Thermophoretic model.
+    double schmidt_number                    = 50.;                   //!< Schmidt number for moment transport.
 
     bool debug_mode = false; //!< Verbose diagnostic output.
 };
@@ -63,11 +65,11 @@ struct PAHConfig : SootDensityConfig
 /** @brief Common binary soot-process switches. */
 struct BinarySootProcessConfig
 {
-    int nucleation_model     = 1; //!< Nucleation model.
-    int condensation_model   = 1; //!< Condensation model.
-    int surface_growth_model = 1; //!< Surface growth model.
-    int oxidation_model      = 1; //!< Oxidation model.
-    int coagulation_model    = 1; //!< Coagulation model.
+    NucleationModel    nucleation_model     = NucleationModel::Standard;    //!< Nucleation model.
+    CondensationModel  condensation_model   = CondensationModel::Standard;  //!< Condensation model.
+    SurfaceGrowthModel surface_growth_model = SurfaceGrowthModel::Standard; //!< Surface growth model.
+    OxidationModel     oxidation_model      = OxidationModel::Standard;     //!< Oxidation model.
+    CoagulationModel   coagulation_model    = CoagulationModel::Standard;   //!< Coagulation model.
 };
 
 /** @brief Common sticking-coefficient controls for PAH collision models. */
@@ -88,10 +90,10 @@ struct CollisionEnhancementConfig
 /** @brief Process switches for BrookesMoss/BrookesMoss-Hall. */
 struct BrookesMossProcessConfig
 {
-    int nucleation_model     = 1; //!< 0=off, 1=BrookesMoss, 2=BrookesMossHall.
-    int surface_growth_model = 1; //!< Surface growth model index.
-    int oxidation_model      = 1; //!< 0=off, 1=BrookesMoss, 2=BrookesMossHall.
-    int coagulation_model    = 1; //!< Coagulation model index.
+    NucleationModel    nucleation_model     = NucleationModel::Standard;    //!< Off=0, Standard=BrookesMoss, Extended=BrookesMossHall.
+    SurfaceGrowthModel surface_growth_model = SurfaceGrowthModel::Standard; //!< Surface growth model.
+    OxidationModel     oxidation_model      = OxidationModel::Standard;     //!< Off=0, Standard=BrookesMoss, Extended=BrookesMossHall.
+    CoagulationModel   coagulation_model    = CoagulationModel::Standard;   //!< Coagulation model.
 };
 
 } // namespace MOM

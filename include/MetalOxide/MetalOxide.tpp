@@ -1263,7 +1263,8 @@ MetalOxide<Thermo>::ParseConfig(DictType& dict)
     if (dict.CheckOption("@SinteringModel"))    dict.ReadInt("@SinteringModel",    cfg.sintering_model);
     if (dict.CheckOption("@CoagulationModel"))  dict.ReadInt("@CoagulationModel",  cfg.coagulation_model);
     if (dict.CheckOption("@CondensationModel")) dict.ReadInt("@CondensationModel", cfg.condensation_model);
-    if (dict.CheckOption("@ThermophoreticModel")) dict.ReadInt("@ThermophoreticModel", cfg.thermophoretic_model);
+    if (dict.CheckOption("@ThermophoreticModel"))
+        { int _tmp; dict.ReadInt("@ThermophoreticModel", _tmp); cfg.thermophoretic_model = static_cast<ThermophoreticModel>(_tmp); }
 
     if (dict.CheckOption("@MinimumFormulaUnits"))
     {

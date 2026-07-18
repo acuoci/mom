@@ -619,8 +619,8 @@ static bool validateBrookesMossHallConfigDefaults()
     try
     {
         MOM::BrookesMoss<MOM::BasicThermoData>::Config cfg;
-        cfg.nucleation_model = 2;
-        cfg.oxidation_model = 2;
+        cfg.nucleation_model = MOM::NucleationModel::Extended; // BrookesMossHall
+        cfg.oxidation_model  = MOM::OxidationModel::Extended;  // BrookesMossHall
 
         MOM::BrookesMoss<MOM::BasicThermoData> from_config(th);
         from_config.SetupFromConfig(cfg);
@@ -708,8 +708,11 @@ static bool validateBrookesMossInvalidModelFlags()
 
     try
     {
+        // D1: direct integer assignment (cfg.nucleation_model = 99) is now a compile
+        // error — the field is a strongly-typed enum.  The runtime validator in
+        // SetNucleation(int) is still exercised via an explicit static_cast.
         MOM::BrookesMoss<MOM::BasicThermoData>::Config cfg;
-        cfg.nucleation_model = 99;
+        cfg.nucleation_model = static_cast<MOM::NucleationModel>(99);
 
         MOM::BrookesMoss<MOM::BasicThermoData> model(th);
         model.SetupFromConfig(cfg);

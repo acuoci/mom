@@ -160,7 +160,7 @@ public:
      *
      * @note No external dependencies: only standard C++ types.
      */
-    struct Config : CommonConfig<1>, GasConsumptionConfig<false>
+    struct Config : CommonConfig<ThermophoreticModel::Standard>, GasConsumptionConfig<false>
     {
         // ---- Activation / precursor ----------------------------------------
         std::string precursor_species = "none"; //!< Gas precursor species.

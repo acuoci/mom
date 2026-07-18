@@ -1099,11 +1099,11 @@ void ThreeEquations<Thermo>::ApplyConfig(const Config& cfg)
     this->SetGasConsumption(cfg.gas_consumption);
     this->SetGasClosureDummySpecies(cfg.gas_closure_dummy_species);
 
-    SetNucleation(cfg.nucleation_model);
-    SetSurfaceGrowth(cfg.surface_growth_model);
-    SetOxidation(cfg.oxidation_model);
-    SetCondensation(cfg.condensation_model);
-    SetCoagulation(cfg.coagulation_model);
+    SetNucleation(static_cast<int>(cfg.nucleation_model));
+    SetSurfaceGrowth(static_cast<int>(cfg.surface_growth_model));
+    SetOxidation(static_cast<int>(cfg.oxidation_model));
+    SetCondensation(static_cast<int>(cfg.condensation_model));
+    SetCoagulation(static_cast<int>(cfg.coagulation_model));
     this->SetThermophoreticModel(cfg.thermophoretic_model);
     SetSurfaceChemistryModel(cfg.surface_chemistry_model);
 
@@ -1290,12 +1290,18 @@ ThreeEquations<Thermo>::ParseConfig(DictType& dict)
     if (dict.CheckOption("@ThreeEquations"))
         dict.ReadBool("@ThreeEquations", cfg.is_active);
 
-    if (dict.CheckOption("@NucleationModel"))    dict.ReadInt("@NucleationModel",    cfg.nucleation_model);
-    if (dict.CheckOption("@SurfaceGrowthModel")) dict.ReadInt("@SurfaceGrowthModel", cfg.surface_growth_model);
-    if (dict.CheckOption("@OxidationModel"))     dict.ReadInt("@OxidationModel",     cfg.oxidation_model);
-    if (dict.CheckOption("@CondensationModel"))  dict.ReadInt("@CondensationModel",  cfg.condensation_model);
-    if (dict.CheckOption("@CoagulationModel"))   dict.ReadInt("@CoagulationModel",   cfg.coagulation_model);
-    if (dict.CheckOption("@ThermophoreticModel")) dict.ReadInt("@ThermophoreticModel", cfg.thermophoretic_model);
+    if (dict.CheckOption("@NucleationModel"))
+        { int _tmp; dict.ReadInt("@NucleationModel",    _tmp); cfg.nucleation_model    = static_cast<NucleationModel>(_tmp);    }
+    if (dict.CheckOption("@SurfaceGrowthModel"))
+        { int _tmp; dict.ReadInt("@SurfaceGrowthModel", _tmp); cfg.surface_growth_model = static_cast<SurfaceGrowthModel>(_tmp); }
+    if (dict.CheckOption("@OxidationModel"))
+        { int _tmp; dict.ReadInt("@OxidationModel",     _tmp); cfg.oxidation_model      = static_cast<OxidationModel>(_tmp);     }
+    if (dict.CheckOption("@CondensationModel"))
+        { int _tmp; dict.ReadInt("@CondensationModel",  _tmp); cfg.condensation_model   = static_cast<CondensationModel>(_tmp);  }
+    if (dict.CheckOption("@CoagulationModel"))
+        { int _tmp; dict.ReadInt("@CoagulationModel",   _tmp); cfg.coagulation_model    = static_cast<CoagulationModel>(_tmp);   }
+    if (dict.CheckOption("@ThermophoreticModel"))
+        { int _tmp; dict.ReadInt("@ThermophoreticModel", _tmp); cfg.thermophoretic_model = static_cast<ThermophoreticModel>(_tmp); }
 
     if (dict.CheckOption("@SurfaceChemistryModel"))
     {

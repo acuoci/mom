@@ -127,7 +127,7 @@ public:
      *
      * @note No external dependencies: only standard C++ types.
      */
-    struct Config : CommonConfig<0>,
+    struct Config : CommonConfig<ThermophoreticModel::Off>,
                     BrookesMossProcessConfig,
                     GasConsumptionConfig<false>,
                     SootDensityConfig,
