@@ -863,7 +863,61 @@ void HMOM6<Thermo>::SootNucleationM7()
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::SootSurfaceGrowthM7()
 {
-    // TODO: implement
+    // Surface growth adds volume δV = VC2_ per C2H2 reaction at an active surface site.
+    // General source for the normalised moment M_{x,y,norm} (Mueller 2009, Eq. 37):
+    //
+    //   dṀ_{x,y}/dt|_sg = ksg · χ · δV · [ x · M_{x-1, y+1}
+    //                                       + y · K_frac · M_{x+Av, y+As+1} ]
+    //
+    //   source_growth_(i) = dṀ_{x,y}/dt|_sg / (V0^x · S0^y · Nav)
+    //
+    // where χ = alpha_ * surface_density_ (active-site surface density, corrected by
+    // the Appel/Frenklach alpha factor), K_frac = K_fractal_, Av = Av_fractal_,
+    // As = As_fractal_.
+    //
+    // Index mapping: 0→M00, 1→M10, 2→M01, 3→M20, 4→M11, 5→M02, 6→N0.
+    //
+    // M00 (x=0, y=0): both prefactors x and y vanish → source = 0.
+    // N0 (small-mode number): treated identically to HMOM4 — small-mode particles at
+    //   the fixed point (V0, S0) are swept out at rate ksg·χ·S0·N0.
+
+    this->source_growth_.setZero();
+    if (!HasSoot())
+        return;
+
+    const double chi  = alpha_ * surface_density_;
+    const double coeff = ksg_ * chi * VC2_;          // [ksg · χ · δV]
+    const double Nav  = this->Nav_mol_;
+
+    // --- M00 (x=0, y=0): zero (particle number conserved by surface growth)
+    this->source_growth_(0) = 0.;
+
+    // --- M10 (x=1, y=0): 1·M_{0,1} / (V0·Nav)
+    this->source_growth_(1) =
+        coeff * GetMoment(0., 1.) / Nav / V0_;
+
+    // --- M01 (x=0, y=1): 1·K_frac·M_{Av_f, As_f+2} / (S0·Nav)
+    this->source_growth_(2) =
+        coeff * K_fractal_ * GetMoment(Av_fractal_, As_fractal_ + 2.) / Nav / S0_;
+
+    // --- M20 (x=2, y=0): 2·M_{1,1} / (V0²·Nav)
+    this->source_growth_(3) =
+        coeff * 2. * GetMoment(1., 1.) / Nav / (V0_ * V0_);
+
+    // --- M11 (x=1, y=1): [M_{0,2} + K_frac·M_{Av_f+1, As_f+2}] / (V0·S0·Nav)
+    this->source_growth_(4) =
+        coeff * (GetMoment(0., 2.) + K_fractal_ * GetMoment(Av_fractal_ + 1., As_fractal_ + 2.))
+        / Nav / (V0_ * S0_);
+
+    // --- M02 (x=0, y=2): 2·K_frac·M_{Av_f, As_f+3} / (S0²·Nav)
+    this->source_growth_(5) =
+        coeff * 2. * K_fractal_ * GetMoment(Av_fractal_, As_fractal_ + 3.) / Nav / (S0_ * S0_);
+
+    // --- N0 (small-mode, index 6): fixed-point sweep-out rate — same as HMOM4 index 3.
+    //   Small particles at (V0, S0) grow away from the fixed node at rate ksg·χ·S0 per particle.
+    //   Note: no VC2_ factor here; this is the phenomenological sweep-out rate from the
+    //   HMOM delta-function approximation (Mueller 2009, Eq. 31).
+    this->source_growth_(6) = -ksg_ * chi * S0_ * N0_ / Nav;
 }
 
 template <ThermoMap Thermo>
