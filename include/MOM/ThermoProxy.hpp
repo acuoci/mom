@@ -35,6 +35,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <concepts>
 #include <string>
 #include <string_view>
@@ -147,22 +148,46 @@ struct BasicThermoData
     }
 
     /** @brief Molecular weight of species @p i [kg/kmol]. */
-    [[nodiscard]] double MolecularWeight(unsigned i) const noexcept { return mw[i]; }
+    [[nodiscard]] double MolecularWeight(unsigned i) const noexcept
+    {
+        assert(i < mw.size() && "BasicThermoData::MolecularWeight — index out of range");
+        return mw[i];
+    }
 
     /** @brief Number of carbon atoms per molecule of species @p i. */
-    [[nodiscard]] double NumberOfCarbonAtoms(unsigned i) const noexcept { return nc[i]; }
+    [[nodiscard]] double NumberOfCarbonAtoms(unsigned i) const noexcept
+    {
+        assert(i < nc.size() && "BasicThermoData::NumberOfCarbonAtoms — index out of range");
+        return nc[i];
+    }
 
     /** @brief Number of hydrogen atoms per molecule of species @p i. */
-    [[nodiscard]] double NumberOfHydrogenAtoms(unsigned i) const noexcept { return nh[i]; }
+    [[nodiscard]] double NumberOfHydrogenAtoms(unsigned i) const noexcept
+    {
+        assert(i < nh.size() && "BasicThermoData::NumberOfHydrogenAtoms — index out of range");
+        return nh[i];
+    }
 
     /** @brief Number of oxygen atoms per molecule of species @p i. */
-    [[nodiscard]] double NumberOfOxygenAtoms(unsigned i) const noexcept { return no[i]; }
+    [[nodiscard]] double NumberOfOxygenAtoms(unsigned i) const noexcept
+    {
+        assert(i < no.size() && "BasicThermoData::NumberOfOxygenAtoms — index out of range");
+        return no[i];
+    }
 
     /** @brief Number of nitrogen atoms per molecule of species @p i. */
-    [[nodiscard]] double NumberOfNitrogenAtoms(unsigned i) const noexcept { return nn[i]; }
+    [[nodiscard]] double NumberOfNitrogenAtoms(unsigned i) const noexcept
+    {
+        assert(i < nn.size() && "BasicThermoData::NumberOfNitrogenAtoms — index out of range");
+        return nn[i];
+    }
 
     /** @brief Number of titanium atoms per molecule of species @p i (0 for non-Ti species). */
-    [[nodiscard]] double NumberOfTitaniumAtoms(unsigned i) const noexcept { return nti[i]; }
+    [[nodiscard]] double NumberOfTitaniumAtoms(unsigned i) const noexcept
+    {
+        assert(i < nti.size() && "BasicThermoData::NumberOfTitaniumAtoms — index out of range");
+        return nti[i];
+    }
 };
 
 static_assert(ThermoMap<BasicThermoData>, "BasicThermoData must satisfy ThermoMap");

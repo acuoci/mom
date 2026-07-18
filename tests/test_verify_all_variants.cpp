@@ -792,13 +792,16 @@ static bool validateIntegerModelFlagValidation()
                    });
     }();
 
-    const bool thermophoretic_ok =
-        throws_invalid_argument(
-            [&]
-            {
-                MOM::HMOM<MOM::BasicThermoData> model(th_soot);
-                model.SetThermophoreticModel(99);
-            });
+    // D4: SetThermophoreticModel(int) is now noexcept — it silently casts any
+    // integer to ThermophoreticModel without throwing.  Out-of-range validation
+    // belongs in ApplyConfig() / ParseConfig(), which have error-reporting context.
+    // The test therefore verifies that the setter does NOT throw (noexcept contract).
+    const bool thermophoretic_ok = !throws_invalid_argument(
+        [&]
+        {
+            MOM::HMOM<MOM::BasicThermoData> model(th_soot);
+            model.SetThermophoreticModel(99);  // should silently accept (noexcept)
+        });
 
     const bool ok = hmom_ok && three_equations_ok && metaloxide_ok && thermophoretic_ok;
 
@@ -812,8 +815,8 @@ static bool validateIntegerModelFlagValidation()
                       ? "  [PASS] MetalOxide rejects invalid integer/string model flags\n"
                       : "  [FAIL] MetalOxide accepted at least one invalid model flag\n");
     std::cout << (thermophoretic_ok
-                      ? "  [PASS] Shared thermophoretic model rejects invalid integer flags\n"
-                      : "  [FAIL] Shared thermophoretic model accepted an invalid integer flag\n");
+                      ? "  [PASS] Shared thermophoretic setter is noexcept (invalid int silently cast; validation deferred to ParseConfig)\n"
+                      : "  [FAIL] Shared thermophoretic setter unexpectedly threw on an integer flag\n");
 
     return ok;
 }
