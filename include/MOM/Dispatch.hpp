@@ -106,9 +106,9 @@ inline void SetMoments(AnyMomentMethod<Thermo>& m, std::span<const double> momen
 
 /** @brief Computes all source terms and gas-phase consumption. */
 template <ThermoMap Thermo>
-inline void Compute(AnyMomentMethod<Thermo>& m)
+inline void Compute(AnyMomentMethod<Thermo>& m) noexcept
 {
-    std::visit([](auto& mm) { mm.ComputeSources(); }, m);
+    std::visit([](auto& mm) noexcept { mm.ComputeSources(); }, m);
 }
 
 /**
