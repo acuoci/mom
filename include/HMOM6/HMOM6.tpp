@@ -841,7 +841,23 @@ void HMOM6<Thermo>::SootKineticConstants()
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::SootNucleationM7()
 {
-    // TODO: implement
+    this->source_nucleation_.setZero();
+
+    // Nucleation rate: J = 0.5 * β_N * [DIMER]²  [particles/m³/s]
+    // Normalised source for M_{x,y,norm} = M_{x,y} / (V0^x · S0^y · Nav):
+    //   d(M_{x,y,norm})/dt|_nuc = J · (V0^x · S0^y) / (V0^x · S0^y · Nav) = J / Nav
+    //
+    // The factor of V0^x · S0^y cancels for every (x,y), so all seven normalised
+    // moment sources from nucleation are identical — including N0 (nucleated
+    // particles always enter the small mode at (V0, S0)).
+    double nuc_N0 = 0.;
+    if (conc_DIMER_ > 0. && betaN_ > 0. && std::isfinite(conc_DIMER_) && std::isfinite(betaN_))
+        nuc_N0 = 0.5 * betaN_ * conc_DIMER_ * conc_DIMER_ * this->Nav_mol_;
+    if (!std::isfinite(nuc_N0) || nuc_N0 < 0.)
+        nuc_N0 = 0.;
+
+    for (unsigned i = 0; i < 7u; ++i)
+        this->source_nucleation_(i) = nuc_N0;
 }
 
 template <ThermoMap Thermo>
