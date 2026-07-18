@@ -516,28 +516,129 @@ void HMOM6<Thermo>::GetMoments()
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::ComputeMOMICCoefficients()
 {
-    // TODO: implement
+    momic_valid_ = false;
+    momic_coeffs_.fill(0.);
+
+    // All six large-mode moments must be strictly positive so that their
+    // logarithms are finite.  kMOMICEps (= 1e-300) guards against log(0).
+    if (L00_ < kMOMICEps || L10_ < kMOMICEps || L01_ < kMOMICEps ||
+        L20_ < kMOMICEps || L11_ < kMOMICEps || L02_ < kMOMICEps)
+        return;
+
+    const double lnL00 = std::log(L00_);
+    const double lnL10 = std::log(L10_);
+    const double lnL01 = std::log(L01_);
+    const double lnL20 = std::log(L20_);
+    const double lnL11 = std::log(L11_);
+    const double lnL02 = std::log(L02_);
+
+    // Analytical closed-form solution of the 6x6 linear system
+    //   ln(L_{x,y}) = p(x,y)   at  (x,y) ∈ {(0,0),(1,0),(0,1),(2,0),(1,1),(0,2)}
+    //
+    // Polynomial basis (Mueller 2009, R=2, Eq. 6):
+    //   p(x,y) = a00 + a10·y + a11·x + a20·y² + a21·x·y + a22·x²
+    //
+    // Evaluation at the six integer moment orders gives the system:
+    //   p(0,0) = a00                                    = lnL00  ...(1)
+    //   p(1,0) = a00 +      a11 +           a22         = lnL10  ...(2)
+    //   p(0,1) = a00 + a10 +      a20                  = lnL01  ...(3)
+    //   p(2,0) = a00 +    2·a11 +         4·a22         = lnL20  ...(4)
+    //   p(1,1) = a00 + a10 + a11 + a20 + a21 + a22     = lnL11  ...(5)
+    //   p(0,2) = a00 + 2·a10 +    4·a20                = lnL02  ...(6)
+    //
+    // Solution:
+    //   From (1):           a00 = lnL00
+    //   From (4)-2·(2):     a22 = (lnL00 - 2·lnL10 + lnL20) / 2
+    //   From (2):           a11 = lnL10 - lnL00 - a22
+    //   From (6)-2·(3):     a20 = (lnL00 - 2·lnL01 + lnL02) / 2
+    //   From (3):           a10 = lnL01 - lnL00 - a20
+    //   From (5):           a21 = lnL11 - a00 - a10 - a11 - a20 - a22
+
+    const double a00 = lnL00;
+    const double a22 = 0.5 * (lnL00 - 2. * lnL10 + lnL20);
+    const double a11 = lnL10 - lnL00 - a22;
+    const double a20 = 0.5 * (lnL00 - 2. * lnL01 + lnL02);
+    const double a10 = lnL01 - lnL00 - a20;
+    const double a21 = lnL11 - a00 - a10 - a11 - a20 - a22;
+
+    // All coefficients must be finite (guards against degenerate L distributions).
+    if (!std::isfinite(a00) || !std::isfinite(a10) || !std::isfinite(a11) ||
+        !std::isfinite(a20) || !std::isfinite(a21) || !std::isfinite(a22))
+        return;
+
+    momic_coeffs_[0] = a00;  // a00
+    momic_coeffs_[1] = a10;  // a10  (coefficient of y)
+    momic_coeffs_[2] = a11;  // a11  (coefficient of x)
+    momic_coeffs_[3] = a20;  // a20  (coefficient of y²)
+    momic_coeffs_[4] = a21;  // a21  (coefficient of x·y)
+    momic_coeffs_[5] = a22;  // a22  (coefficient of x²)
+    momic_valid_ = true;
 }
 
 template <ThermoMap Thermo>
 double HMOM6<Thermo>::MOMICPolynomial(double x, double y) const noexcept
 {
-    // TODO: implement
-    return 0.;
+    // p(x,y) = a00 + a10·y + a11·x + a20·y² + a21·x·y + a22·x²
+    // momic_coeffs_: [0]=a00, [1]=a10, [2]=a11, [3]=a20, [4]=a21, [5]=a22
+    return momic_coeffs_[0]
+         + momic_coeffs_[1] * y
+         + momic_coeffs_[2] * x
+         + momic_coeffs_[3] * y * y
+         + momic_coeffs_[4] * x * y
+         + momic_coeffs_[5] * x * x;
 }
 
 template <ThermoMap Thermo>
 double HMOM6<Thermo>::GetMoment(double x, double y) const noexcept
 {
-    // TODO: implement
-    return 0.;
+    if (!HasSoot())
+        return 0.;
+
+    double moment = 0.;
+
+    // Small-mode (delta function at V0, S0) contribution: N0 · V0^x · S0^y
+    if (N0_ > 0.)
+    {
+        const double small = N0_ * SafePowPositive(V0_, x) * SafePowPositive(S0_, y);
+        if (std::isfinite(small))
+            moment += small;
+    }
+
+    // Large-mode (MOMIC polynomial) contribution: exp(p(x, y))
+    if (momic_valid_)
+    {
+        const double lp = MOMICPolynomial(x, y);
+        // Guard against overflow (exp > ~DBL_MAX) and underflow (negligible).
+        double large = 0.;
+        if      (lp >  700.) large = std::exp(700.);
+        else if (lp > -700.) large = std::exp(lp);
+        // lp <= -700 → large ≈ 0, already initialised to 0.
+        if (std::isfinite(large))
+            moment += large;
+    }
+
+    if (!std::isfinite(moment) || moment < 0.)
+        return 0.;
+    return moment;
 }
 
 template <ThermoMap Thermo>
 double HMOM6<Thermo>::GetMissingMoment(double x, double y) const noexcept
 {
-    // TODO: implement
-    return 0.;
+    // Large-mode only: exp(p(x, y)).
+    // Returns 0 when soot is absent or the MOMIC system could not be solved.
+    if (!HasSoot() || !momic_valid_)
+        return 0.;
+
+    const double lp = MOMICPolynomial(x, y);
+    double moment = 0.;
+    if      (lp >  700.) moment = std::exp(700.);
+    else if (lp > -700.) moment = std::exp(lp);
+    // lp <= -700 → negligible large-mode contribution → moment stays 0.
+
+    if (!std::isfinite(moment) || moment < 0.)
+        return 0.;
+    return moment;
 }
 
 // ===========================================================================
@@ -547,15 +648,19 @@ double HMOM6<Thermo>::GetMissingMoment(double x, double y) const noexcept
 template <ThermoMap Thermo>
 bool HMOM6<Thermo>::HasSoot() const noexcept
 {
-    // TODO: implement
-    return false;
+    return (M00_ > kSootNumberFloor && M10_ > kSootVolumeFloor && M01_ > kSootSurfaceFloor &&
+            std::isfinite(M00_) && std::isfinite(M10_) && std::isfinite(M01_));
 }
 
 template <ThermoMap Thermo>
 double HMOM6<Thermo>::SafePowPositive(double x, double a) const noexcept
 {
-    // TODO: implement
-    return 0.;
+    if (!std::isfinite(x) || x <= 0.)
+        return 0.;
+    const double y = a * std::log(x);
+    if (y >  700.) return std::exp(700.);
+    if (y < -700.) return 0.;
+    return std::exp(y);
 }
 
 // ===========================================================================
