@@ -78,11 +78,13 @@
  * @endcode
  *
  * @par Functions provided
- * - `GetOxidationSources`           — zero-copy span of oxidation-only moment sources
  * - `GetSourcesWithoutOxidation`    — zero-copy span: total − oxidation (internal cache)
  * - `GetOxidationRateCoefficients`  — zero-copy span: κ_i [1/s] (internal cache)
  * - `GetOmegaGasOxidation`          — zero-copy span of oxidation-only gas-phase sources
  * - `FillOmegaGasWithoutOxidation`  — writes total gas − oxidation into caller buffer
+ *
+ * @note `GetOxidationSources` (zero-copy span of the raw oxidation source vector) lives
+ *       in `Sources.hpp` alongside the other per-process source accessors.
  */
 
 #include <algorithm>   // std::copy, std::min
@@ -97,22 +99,6 @@ namespace MOM
  * @name Operator-splitting — moment-space functions
  * @{
  */
-
-/**
- * @brief Returns a zero-copy span over the **oxidation-only** moment source vector.
- *
- * Points directly into the model's internal oxidation source storage. For
- * models without oxidation, the returned span is the standard zero fallback.
- *
- * @pre  `ComputeSources()` must have been called at the current state.
- * @return Span of size `n_equations`; valid until next `ComputeSources()`.
- */
-template <ThermoMap Thermo>
-[[nodiscard]] inline std::span<const double>
-GetOxidationSources(const AnyMomentMethod<Thermo>& m) noexcept
-{
-    return std::visit([](const auto& mm) { return mm.sources_oxidation(); }, m);
-}
 
 /**
  * @brief Returns a zero-copy span over `source_all[i] - source_oxidation[i]`.
