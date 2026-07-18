@@ -44,6 +44,7 @@
 #include "AnyMomentMethod.hpp"
 #include "Utilities/OutputFileColumns.h"
 
+#include <cassert>
 #include <cmath>
 #include <numbers>
 #include <numeric>
@@ -222,6 +223,7 @@ public:
     requires HasReconstructedNDF<Model>
     void WriteHeaderLineReconstructedNDF(const Model& model, unsigned precision = 16)
     {
+        assert(out_ != nullptr && "MomentMethodReporter: WriteHeaderLineReconstructedNDF called on a disconnected reporter (out_ is null).");
         WriteHeaderLineReconstructedNDF(model, *out_, precision);
     }
 
@@ -229,6 +231,7 @@ public:
     void WriteHeaderLineReconstructedNDF(const AnyMomentMethod<Thermo>& any,
                                          unsigned precision = 16)
     {
+        assert(out_ != nullptr && "MomentMethodReporter: WriteHeaderLineReconstructedNDF called on a disconnected reporter (out_ is null).");
         WriteHeaderLineReconstructedNDF(any, *out_, precision);
     }
 
@@ -240,6 +243,7 @@ public:
                                double vmax_nm3                = 1.0e6,
                                bool   use_regularized_moments = false)
     {
+        assert(out_ != nullptr && "MomentMethodReporter: WriteReconstructedNDF called on a disconnected reporter (out_ is null).");
         WriteReconstructedNDF(model, *out_, nv, vmin_nm3, vmax_nm3, use_regularized_moments);
     }
 
@@ -250,6 +254,7 @@ public:
                                double vmax_nm3                = 1.0e6,
                                bool   use_regularized_moments = false)
     {
+        assert(out_ != nullptr && "MomentMethodReporter: WriteReconstructedNDF called on a disconnected reporter (out_ is null).");
         WriteReconstructedNDF(any, *out_, nv, vmin_nm3, vmax_nm3, use_regularized_moments);
     }
 
@@ -281,6 +286,7 @@ private:
 template <MomentMethod Model>
 void MomentMethodReporter::WriteHeader(const Model& model, unsigned precision)
 {
+    assert(out_ != nullptr && "MomentMethodReporter: WriteHeader called on a disconnected reporter (out_ is null).");
     constexpr unsigned N = Model::n_equations;
 
     // [ZF] marks columns backed by the base-class zero fallback for this variant.
@@ -338,6 +344,7 @@ void MomentMethodReporter::WriteHeader(const Model& model, unsigned precision)
 
 template <MomentMethod Model> void MomentMethodReporter::WriteRow(const Model& model)
 {
+    assert(out_ != nullptr && "MomentMethodReporter: WriteRow called on a disconnected reporter (out_ is null).");
     // Row-mode callback for optional variant columns.
     auto add_val = [&](std::string_view /*unused_in_row*/, double value)
     {

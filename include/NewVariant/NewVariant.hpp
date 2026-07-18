@@ -172,8 +172,8 @@ public:
 
     NewVariant(const NewVariant&)            = delete;
     NewVariant& operator=(const NewVariant&) = delete;
-    NewVariant(NewVariant&&)                 = default;
-    NewVariant& operator=(NewVariant&&)      = default;
+    NewVariant(NewVariant&&)                 = default;  ///< Move-constructible for placement in std::variant.
+    NewVariant& operator=(NewVariant&&)      = delete;   ///< Not move-assignable — const Thermo& member cannot be reseated.
 
     // =========================================================================
     // Config struct (optional but strongly recommended)
