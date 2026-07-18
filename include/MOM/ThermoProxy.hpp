@@ -61,31 +61,41 @@ namespace MOM
  * - Molecular weights are in **[kg/kmol]**.
  * - Atom-count methods return **0.0** for species that do not contain that element
  *   (e.g. `NumberOfTitaniumAtoms` on a carbon species returns 0.0, not NaN).
+ * - **All methods must be `noexcept`.**  They are called from `noexcept` code
+ *   paths in `MomentMethodBase`: `UpdateMixtureState` (loops over
+ *   `NumberOfSpecies()` and `MolecularWeight()`), `SpeciesConcentrationKmolM3`
+ *   (calls `MolecularWeight()`), and `ComputeSources()` implementations (call
+ *   atom-count methods).  If an adapter method can throw, the C++ runtime will
+ *   call `std::terminate` rather than propagating the exception.  Adapter
+ *   authors must ensure the `noexcept` guarantee at the wrapper level.
  *
  * @par Requirement summary
- * | Expression | Return type | Description |
- * |---|---|---|
- * | `t.NumberOfSpecies()` | convertible to `unsigned` | Total species count |
- * | `t.IndexOfSpecies(name)` | convertible to `int` | 0-based index, −1 if absent |
- * | `t.MolecularWeight(i)` | `double` | MW of species *i* [kg/kmol] |
- * | `t.NumberOfCarbonAtoms(i)` | `double` | C atoms per molecule of species *i* |
- * | `t.NumberOfHydrogenAtoms(i)` | `double` | H atoms per molecule |
- * | `t.NumberOfOxygenAtoms(i)` | `double` | O atoms per molecule |
- * | `t.NumberOfNitrogenAtoms(i)` | `double` | N atoms per molecule |
- * | `t.NumberOfTitaniumAtoms(i)` | `double` | Ti atoms per molecule (0 if none) |
+ * | Expression | Return type | `noexcept` | Description |
+ * |---|---|---|---|
+ * | `t.NumberOfSpecies()` | convertible to `unsigned` | required | Total species count |
+ * | `t.IndexOfSpecies(name)` | convertible to `int` | required | 0-based index, −1 if absent |
+ * | `t.MolecularWeight(i)` | `double` | required | MW of species *i* [kg/kmol] |
+ * | `t.NumberOfCarbonAtoms(i)` | `double` | required | C atoms per molecule of species *i* |
+ * | `t.NumberOfHydrogenAtoms(i)` | `double` | required | H atoms per molecule |
+ * | `t.NumberOfOxygenAtoms(i)` | `double` | required | O atoms per molecule |
+ * | `t.NumberOfNitrogenAtoms(i)` | `double` | required | N atoms per molecule |
+ * | `t.NumberOfTitaniumAtoms(i)` | `double` | required | Ti atoms per molecule (0 if none) |
  *
  * @tparam T  Thermodynamics backend type to check.
  */
 template <typename T>
 concept ThermoMap = requires(const T& t, unsigned i, std::string_view name) {
-    { t.NumberOfSpecies() } -> std::convertible_to<unsigned>;
-    { t.IndexOfSpecies(name) } -> std::convertible_to<int>;
-    { t.MolecularWeight(i) } -> std::same_as<double>;
-    { t.NumberOfCarbonAtoms(i) } -> std::same_as<double>;
-    { t.NumberOfHydrogenAtoms(i) } -> std::same_as<double>;
-    { t.NumberOfOxygenAtoms(i) } -> std::same_as<double>;
-    { t.NumberOfNitrogenAtoms(i) } -> std::same_as<double>;
-    { t.NumberOfTitaniumAtoms(i) } -> std::same_as<double>;
+    // noexcept is required on every expression: all methods are called from
+    // noexcept code paths in MomentMethodBase (UpdateMixtureState,
+    // SpeciesConcentrationKmolM3, ComputeSources implementations).
+    { t.NumberOfSpecies()          } noexcept -> std::convertible_to<unsigned>;
+    { t.IndexOfSpecies(name)       } noexcept -> std::convertible_to<int>;
+    { t.MolecularWeight(i)         } noexcept -> std::same_as<double>;
+    { t.NumberOfCarbonAtoms(i)     } noexcept -> std::same_as<double>;
+    { t.NumberOfHydrogenAtoms(i)   } noexcept -> std::same_as<double>;
+    { t.NumberOfOxygenAtoms(i)     } noexcept -> std::same_as<double>;
+    { t.NumberOfNitrogenAtoms(i)   } noexcept -> std::same_as<double>;
+    { t.NumberOfTitaniumAtoms(i)   } noexcept -> std::same_as<double>;
 };
 
 /**
