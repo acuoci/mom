@@ -670,33 +670,168 @@ double HMOM6<Thermo>::SafePowPositive(double x, double a) const noexcept
 template <ThermoMap Thermo>
 double HMOM6<Thermo>::GetBetaC() const noexcept
 {
-    // TODO: implement
-    return 0.;
+    // Free-molecular collision rate between the PAH dimer and the soot population.
+    // This is the integral β_C = Cfm·√T · Σ_k (geometric cross-section terms),
+    // identical in structure to HMOM — the only difference is that GetMoment()
+    // now uses the MOMIC polynomial for the large mode instead of two-delta.
+    //
+    // Geometric mean collision kernel (free-molecular, Eq. 28 of Mueller 2009):
+    //   β(d_dim, d_p) ∝ (d_dim^{-1/2} + d_p^{-1/2}) · (d_dim + d_p)^2
+    // Expressed via collision-diameter model:  d_c = K_coll · V^{Av} · S^{As}
+    // and dimer diameter:                      d_dim = K_diam · V_dim^{1/3}
+
+    const double K_diam = K_diam_HMOM6(this->pi_);
+
+    const double betaC =
+        K_collisional_ * K_collisional_ * std::pow(dimer_volume_, -3. / 6.) *
+            GetMoment(2. * Av_collisional_, 2. * As_collisional_) +
+        2. * K_diam * K_collisional_ * std::pow(dimer_volume_, -1. / 6.) *
+            GetMoment(Av_collisional_, As_collisional_) +
+        K_diam * K_diam * std::pow(dimer_volume_, 1. / 6.) *
+            GetMoment(0., 0.) +
+        0.5 * K_collisional_ * K_collisional_ * std::pow(dimer_volume_, 3. / 6.) *
+            GetMoment(2. * Av_collisional_ - 1., 2. * As_collisional_) +
+        2. * K_diam * K_collisional_ * std::pow(dimer_volume_, 5. / 6.) *
+            GetMoment(Av_collisional_ - 1., As_collisional_) +
+        0.5 * K_diam * K_diam * std::pow(dimer_volume_, 7. / 6.) *
+            GetMoment(-1., 0.);
+
+    return Cfm_ * std::sqrt(this->T_) * betaC;
 }
 
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::DimerConcentration()
 {
-    // TODO: implement
+    conc_DIMER_        = 0.;
+    dimerization_rate_ = 0.;
+
+    betaN_ = betaN_TV_ * std::sqrt(this->T_) * std::pow(dimer_volume_, 1. / 6.);
+
+    double betaC = 0.;
+    if (condensation_model_ > 0)
+        betaC = GetBetaC();
+
+    if (betaN_ <= 0. || !std::isfinite(betaN_))
+        return;
+
+    double stickCoeff = sticking_coeff_constant_;
+    if (sticking_model_ == StickingModel::PAH4)
+        stickCoeff = sticking_coeff_constant_ * std::pow(mwpah_, 4.);
+
+    const double KfmPAH = betaN_TV_ * std::sqrt(this->T_) * std::pow(vpah_, 1. / 6.);
+    if (KfmPAH <= 0. || !std::isfinite(KfmPAH))
+        return;
+    if (betaC < 0. || !std::isfinite(betaC))
+        return;
+
+    // PAH dimerization: 2 PAH → dimer (collision-limited).
+    const double beta_pah_pah = 0.5 * stickCoeff * KfmPAH;
+    const double C_PAH        = std::max(conc_PAH_, 0.) * 1.e6; // mol/cm3 → mol/m3
+    const double reduced_rate  = beta_pah_pah * C_PAH * C_PAH;
+
+    dimerization_rate_ = reduced_rate;
+    if (dimerization_rate_ <= 0. || !std::isfinite(dimerization_rate_))
+    {
+        dimerization_rate_ = 0.;
+        return;
+    }
+
+    // Steady-state dimer number density from the quadratic balance:
+    //   Jpah = betaN * Ndim^2 + betaC * Ndim
+    // where Jpah = dimerization_rate * Nav^2.
+    const double Jpah = dimerization_rate_ * this->Nav_mol_ * this->Nav_mol_;
+    if (Jpah <= 0. || !std::isfinite(Jpah))
+        return;
+
+    const double discriminant = betaC * betaC + 4. * betaN_ * Jpah;
+    if (discriminant <= 0. || !std::isfinite(discriminant))
+        return;
+
+    double Ndim = 2. * Jpah / (betaC + std::sqrt(discriminant));
+    if (Ndim < 0. || !std::isfinite(Ndim))
+        Ndim = 0.;
+
+    conc_DIMER_ = Ndim / this->Nav_mol_;
 }
 
 template <ThermoMap Thermo>
 double HMOM6<Thermo>::PAHDimerizationRate() const noexcept
 {
-    // TODO: implement
-    return 0.;
+    // Convert from [mol/m3/s] to [kmol/m3/s] for gas-phase coupling convention.
+    return 2. * dimerization_rate_ * this->Nav_mol_ / 1000.;
 }
 
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::CalculateAlphaCoefficient()
 {
-    // TODO: implement
+    alpha_ = 1.;
+    if (!std::isfinite(this->T_) || this->T_ <= 0.)
+        return;
+
+    const double a = surf_dens_a1_ + surf_dens_a2_ * this->T_;
+    const double b = surf_dens_b1_ + surf_dens_b2_ * this->T_;
+
+    // Large-mode mean volume: VL = L10 / L00 (MOMIC equivalent of NLVL/NL).
+    double VL = V0_;
+    if (L00_ > kSootNumberFloor && L10_ > kSootVolumeFloor)
+        VL = L10_ / L00_;
+    if (!std::isfinite(VL) || VL <= 0.)
+        VL = V0_;
+
+    const double mC  = this->WC_ / this->Nav_kmol_;
+    const double mu1 = VL * this->rho_particle_ / mC;
+    if (!std::isfinite(mu1) || mu1 <= 1.)
+        return;
+
+    const double logMu1 = std::log(mu1);
+    if (!std::isfinite(logMu1) || std::fabs(logMu1) < 1.e-12)
+        return;
+
+    // Appel et al. surface-density correction for mature soot particles.
+    alpha_ = std::tanh(a / logMu1 + b);
+    if (!std::isfinite(alpha_))
+        alpha_ = 1.;
+    alpha_ = std::max(0., std::min(alpha_, 1.));
 }
 
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::SootKineticConstants()
 {
-    // TODO: implement
+    const double T   = this->T_;
+    const double k1f = A1f_ * std::pow(T, n1f_) * std::exp(-E1f_ / T);
+    const double k1b = A1b_ * std::pow(T, n1b_) * std::exp(-E1b_ / T);
+    const double k2f = A2f_ * std::pow(T, n2f_) * std::exp(-E2f_ / T);
+    const double k2b = A2b_ * std::pow(T, n2b_) * std::exp(-E2b_ / T);
+    const double k3f = A3f_ * std::pow(T, n3f_) * std::exp(-E3f_ / T);
+    const double k3b = A3b_ * std::pow(T, n3b_) * std::exp(-E3b_ / T);
+    const double k4  = A4_  * std::pow(T, n4_)  * std::exp(-E4_  / T);
+
+    // Active-site fraction (HACA steady-state):
+    //   χ* / (1 + χ*),  χ* = (k1f[OH] + k2f[H] + k3f) / (k1b[H2O] + k2b[H2] + k3b[H] + k4[C2H2])
+    const double ratio = k1b * conc_H2O_ + k2b * conc_H2_ + k3b * conc_H_ + k4 * conc_C2H2_;
+    double conc_sootStar = 0.;
+    if (ratio > 0.)
+        conc_sootStar = (k1f * conc_OH_ + k2f * conc_H_ + k3f) / ratio;
+
+    // Smooth low-radical damping: suppress HACA when both H and OH pools are depleted.
+    {
+        constexpr double YH_threshold  = 2.e-9;
+        constexpr double YOH_threshold = 2.e-8;
+        const double rampH  = 0.5 * (1. + std::tanh((mass_fraction_H_  - YH_threshold)
+                                                     / (0.5 * YH_threshold)));
+        const double rampOH = 0.5 * (1. + std::tanh((mass_fraction_OH_ - YOH_threshold)
+                                                     / (0.5 * YOH_threshold)));
+        conc_sootStar *= rampH * rampOH;
+    }
+
+    conc_sootStar = conc_sootStar / (1. + conc_sootStar);
+    conc_sootStar = std::max(conc_sootStar, 0.);
+
+    ksg_    = k4 * conc_C2H2_ * conc_sootStar;
+    const double k6 = 8.94 * eff6_ * std::sqrt(T) * this->Nav_mol_;
+    kox_O2_ = A5_ * std::pow(T, n5_) * std::exp(-E5_ / T) * conc_O2_ * conc_sootStar;
+    kox_OH_ = (0.5 / (alpha_ * surface_density_)) * k6 * conc_OH_;
+    kox_    = kox_O2_ + kox_OH_;
 }
 
 // ===========================================================================
