@@ -929,7 +929,96 @@ void HMOM6<Thermo>::SootOxidationM7()
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::SootCondensationM7()
 {
-    // TODO: implement
+    // PAH dimer condensation onto existing soot particles (free-molecular regime).
+    //
+    // Free-molecular collision kernel (beta approximated to first order in Vd/V):
+    //   beta(Vd, V) = Cfm*sqrt(T)*Vd^{-1/2} * (1 + 0.5*Vd/V) * (D_DIM + D_c(V,S))^2
+    // where D_DIM = K_diam*Vd^{1/3} and D_c = K_collisional*V^{Av_c}*S^{As_c}.
+    //
+    // The change in a bivariate moment M_{x,y} per dimer-particle collision is
+    // linearised in Vd (consistent with the HMOM4 treatment):
+    //   Delta(V^x * S^y) ≈ Vd * [ x * V^{x-1} * S^y
+    //                             + y * K_frac * V^{x+Av_f} * S^{y+As_f} ]
+    // where the second term comes from dS/dV = K_frac * V^{Av_f} * S^{As_f+1}.
+    //
+    // This yields the normalised condensation source:
+    //   source[M_{x,y,norm}] = Cfm*sqrtVd*cd*sqrtT
+    //                        * { x * CI(x-1, y)  +  y * Kf * CI(x+Av_f, y+As_f) }
+    //                        / (V0^x * S0^y)
+    //
+    // where the collision integral CI(a, b) is defined as:
+    //   CI(a,b) = D_DIM^2  * [M(a,   b)        + 0.5*Vd * M(a-1,       b)]
+    //           + K_c^2    * [M(a+2Av_c, b+2As_c) + 0.5*Vd * M(a-1+2Av_c, b+2As_c)]
+    //           + 2*D*K_c  * [M(a+Av_c,  b+As_c)  + 0.5*Vd * M(a-1+Av_c,  b+As_c)]
+    //
+    // Index mapping: 0→M00, 1→M10, 2→M01, 3→M20, 4→M11, 5→M02, 6→N0.
+    //
+    // The N0 source (index 6) captures the depletion of small-mode particles by
+    // dimer collision (identical in structure to HMOM4 source_condensation_(3)).
+
+    this->source_condensation_.setZero();
+    if (!HasSoot())
+        return;
+
+    const double K_diam = K_diam_HMOM6(this->pi_);
+    const double D_DIM  = K_diam * std::pow(dimer_volume_, 1. / 3.);
+    const double D_NUCL = K_diam * std::pow(V0_, 1. / 3.);
+    const double Vd     = dimer_volume_;
+    const double sqrtDv = std::sqrt(Vd);
+    const double sqrtT  = std::sqrt(this->T_);
+    const double cd     = conc_DIMER_;
+
+    // Collision integral CI(a, b) — encapsulates the three-term kernel expansion.
+    // Expanding (D_DIM + K_c*V^{Av_c}*S^{As_c})^2 and the (1+0.5*Vd/V) factor.
+    const double Av_c = Av_collisional_;
+    const double As_c = As_collisional_;
+    const double K_c  = K_collisional_;
+
+    auto CI = [&](double a, double b) noexcept -> double {
+        return
+            D_DIM * D_DIM *
+                (GetMoment(a,              b) + 0.5 * Vd * GetMoment(a - 1.,          b)) +
+            K_c * K_c *
+                (GetMoment(a + 2.*Av_c, b + 2.*As_c) +
+                 0.5 * Vd * GetMoment(a - 1. + 2.*Av_c, b + 2.*As_c)) +
+            2. * D_DIM * K_c *
+                (GetMoment(a + Av_c,    b + As_c) +
+                 0.5 * Vd * GetMoment(a - 1. + Av_c,    b + As_c));
+    };
+
+    // Pre-factor shared by all large-mode collision terms.
+    const double pre = Cfm_ * sqrtDv * cd * sqrtT;
+
+    const double Av_f = Av_fractal_;
+    const double As_f = As_fractal_;
+    const double Kf   = K_fractal_;
+
+    // --- M00 (x=0, y=0): no change (particle count conserved by condensation)
+    this->source_condensation_(0) = 0.;
+
+    // --- M10 (x=1, y=0): x-term 1*CI(0,0) / V0
+    this->source_condensation_(1) = pre * CI(0., 0.) / V0_;
+
+    // --- M01 (x=0, y=1): y-term 1*Kf*CI(Av_f, As_f+1) / S0
+    this->source_condensation_(2) = pre * Kf * CI(Av_f, As_f + 1.) / S0_;
+
+    // --- M20 (x=2, y=0): x-term 2*CI(1,0) / V0^2
+    this->source_condensation_(3) = pre * 2. * CI(1., 0.) / (V0_ * V0_);
+
+    // --- M11 (x=1, y=1): x-term CI(0,1) + y-term Kf*CI(Av_f+1, As_f+1), / (V0*S0)
+    this->source_condensation_(4) =
+        pre * (CI(0., 1.) + Kf * CI(Av_f + 1., As_f + 1.)) / (V0_ * S0_);
+
+    // --- M02 (x=0, y=2): y-term 2*Kf*CI(Av_f, As_f+2) / S0^2
+    this->source_condensation_(5) = pre * 2. * Kf * CI(Av_f, As_f + 2.) / (S0_ * S0_);
+
+    // --- N0 (small-mode, index 6): depletion of small-mode particles by dimer collisions.
+    //   d(N0)/dt|_cond = -beta(Vd, V0) * cd * N0
+    //   where beta(Vd,V0) = Cfm/sqrtVd * sqrtT * (1 + 0.5*Vd/V0) * (D_DIM+D_NUCL)^2
+    //   Identical to HMOM4 source_condensation_(3) — same physics, just re-indexed.
+    this->source_condensation_(6) =
+        -Cfm_ / sqrtDv * cd * sqrtT *
+        (1. + 0.5 * Vd / V0_) * (D_DIM + D_NUCL) * (D_DIM + D_NUCL) * N0_;
 }
 
 // ===========================================================================
