@@ -35,6 +35,7 @@
 
 #pragma once
 
+#include <optional>
 #include <string_view>
 
 namespace MOM
@@ -126,13 +127,17 @@ enum class PlanckCoeffModel : int
 /**
  * @brief Parse a Planck absorption coefficient model label from a string.
  *
- * Case-insensitive. Returns `PlanckCoeffModel::None` for unrecognised labels.
- * Used by `ParseConfig()` implementations.
+ * Case-insensitive. Returns `std::nullopt` for unrecognised labels so that
+ * callers can distinguish between an explicit `"None"` request and a typo.
+ * Used by `SetPlanckAbsorptionCoefficient(std::string_view)` and
+ * `ParseConfig()` implementations.
  *
  * @param s  Label string (e.g. `"Smooke"`, `"Kent"`, `"Sazhin"`, `"None"`).
- * @return   Matching `PlanckCoeffModel` enumerator, or `None` if not recognised.
+ * @return   Matching `PlanckCoeffModel` enumerator wrapped in `std::optional`,
+ *           or `std::nullopt` if the label is not recognised.
  */
-[[nodiscard]] constexpr PlanckCoeffModel PlanckCoeffModelFromString(std::string_view s) noexcept
+[[nodiscard]] constexpr std::optional<PlanckCoeffModel>
+PlanckCoeffModelFromString(std::string_view s) noexcept
 {
     if (s == "Smooke" || s == "smooke" || s == "SMOOKE")
         return PlanckCoeffModel::Smooke;
@@ -142,7 +147,7 @@ enum class PlanckCoeffModel : int
         return PlanckCoeffModel::Sazhin;
     if (s == "None" || s == "none" || s == "NONE")
         return PlanckCoeffModel::None;
-    return PlanckCoeffModel::None;
+    return std::nullopt;
 }
 
 /**

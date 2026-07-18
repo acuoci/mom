@@ -85,7 +85,7 @@
  * - `FillOmegaGasWithoutOxidation`  — writes total gas − oxidation into caller buffer
  */
 
-#include <algorithm>   // std::min
+#include <algorithm>   // std::copy, std::min
 #include <cmath>       // std::abs
 
 #include "AnyMomentMethod.hpp"
@@ -247,8 +247,13 @@ inline void FillOmegaGasWithoutOxidation(const AnyMomentMethod<Thermo>& m,
             const auto total = mm.omega_gas();           // full omega_gas_   — zero-copy
             const auto ox    = mm.omega_gas_oxidation(); // oxidation-only    — zero-copy
             const std::size_t N = std::min(total.size(), out.size());
-            for (std::size_t k = 0; k < N; ++k)
-                out[k] = total[k] - (k < ox.size() ? ox[k] : 0.);
+            // ox is either empty (model has no oxidation) or size == N (always).
+            // Hoist the invariant check out of the loop to avoid a branch per species.
+            if (ox.empty())
+                std::copy(total.begin(), total.begin() + N, out.begin());
+            else
+                for (std::size_t k = 0; k < N; ++k)
+                    out[k] = total[k] - ox[k];
         },
         m);
 }

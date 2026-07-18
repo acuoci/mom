@@ -158,11 +158,20 @@ public:
 
     /**
      * @brief Selects the Planck mean absorption coefficient correlation by label string.
+     *
      * @param label Case-insensitive label: `"Smooke"`, `"Kent"`, `"Sazhin"`, or `"None"`.
+     * @throws std::invalid_argument if @p label does not match any known model.
+     *         Use `SetPlanckAbsorptionCoefficient(PlanckCoeffModel)` for a `noexcept`
+     *         alternative when the model is already resolved.
      */
-    void SetPlanckAbsorptionCoefficient(std::string_view label) noexcept
+    void SetPlanckAbsorptionCoefficient(std::string_view label)
     {
-        planck_model_ = PlanckCoeffModelFromString(label);
+        const auto opt = PlanckCoeffModelFromString(label);
+        if (!opt.has_value())
+            throw std::invalid_argument(
+                "Unknown PlanckCoeffModel label: \"" + std::string(label) +
+                "\". Valid labels: \"Smooke\", \"Kent\", \"Sazhin\", \"None\".");
+        planck_model_ = *opt;
     }
 
     // -- Common getters -----------------------------------------------------
