@@ -148,10 +148,15 @@ concept MomentMethod =
         // Number of transported moment equations
         { M::n_equations } -> std::convertible_to<unsigned>;
         // Factory label array — used by MakeAnyMomentMethod for runtime variant selection.
-        // Must be a non-empty, iterable range whose elements are convertible to string_view.
+        // Must be a non-empty, iterable range whose elements are non-empty string_views.
         // Concrete variants declare this as:
         //   static constexpr std::array<std::string_view, N> variant_labels{"Name", "alias"};
         { M::variant_labels[0] } -> std::convertible_to<std::string_view>;
+        // Nested requirement: the first label must be non-empty.  An empty label would
+        // match every string in MakeAnyMomentMethod's loop, silently selecting the wrong
+        // variant.  std::string_view::empty() is constexpr, so this is evaluated at
+        // concept-check time with zero runtime cost.
+        requires (!std::string_view{M::variant_labels[0]}.empty());
     }
 
     &&
