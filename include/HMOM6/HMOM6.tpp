@@ -294,19 +294,77 @@ void HMOM6<Thermo>::Precalculations()
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::SetPAH(std::string_view name)
 {
-    // TODO: implement
+    const auto pah_index = thermo_.IndexOfSpecies(name);
+    if (pah_index < 0)
+        throw std::runtime_error("[HMOM6] PAH species not found in mechanism: " + std::string(name));
+
+    const auto pah_index_u = static_cast<unsigned>(pah_index);
+    const auto ncpah       = static_cast<double>(thermo_.NumberOfCarbonAtoms(pah_index_u));
+    const auto nhpah       = static_cast<double>(thermo_.NumberOfHydrogenAtoms(pah_index_u));
+
+    // PAH mass and sphere-equivalent geometry.
+    auto mwpah = thermo_.MolecularWeight(pah_index_u); // [kg/kmol]
+    if (is_simplified_pah_mass_)
+        mwpah = ncpah * this->WC_;
+
+    const auto vpah = mwpah / this->rho_particle_ / this->Nav_kmol_; // [m3]
+    const auto dpah = this->SphereDiameter(vpah);                    // [m]
+    const auto spah = this->SphereSurface(dpah);                     // [m2]
+    const auto mpah = mwpah / this->Nav_kmol_;                       // [kg]
+
+    pah_species_ = std::string(name);
+    pah_index_   = pah_index;
+    ncpah_       = ncpah;
+    nhpah_       = nhpah;
+    mwpah_       = mwpah;
+    vpah_        = vpah;
+    dpah_        = dpah;
+    spah_        = spah;
+    mpah_        = mpah;
+
+    dimer_volume_  = 2. * vpah_;
+    dimer_surface_ = this->SphereSurfaceFromVolume(dimer_volume_);
+    V0_            = 2. * dimer_volume_;
+    S0_            = this->SphereSurfaceFromVolume(V0_);
+    VC2_           = (this->WC_ / this->rho_particle_ / this->Nav_kmol_) * 2.;
 }
 
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::SetGasClosureDummySpecies(std::string_view name)
 {
-    // TODO: implement
+    this->closure_dummy_species_ = std::string(name);
+
+    if (name == "none")
+    {
+        this->closure_dummy_index_      = -1;
+        this->is_closure_dummy_species_ = false;
+        return;
+    }
+
+    this->closure_dummy_index_ = thermo_.IndexOfSpecies(name);
+    if (this->closure_dummy_index_ < 0)
+        throw std::runtime_error("[HMOM6] Dummy species not found: " + this->closure_dummy_species_);
+
+    if (this->closure_dummy_index_ == pah_index_)
+        throw std::runtime_error("[HMOM6] Dummy species cannot be the same as the PAH precursor.");
+
+    if (this->closure_dummy_index_ == index_H_  || this->closure_dummy_index_ == index_H2_  ||
+        this->closure_dummy_index_ == index_O2_ || this->closure_dummy_index_ == index_OH_  ||
+        this->closure_dummy_index_ == index_H2O_|| this->closure_dummy_index_ == index_C2H2_)
+        throw std::runtime_error("[HMOM6] Dummy species cannot be H, H2, O2, OH, H2O, or C2H2.");
+
+    this->is_closure_dummy_species_ = true;
 }
 
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::SetStickingCoefficientModel(std::string_view label)
 {
-    // TODO: implement
+    if (label == "constant")
+        sticking_model_ = StickingModel::Constant;
+    else if (label == "pah-dependent")
+        sticking_model_ = StickingModel::PAH4;
+    else
+        throw std::runtime_error("[HMOM6] Unknown sticking coefficient model: " + std::string(label));
 }
 
 // ===========================================================================
@@ -316,7 +374,21 @@ void HMOM6<Thermo>::SetStickingCoefficientModel(std::string_view label)
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::SetState(double T, double P_Pa, const double* Y) noexcept
 {
-    // TODO: implement
+    const double cTot = this->template UpdateMixtureState<>(T, P_Pa, Y, thermo_);
+
+    // Mass fractions used by the smooth active-site damping factor.
+    mass_fraction_H_  = (index_H_  >= 0) ? std::max(Y[index_H_],  0.) : 0.;
+    mass_fraction_OH_ = (index_OH_ >= 0) ? std::max(Y[index_OH_], 0.) : 0.;
+
+    conc_H_    = this->SpeciesConcentrationMolCm3(index_H_,    Y, cTot, thermo_);
+    conc_OH_   = this->SpeciesConcentrationMolCm3(index_OH_,   Y, cTot, thermo_);
+    conc_O2_   = this->SpeciesConcentrationMolCm3(index_O2_,   Y, cTot, thermo_);
+    conc_H2_   = this->SpeciesConcentrationMolCm3(index_H2_,   Y, cTot, thermo_);
+    conc_H2O_  = this->SpeciesConcentrationMolCm3(index_H2O_,  Y, cTot, thermo_);
+    conc_C2H2_ = this->SpeciesConcentrationMolCm3(index_C2H2_, Y, cTot, thermo_);
+
+    // PAH concentration [mol/cm3].
+    conc_PAH_  = this->SpeciesConcentrationMolCm3(pah_index_,  Y, cTot, thermo_);
 }
 
 template <ThermoMap Thermo>
@@ -336,7 +408,14 @@ void HMOM6<Thermo>::SetNormalizedMoments(double M00_norm,
                                          double M02_norm,
                                          double N0_norm) noexcept
 {
-    // TODO: implement
+    M00_normalized_ = M00_norm;
+    M10_normalized_ = M10_norm;
+    M01_normalized_ = M01_norm;
+    M20_normalized_ = M20_norm;
+    M11_normalized_ = M11_norm;
+    M02_normalized_ = M02_norm;
+    N0_normalized_  = N0_norm;
+    GetMoments();
 }
 
 // ===========================================================================
@@ -346,7 +425,88 @@ void HMOM6<Thermo>::SetNormalizedMoments(double M00_norm,
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::GetMoments()
 {
-    // TODO: implement
+    // De-normalise: M_{x,y} = M_{x,y,norm} * V0^x * S0^y * Nav
+    double M00_raw = M00_normalized_ * this->Nav_mol_;
+    double M10_raw = M10_normalized_ * V0_         * this->Nav_mol_;
+    double M01_raw = M01_normalized_ * S0_         * this->Nav_mol_;
+    double M20_raw = M20_normalized_ * V0_ * V0_   * this->Nav_mol_;
+    double M11_raw = M11_normalized_ * V0_ * S0_   * this->Nav_mol_;
+    double M02_raw = M02_normalized_ * S0_ * S0_   * this->Nav_mol_;
+    double N0_raw  = N0_normalized_  * this->Nav_mol_;
+
+    // NaN guards — replace non-finite values with zero.
+    if (!std::isfinite(M00_raw)) M00_raw = 0.;
+    if (!std::isfinite(M10_raw)) M10_raw = 0.;
+    if (!std::isfinite(M01_raw)) M01_raw = 0.;
+    if (!std::isfinite(M20_raw)) M20_raw = 0.;
+    if (!std::isfinite(M11_raw)) M11_raw = 0.;
+    if (!std::isfinite(M02_raw)) M02_raw = 0.;
+    if (!std::isfinite(N0_raw))  N0_raw  = 0.;
+
+    // All moments are non-negative by physics; clamp numerical noise.
+    M00_raw = std::max(M00_raw, 0.);
+    M10_raw = std::max(M10_raw, 0.);
+    M01_raw = std::max(M01_raw, 0.);
+    M20_raw = std::max(M20_raw, 0.);
+    M11_raw = std::max(M11_raw, 0.);
+    M02_raw = std::max(M02_raw, 0.);
+    N0_raw  = std::max(N0_raw,  0.);
+
+    // If the primary moments are below numerical floors treat as particle-free.
+    if (M00_raw < kSootNumberFloor || M10_raw < kSootVolumeFloor || M01_raw < kSootSurfaceFloor)
+    {
+        M00_ = M10_ = M01_ = M20_ = M11_ = M02_ = N0_ = 0.;
+        L00_ = L10_ = L01_ = L20_ = L11_ = L02_ = 0.;
+        momic_valid_ = false;
+        return;
+    }
+
+    // Clamp N0 so that every large-mode moment L_{x,y} = M_{x,y} - N0*V0^x*S0^y >= 0.
+    // This guarantees that the MOMIC log system is well-posed.
+    N0_raw = std::min(N0_raw, M00_raw);
+    if (V0_ > 0. && S0_ > 0.)
+    {
+        N0_raw = std::min(N0_raw, M10_raw / V0_);
+        N0_raw = std::min(N0_raw, M01_raw / S0_);
+        N0_raw = std::min(N0_raw, M20_raw / (V0_ * V0_));
+        N0_raw = std::min(N0_raw, M11_raw / (V0_ * S0_));
+        N0_raw = std::min(N0_raw, M02_raw / (S0_ * S0_));
+    }
+    N0_raw = std::max(N0_raw, 0.);
+
+    M00_ = M00_raw;
+    M10_ = M10_raw;
+    M01_ = M01_raw;
+    M20_ = M20_raw;
+    M11_ = M11_raw;
+    M02_ = M02_raw;
+    N0_  = N0_raw;
+
+    // Large-mode moments: L_{x,y} = M_{x,y} - N0 * V0^x * S0^y
+    L00_ = M00_ - N0_;
+    L10_ = M10_ - V0_       * N0_;
+    L01_ = M01_ - S0_       * N0_;
+    L20_ = M20_ - V0_*V0_   * N0_;
+    L11_ = M11_ - V0_*S0_   * N0_;
+    L02_ = M02_ - S0_*S0_   * N0_;
+
+    // Tolerance correction: numerical discretisation may produce small negative
+    // residuals. Flush to zero if within 1e-12 relative to the parent moment.
+    auto toleranceFloor = [](double& L, double ref)
+    {
+        if (L < 0. && std::fabs(L) < 1.e-12 * std::max(ref, 1.))
+            L = 0.;
+        L = std::max(L, 0.);
+    };
+    toleranceFloor(L00_, M00_);
+    toleranceFloor(L10_, M10_);
+    toleranceFloor(L01_, M01_);
+    toleranceFloor(L20_, M20_);
+    toleranceFloor(L11_, M11_);
+    toleranceFloor(L02_, M02_);
+
+    // With the large-mode moments available, solve the MOMIC polynomial.
+    ComputeMOMICCoefficients();
 }
 
 // ===========================================================================
