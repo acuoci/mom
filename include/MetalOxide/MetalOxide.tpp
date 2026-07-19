@@ -363,6 +363,25 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::SetGasClosureDummySpecies(s
 }
 
 template <ThermoMap Thermo>
+void MetalOxide<Thermo>::SetClosureModel(std::string_view label)
+{
+    if (label == "monodisperse" || label == "Monodisperse" || label == "mono" || label == "0")
+    {
+        closure_model_ = ClosureModel::Monodisperse;
+        return;
+    }
+
+    if (label == "lognormal" || label == "Lognormal" || label == "log-normal" || label == "1")
+    {
+        closure_model_ = ClosureModel::Lognormal;
+        return;
+    }
+
+    throw std::invalid_argument(
+        "[MetalOxide] Invalid closure model. Allowed values: monodisperse, lognormal.");
+}
+
+template <ThermoMap Thermo>
 void MetalOxide<Thermo>::Properties(double& fv,
                               double& dp,
                               double& dc,
@@ -841,6 +860,13 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::PrintSummary() const
             default:                        return "unknown";
         }
     };
+    const auto closure_str = [](ClosureModel m) -> const char* {
+        switch (m) {
+            case ClosureModel::Monodisperse: return "monodisperse";
+            case ClosureModel::Lognormal:    return "lognormal";
+            default:                         return "unknown";
+        }
+    };
 
     std::cout
         << "\n"
@@ -863,6 +889,7 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::PrintSummary() const
         << "    + s0 (m2):                       " << s0_ << "\n"
         << "\n"
         << " [Processes]\n"
+        << "    + Closure model:                 " << closure_str(closure_model_) << "\n"
         << "    + Nucleation:                    " << static_cast<int>(nucleation_variant_) << "  (" << nuc_str(nucleation_variant_) << ")\n"
         << "    + Coagulation:                   " << coagulation_model_ << "\n"
         << "    + Condensation:                  " << condensation_model_ << "\n"
@@ -973,6 +1000,8 @@ void MetalOxide<Thermo>::ApplyConfig(const Config& cfg)
     else
         throw std::invalid_argument(
             "[MetalOxide] Invalid nucleation model. Allowed values: none, binary, fixed-cluster.");
+
+    this->SetClosureModel(cfg.closure_model);
 
     // -- Other process models ----------------------------------------------
     this->SetSintering(cfg.sintering_model);
@@ -1259,6 +1288,9 @@ MetalOxide<Thermo>::ParseConfig(DictType& dict)
 
     if (dict.CheckOption("@NucleationModel"))
         dict.ReadString("@NucleationModel", cfg.nucleation_model);
+
+    if (dict.CheckOption("@ClosureModel"))
+        dict.ReadString("@ClosureModel", cfg.closure_model);
 
     if (dict.CheckOption("@SinteringModel"))    dict.ReadInt("@SinteringModel",    cfg.sintering_model);
     if (dict.CheckOption("@CoagulationModel"))  dict.ReadInt("@CoagulationModel",  cfg.coagulation_model);

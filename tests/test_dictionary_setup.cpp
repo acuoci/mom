@@ -240,6 +240,7 @@ FakeDictionary buildMetalOxideDictionary()
     dict.strings["@SolidName"] = "GenericOxide";
     dict.strings["@GasClosureDummySpecies"] = "none";
     dict.strings["@NucleationModel"] = "fixed-cluster";
+    dict.strings["@ClosureModel"] = "monodisperse";
 
     dict.measures["@SolidMolecularWeight"] = {100.0, "kg/kmol"};
     dict.measures["@SolidDensity"] = {4.5, "g/cm3"};
@@ -429,6 +430,7 @@ void checkMetalOxideDictionarySetup()
     requireNear(cfg->solid_formula_units_per_precursor, 2.0,
                 "MetalOxide @SolidFormulaUnitsPerPrecursor was not parsed");
     require(cfg->nucleation_model == "fixed-cluster", "MetalOxide @NucleationModel was not parsed");
+    require(cfg->closure_model == "monodisperse", "MetalOxide @ClosureModel was not parsed");
     require(cfg->sintering_model == 0, "MetalOxide @SinteringModel was not parsed");
     require(cfg->coagulation_model == 1, "MetalOxide @CoagulationModel was not parsed");
     require(cfg->condensation_model == 0, "MetalOxide @CondensationModel was not parsed");
@@ -454,6 +456,8 @@ void checkMetalOxideDictionarySetup()
     requireNear(metaloxide.solid_formula_units_per_precursor(), 2.0,
                 "MetalOxide formula units per precursor was not applied");
     require(metaloxide.nucleation_model()  == MOM::NucleationModel::Extended,  "MetalOxide nucleation flag was not applied");
+    require(metaloxide.closure_model() == MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Monodisperse,
+            "MetalOxide closure model was not applied");
     require(metaloxide.sintering_model()   == MOM::SinteringModel::Off,         "MetalOxide sintering flag was not applied");
     require(metaloxide.coagulation_model() == MOM::CoagulationModel::Standard,  "MetalOxide coagulation flag was not applied");
     require(metaloxide.condensation_model()== MOM::CondensationModel::Off,      "MetalOxide condensation flag was not applied");

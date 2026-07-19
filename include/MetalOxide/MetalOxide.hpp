@@ -114,6 +114,13 @@ public:
         FixedCluster = 2  //!< Nucleation via a fixed-size cluster of n0 formula units.
     };
 
+    /** @brief Source-term closure used for condensation, coagulation, and sintering. */
+    enum class ClosureModel : int
+    {
+        Monodisperse = 0, //!< Mean-particle closure used by the current model.
+        Lognormal    = 1  //!< Dimensionless log-normal closure for polydisperse populations.
+    };
+
     /**
      * @struct NDFReconstructionData
      * @brief Parameters of the Pareto + log-normal NDF reconstruction.
@@ -178,6 +185,8 @@ public:
         // ---- Process model selection ---------------------------------------
         /// Nucleation model: "none" | "binary" | "fixed-cluster".
         std::string nucleation_model = "binary";
+        /// Source-term closure: "monodisperse" | "lognormal".
+        std::string closure_model     = "monodisperse";
         int sintering_model          = 1; //!< Sintering model index
         int coagulation_model        = 1; //!< Coagulation model index
         int condensation_model       = 1; //!< Condensation model index
@@ -474,6 +483,9 @@ public:
         sintering_model_ = flag;
     }
 
+    /** @brief Sets the source-term closure model by label. */
+    void SetClosureModel(std::string_view label);
+
     /** @brief Sets and validates solid material properties. */
     void SetSolidMaterial(std::string_view name, double molecular_weight_kg_kmol, double density_kg_m3);
 
@@ -524,6 +536,8 @@ public:
     [[nodiscard]] CondensationModel condensation_model() const noexcept { return static_cast<CondensationModel>(condensation_model_); }
 
     [[nodiscard]] SinteringModel    sintering_model()    const noexcept { return static_cast<SinteringModel>(sintering_model_);       }
+
+    [[nodiscard]] ClosureModel closure_model() const noexcept { return closure_model_; }
 
     [[nodiscard]] bool is_sintering_deferred() const noexcept { return is_sintering_deferred_; }
 
@@ -641,6 +655,9 @@ private:
     unsigned int n_formula_units_min_     = 1;   //!< minimum reference size for regularization
     unsigned int n0_                      = 5;   //!< solid formula units per newly nucleated particle
     double epsilon_nuc_                   = 2.5; //!< nucleation collision enhancement factor
+
+    // -- Source-term closure ----------------------------------------------------
+    ClosureModel closure_model_ = ClosureModel::Monodisperse;
 
     // -- Sintering parameters ---------------------------------------------------
     double As_ = 7.44e16; //!< sintering frequency factor [1/s/K]
