@@ -1441,6 +1441,296 @@ static bool validateMetalOxideLognormalLimitingCases()
     return ok;
 }
 
+static bool validateMetalOxideLognormalPaper0DCases()
+{
+    using Access = MOM::detail::MetalOxideTestAccess<MOM::BasicThermoData>;
+
+    constexpr double pi = 3.141592653589793238462643383279502884;
+    constexpr double R = 8314.46261815324;
+    constexpr double NavKmol = 6.02214076e26;
+    constexpr double T = 1850.;
+    constexpr double P = 101325.;
+    constexpr double rhoParticle = 4230.;
+    constexpr double d0 = 0.67e-9;
+    constexpr double dprec = 0.5 * d0;
+    constexpr double N0 = 1.e21;
+    constexpr double Astar = 9.75e21;
+    // The results figures are plotted up to 0.1 s; the text statement "0.1 ms"
+    // is inconsistent with those captions and axes.
+    constexpr double tEnd = 0.1;
+    constexpr double dt = 1.e-5;
+    constexpr int nSteps = static_cast<int>(tEnd / dt);
+
+    MOM::BasicThermoData th;
+    th.names = {"PREC", "N2"};
+    th.mw = {
+        rhoParticle * (pi / 6.) * dprec * dprec * dprec * NavKmol,
+        28.014
+    };
+    th.nc = {0, 0};
+    th.nh = {0, 0};
+    th.no = {1, 0};
+    th.nn = {0, 2};
+    th.nti = {1, 0};
+
+    const double gasInvMW = 1. / th.mw[1];
+    const double gasRho = P / (R * T) / gasInvMW;
+    const double v0Paper = pi / 6. * d0 * d0 * d0;
+    const double s0Paper = pi * d0 * d0;
+    const double fv0 = N0 * v0Paper;
+    const double S0 = N0 * s0Paper;
+    const double Ysolid0 = rhoParticle / gasRho * fv0;
+    const double solidMW = rhoParticle * v0Paper * NavKmol;
+
+    auto near = [](double value, double expected, double rtol = 5.e-3)
+    {
+        const double scale = std::max({1., std::abs(value), std::abs(expected)});
+        return std::abs(value - expected) <= rtol * scale;
+    };
+
+    auto finite_positive = [](double v)
+    {
+        return std::isfinite(v) && v > 0.;
+    };
+
+    enum class PaperCase : int { I, II, III, IV, V };
+
+    struct Outcome
+    {
+        bool valid = false;
+        double N = 0.;
+        double fv = 0.;
+        double S = 0.;
+        double dpp = 0.;
+        double npp = 0.;
+        double sigma = 0.;
+        double M = 0.;
+    };
+
+    auto base_config = [&](MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel closure,
+                           PaperCase c)
+    {
+        MOM::MetalOxide<MOM::BasicThermoData>::Config cfg;
+        cfg.precursor_species = "PREC";
+        cfg.solid_name = "PaperOxide";
+        cfg.solid_molecular_weight_kg_kmol = solidMW;
+        cfg.solid_density_kg_m3 = rhoParticle;
+        cfg.solid_formula_units_per_precursor = std::pow(dprec / d0, 3.);
+        cfg.nucleation_model = "none";
+        cfg.closure_model =
+            (closure == MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Lognormal)
+                ? "lognormal"
+                : "monodisperse";
+        cfg.coagulation_model = 1;
+        cfg.condensation_model = (c == PaperCase::IV || c == PaperCase::V) ? 1 : 0;
+        cfg.sintering_model = (c == PaperCase::I) ? 0 : 1;
+        cfg.gas_consumption = false;
+        cfg.sintering_As_s_K_m =
+            (c == PaperCase::II || c == PaperCase::IV) ? 1.e-6 * Astar : Astar;
+        cfg.sintering_Ts_K = 31000.;
+        // MetalOxide uses tau_s = As * T^ns * dp^4 * exp(Ts/T).
+        cfg.sintering_ns = 1.;
+        cfg.sintering_dp_min_m = 1.e-12;
+        cfg.sintering_tau_min_s = 1.e-12;
+        cfg.sintering_k_max_per_s = 1.e20;
+        cfg.minimum_formula_units = 1;
+        cfg.nucleated_particle_formula_units = 1;
+        cfg.ns_minimum_per_m3 = 1.;
+        cfg.fv_minimum = 1.e-40;
+        return cfg;
+    };
+
+    auto precursor_number_density = [](double t)
+    {
+        constexpr double Nplateau = 7.e17;
+        constexpr double tMid = 0.020;
+        constexpr double width = 8.e-4;
+        const double arg = std::clamp((t - tMid) / width, -700., 700.);
+        return Nplateau / (1. + std::exp(-arg));
+    };
+
+    auto gas_mass_fractions = [&](double Nprec)
+    {
+        const double cTot = P / (R * T);
+        const double xPrec = std::clamp(Nprec / (cTot * NavKmol), 0., 0.5);
+        return X2Y({xPrec, 1. - xPrec}, th);
+    };
+
+    auto run_case = [&](MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel closure,
+                        PaperCase c)
+    {
+        MOM::MetalOxide<MOM::BasicThermoData> model(th);
+        model.SetupFromConfig(base_config(closure, c));
+        model.SetViscosity(4.e-5);
+
+        double Ysolid = Ysolid0;
+        double Nscaled = N0 / model.ScalingFactorNs();
+        double S = S0;
+
+        for (int step = 0; step < nSteps; ++step)
+        {
+            double remaining = dt;
+            int substeps = 0;
+            while (remaining > 0.)
+            {
+                const double t = static_cast<double>(step) * dt + (dt - remaining);
+                const double Nprec =
+                    (c == PaperCase::IV || c == PaperCase::V) ? precursor_number_density(t) : 0.;
+                const auto Y = gas_mass_fractions(Nprec);
+
+                model.SetState(T, P, Y.data());
+                model.SetMoments(Ysolid, Nscaled, S);
+                model.ComputeSources();
+
+                const auto src = model.sources();
+                double h = remaining;
+
+                auto limit_negative_update = [&h](double value, double rate)
+                {
+                    if (rate < 0. && value > 0.)
+                        h = std::min(h, 0.02 * value / (-rate));
+                };
+                limit_negative_update(Ysolid, src[0]);
+                limit_negative_update(Nscaled, src[1]);
+                limit_negative_update(S, src[2]);
+
+                if (!std::isfinite(h) || h <= 0. || ++substeps > 100000)
+                    return Outcome{};
+
+                Ysolid = std::max(0., Ysolid + h * src[0]);
+                Nscaled = std::max(0., Nscaled + h * src[1]);
+                S = std::max(0., S + h * src[2]);
+                remaining -= h;
+
+                if (!std::isfinite(Ysolid) || !std::isfinite(Nscaled) || !std::isfinite(S))
+                    return Outcome{};
+            }
+        }
+
+        const double NprecFinal =
+            (c == PaperCase::IV || c == PaperCase::V) ? precursor_number_density(tEnd) : 0.;
+        const auto Yfinal = gas_mass_fractions(NprecFinal);
+        model.SetState(T, P, Yfinal.data());
+        model.SetMoments(Ysolid, Nscaled, S);
+        model.ComputeSources();
+        const auto d = Access::BuildLognormalClosureData(model);
+
+        return Outcome{
+            d.valid,
+            model.particle_number_density(),
+            model.volume_fraction(),
+            model.specific_surface_area(),
+            d.dpp_mean,
+            d.npp_mean,
+            d.sigma,
+            d.M
+        };
+    };
+
+    const auto mono_i = run_case(
+        MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Monodisperse, PaperCase::I);
+    const auto logn_i = run_case(
+        MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Lognormal, PaperCase::I);
+    const auto logn_ii = run_case(
+        MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Lognormal, PaperCase::II);
+    const auto logn_iii = run_case(
+        MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Lognormal, PaperCase::III);
+    const auto logn_iv = run_case(
+        MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Lognormal, PaperCase::IV);
+    const auto logn_v = run_case(
+        MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Lognormal, PaperCase::V);
+
+    const bool all_valid =
+        mono_i.valid && logn_i.valid && logn_ii.valid && logn_iii.valid &&
+        logn_iv.valid && logn_v.valid;
+
+    const bool case_i_ok =
+        logn_i.N < N0 &&
+        logn_i.N < mono_i.N &&
+        near(logn_i.fv, fv0) &&
+        near(logn_i.dpp, d0, 2.e-2) &&
+        logn_i.npp > 10. &&
+        logn_i.M > 2.8;
+
+    const bool case_ii_ok =
+        logn_ii.N < N0 &&
+        logn_ii.npp < 1.2 &&
+        logn_ii.M < 2.05 &&
+        logn_ii.dpp > d0;
+
+    const bool case_iii_ok =
+        logn_iii.N < N0 &&
+        logn_iii.dpp > d0 &&
+        logn_iii.npp > 1.05 &&
+        logn_iii.M > 2. && logn_iii.M < 3.;
+
+    const bool case_iv_ok =
+        logn_iv.N < N0 &&
+        logn_iv.fv > fv0 &&
+        logn_iv.dpp > d0 &&
+        logn_iv.npp < 1.2 &&
+        logn_iv.M < 2.1;
+
+    const bool case_v_ok =
+        logn_v.N < N0 &&
+        logn_v.fv > fv0 &&
+        logn_v.S > 0. &&
+        logn_v.dpp > d0 &&
+        logn_v.npp > 1.2 &&
+        logn_v.M > 2. && logn_v.M < 3.;
+
+    const bool finite_ok =
+        finite_positive(mono_i.N) && finite_positive(logn_i.N) &&
+        finite_positive(logn_ii.N) && finite_positive(logn_iii.N) &&
+        finite_positive(logn_iv.N) && finite_positive(logn_v.N) &&
+        std::isfinite(logn_v.sigma);
+
+    const bool ok =
+        all_valid && finite_ok && case_i_ok && case_ii_ok &&
+        case_iii_ok && case_iv_ok && case_v_ok;
+
+    auto print_outcome = [](const char* name, const Outcome& o)
+    {
+        std::cout << "    " << name
+                  << ": valid=" << o.valid
+                  << " N=" << o.N
+                  << " fv=" << o.fv
+                  << " S=" << o.S
+                  << " dpp=" << o.dpp
+                  << " npp=" << o.npp
+                  << " sigma=" << o.sigma
+                  << " M=" << o.M << "\n";
+    };
+
+    std::cout << "\n=== MetalOxide lognormal paper 0-D cases ===\n";
+    print_outcome("mono-i", mono_i);
+    print_outcome("logn-i", logn_i);
+    print_outcome("logn-ii", logn_ii);
+    print_outcome("logn-iii", logn_iii);
+    print_outcome("logn-iv", logn_iv);
+    print_outcome("logn-v", logn_v);
+    std::cout << (all_valid
+                      ? "  [PASS] All five paper-style 0-D cases produced valid closure states\n"
+                      : "  [FAIL] At least one paper-style 0-D case produced an invalid state\n");
+    std::cout << (case_i_ok
+                      ? "  [PASS] Case i reproduces pure-agglomeration trends\n"
+                      : "  [FAIL] Case i pure-agglomeration trends are inconsistent\n");
+    std::cout << (case_ii_ok
+                      ? "  [PASS] Case ii reproduces predominant-sintering trends\n"
+                      : "  [FAIL] Case ii predominant-sintering trends are inconsistent\n");
+    std::cout << (case_iii_ok
+                      ? "  [PASS] Case iii reproduces competing agglomeration/sintering trends\n"
+                      : "  [FAIL] Case iii competing agglomeration/sintering trends are inconsistent\n");
+    std::cout << (case_iv_ok
+                      ? "  [PASS] Case iv reproduces condensation with strong sintering trends\n"
+                      : "  [FAIL] Case iv condensation/strong-sintering trends are inconsistent\n");
+    std::cout << (case_v_ok
+                      ? "  [PASS] Case v reproduces condensation with weak sintering trends\n"
+                      : "  [FAIL] Case v condensation/weak-sintering trends are inconsistent\n");
+
+    return ok;
+}
+
 static bool validateMetalOxideLognormalCoagulation()
 {
     using Access = MOM::detail::MetalOxideTestAccess<MOM::BasicThermoData>;
@@ -1935,6 +2225,7 @@ int main()
     all_ok &= validateMetalOxideLognormalClosureState();
     all_ok &= validateMetalOxideDimensionlessLognormalMoment();
     all_ok &= validateMetalOxideLognormalLimitingCases();
+    all_ok &= validateMetalOxideLognormalPaper0DCases();
     all_ok &= validateMetalOxideLognormalCoagulation();
     all_ok &= validateMetalOxideLognormalCondensation();
     all_ok &= validateMetalOxideLognormalSintering();
