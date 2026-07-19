@@ -923,7 +923,79 @@ void HMOM6<Thermo>::SootSurfaceGrowthM7()
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::SootOxidationM7()
 {
-    // TODO: implement
+    // Oxidation removes volume from each particle at a rate proportional to its
+    // surface area (HACA-type model):
+    //
+    //   dV/dt|ox  = −coeff · S
+    //   dS/dt|ox  = (∂S/∂V) · (dV/dt) = Kf · V^{Av_f} · S^{As_f+1} · (−coeff · S)
+    //             = −coeff · Kf · V^{Av_f} · S^{As_f+2}
+    //
+    // where  coeff = kox · χ · VC2,  χ = α · surface_density.
+    //
+    // Applying the bivariate transport theorem:
+    //
+    //   d(M_{x,y})/dt|ox = −coeff · [ x · M(x−1, y+1)
+    //                                + y · Kf · M(x+Av_f, y+As_f+1) ]
+    //
+    // (derived by differentiating V^x · S^y along the particle trajectory and
+    //  integrating over the NDF — exactly the same algebra as SootSurfaceGrowthM7
+    //  with opposite sign and coeff_ox in place of coeff_sg.)
+    //
+    // The normalised source is divided by V0^x · S0^y · Nav.
+    //
+    // Special cases:
+    //   M00 (x=0, y=0): the transport term vanishes (no particle creation/destruction
+    //     from volume/surface evolution alone).  Particle loss occurs via the boundary
+    //     flux at V=0: small-mode particles oxidise completely at rate
+    //       dn0/dt|ox = −N0 · coeff · S0 / V0
+    //     Normalised: source_(0) = −coeff · N0 · S0 / (V0 · Nav).
+    //   N0 (index 6): identical to M00 — both track particle count loss from the
+    //     small mode.
+    //   M10 (x=1): GetMoment(0,1) includes the small-mode term N0·S0, which
+    //     correctly accounts for the volume removed by disappearing small-mode
+    //     particles (V0 per particle × rate N0·coeff·S0/V0).
+    //
+    // Index mapping: 0→M00, 1→M10, 2→M01, 3→M20, 4→M11, 5→M02, 6→N0.
+
+    this->source_oxidation_.setZero();
+    if (!HasSoot())
+        return;
+
+    const double chi   = alpha_ * surface_density_;
+    const double coeff = kox_ * chi * VC2_;
+    const double Nav   = this->Nav_mol_;
+    const double Av_f  = Av_fractal_;
+    const double As_f  = As_fractal_;
+    const double Kf    = K_fractal_;
+
+    // --- M00 (x=0, y=0): small-mode particle loss (boundary flux at V→0) ---
+    this->source_oxidation_(0) = -coeff * N0_ * S0_ / V0_ / Nav;
+
+    // --- M10 (x=1, y=0): 1·M(0,1) / (V0·Nav) ---
+    this->source_oxidation_(1) = -coeff * GetMoment(0., 1.) / (V0_ * Nav);
+
+    // --- M01 (x=0, y=1): 1·Kf·M(Av_f, As_f+2) / (S0·Nav) ---
+    //   [second term: y+As_f+1 = 1+As_f+1 = As_f+2, x+Av_f = Av_f]
+    this->source_oxidation_(2) = -coeff * Kf * GetMoment(Av_f, As_f + 2.) / (S0_ * Nav);
+
+    // --- M20 (x=2, y=0): 2·M(1,1) / (V0²·Nav) ---
+    this->source_oxidation_(3) =
+        -2. * coeff * GetMoment(1., 1.) / (V0_ * V0_ * Nav);
+
+    // --- M11 (x=1, y=1): [M(0,2) + Kf·M(Av_f+1, As_f+2)] / (V0·S0·Nav) ---
+    //   volume term:  1·M(0,  2)
+    //   surface term: 1·Kf·M(1+Av_f, 1+As_f+1) = Kf·M(Av_f+1, As_f+2)
+    this->source_oxidation_(4) =
+        -coeff * (GetMoment(0., 2.) + Kf * GetMoment(Av_f + 1., As_f + 2.))
+        / (V0_ * S0_ * Nav);
+
+    // --- M02 (x=0, y=2): 2·Kf·M(Av_f, As_f+3) / (S0²·Nav) ---
+    //   [second term: y+As_f+1 = 2+As_f+1 = As_f+3, x+Av_f = Av_f]
+    this->source_oxidation_(5) =
+        -2. * coeff * Kf * GetMoment(Av_f, As_f + 3.) / (S0_ * S0_ * Nav);
+
+    // --- N0 (index 6): same as M00 — small-mode particle loss ---
+    this->source_oxidation_(6) = this->source_oxidation_(0);
 }
 
 template <ThermoMap Thermo>
