@@ -1670,57 +1670,85 @@ void HMOM6<Thermo>::CalculateOmegaGas() noexcept
 template <ThermoMap Thermo>
 double HMOM6<Thermo>::volume_fraction() const noexcept
 {
-    // TODO: implement
-    return 0.;
+    // Total soot volume fraction fv = M_{1,0} = ∫ V · n dV dS  [m³/m³].
+    const double fv = GetMoment(1., 0.);
+    return (!std::isfinite(fv) || fv < kSootVolumeFloor) ? 0. : fv;
 }
 
 template <ThermoMap Thermo>
 double HMOM6<Thermo>::particle_diameter() const noexcept
 {
-    // TODO: implement
-    return 0.;
+    // Sauter mean diameter: dp = 6 V / S (holds for volume-equivalent sphere).
+    const double V = GetMoment(1., 0.);
+    const double S = GetMoment(0., 1.);
+    if (!std::isfinite(V) || !std::isfinite(S) || V <= kSootVolumeFloor || S <= kSootSurfaceFloor)
+        return 0.;
+    const double dp = 6. * V / S;
+    return (std::isfinite(dp) && dp > 0.) ? dp : 0.;
 }
 
 template <ThermoMap Thermo>
 double HMOM6<Thermo>::collision_diameter() const noexcept
 {
-    // TODO: implement
-    return 0.;
+    // Mean collision diameter: dc = K_c · <V^{Av_c} · S^{As_c}> / N
+    //   where <·> is the number-weighted mean over the full NDF.
+    const double N = GetMoment(0., 0.);
+    if (!std::isfinite(N) || N <= kSootNumberFloor)
+        return 0.;
+    const double dc = K_collisional_ * GetMoment(Av_collisional_, As_collisional_) / N;
+    return (std::isfinite(dc) && dc > 0.) ? dc : 0.;
 }
 
 template <ThermoMap Thermo>
 double HMOM6<Thermo>::particle_number_density() const noexcept
 {
-    // TODO: implement
-    return 0.;
+    // Total particle number density N = M_{0,0} = ∫ n dV dS  [#/m³].
+    const double n = GetMoment(0., 0.);
+    return (!std::isfinite(n) || n < kSootNumberFloor) ? 0. : n;
 }
 
 template <ThermoMap Thermo>
 double HMOM6<Thermo>::mass_fraction() const noexcept
 {
-    // TODO: implement
-    return 0.;
+    // Soot mass fraction: Ys = rho_soot / rho_mix · fv.
+    return this->rho_particle_ / this->rho_ * volume_fraction();
 }
 
 template <ThermoMap Thermo>
 double HMOM6<Thermo>::specific_surface_area() const noexcept
 {
-    // TODO: implement
-    return 0.;
+    // Total soot surface area density [m²/m³]: M_{0,1} = ∫ S · n dV dS.
+    const double Ss = GetMoment(0., 1.);
+    return (!std::isfinite(Ss) || Ss <= 0.) ? 0. : Ss;
 }
 
 template <ThermoMap Thermo>
 double HMOM6<Thermo>::number_primary_particles() const noexcept
 {
-    // TODO: implement
-    return 0.;
+    // Mean number of primary particles per aggregate:
+    //   np = (K_spher)^{-3} · M_{-2,3} / N
+    // where K_spher = (36·π)^{1/3} and M_{-2,3} = ∫ V^{-2}·S³·n dV dS.
+    // This formula is exact for spherical primaries arranged in mass-fractal
+    // aggregates and is the MOMIC extension of the HMOM4 expression.
+    const double N = GetMoment(0., 0.);
+    if (!std::isfinite(N) || N <= kSootNumberFloor)
+        return 0.;
+    const double M = GetMoment(-2., 3.);
+    if (!std::isfinite(M) || M <= 0.)
+        return 0.;
+    const double K_spher = K_spher_HMOM6(this->pi_);
+    const double np      = std::pow(K_spher, -3.) * M / N;
+    return (std::isfinite(np) && np >= 1.) ? np : 1.;
 }
 
 template <ThermoMap Thermo>
 double HMOM6<Thermo>::diffusion_coefficient() const noexcept
 {
-    // TODO: implement
-    return 0.;
+    // Brownian diffusion coefficient via Cunningham-corrected Stokes–Einstein.
+    // Falls back to kinetic-theory value mu/Sc when dc is sub-nanometre.
+    const double dc_safe       = std::max(collision_diameter(), 1.e-12);
+    const double GammaBrownian = this->CunninghamDiffusionCoeff(dc_safe);
+    return std::max(GammaBrownian, this->mu_ / this->schmidt_number_);
 }
 
 // ===========================================================================
