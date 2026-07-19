@@ -565,9 +565,53 @@ double MetalOxide<Thermo>::LognormalCoagulationIntegralCorrection(double M,
     if (sigma <= zero_width)
         return 1.;
 
-    // Empirical dimensionless coagulation integral correction proposed for
-    // the log-normal closure when no lookup table is used.
-    return 0.65;
+    constexpr std::array<double, 5> M_nodes{
+        2.00, 2.25, 2.50, 2.75, 3.00};
+    constexpr std::array<double, 8> sigma_nodes{
+        0.00, 0.25, 0.50, 0.75, 1.00, 1.25, 1.50, 1.70};
+
+    // Dimensionless integral I(M,sigma) from the log-normal coagulation
+    // correction. Values were generated from the Eq. (37) double integral.
+    constexpr std::array<std::array<double, 8>, 5> I_table{{
+        {{1.000000000, 1.006532090, 1.026439667, 1.060958207,
+          1.112899105, 1.187450945, 1.293315299, 1.409752344}},
+        {{1.000000000, 1.005101653, 1.020913133, 1.049262662,
+          1.094017440, 1.162078835, 1.264914720, 1.384396881}},
+        {{1.000000000, 1.004260069, 1.017865773, 1.043627900,
+          1.087199239, 1.158443034, 1.273741759, 1.415330366}},
+        {{1.000000000, 1.004006725, 1.017290649, 1.044043180,
+          1.092525960, 1.177151955, 1.322300379, 1.509027840}},
+        {{1.000000000, 1.004342159, 1.019200745, 1.050613230,
+          1.110519654, 1.220185674, 1.416934098, 1.680366832}}
+    }};
+
+    const double Mc = std::clamp(M, M_nodes.front(), M_nodes.back());
+    const double sc = std::clamp(sigma, sigma_nodes.front(), sigma_nodes.back());
+
+    auto bracket = [](const auto& nodes, double x) noexcept
+    {
+        if (x <= nodes.front())
+            return std::size_t{0};
+        if (x >= nodes.back())
+            return nodes.size() - 2u;
+        const auto upper = std::upper_bound(nodes.begin(), nodes.end(), x);
+        return static_cast<std::size_t>((upper - nodes.begin()) - 1);
+    };
+
+    const std::size_t iM = bracket(M_nodes, Mc);
+    const std::size_t is = bracket(sigma_nodes, sc);
+
+    const double tM = (Mc - M_nodes[iM]) / (M_nodes[iM + 1u] - M_nodes[iM]);
+    const double ts = (sc - sigma_nodes[is]) / (sigma_nodes[is + 1u] - sigma_nodes[is]);
+
+    const double I00 = I_table[iM][is];
+    const double I10 = I_table[iM + 1u][is];
+    const double I01 = I_table[iM][is + 1u];
+    const double I11 = I_table[iM + 1u][is + 1u];
+
+    const double I0 = I00 + tM * (I10 - I00);
+    const double I1 = I01 + tM * (I11 - I01);
+    return I0 + ts * (I1 - I0);
 }
 
 template <ThermoMap Thermo> double MetalOxide<Thermo>::volume_fraction() const noexcept

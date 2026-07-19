@@ -1185,9 +1185,13 @@ static bool validateMetalOxideLognormalCoagulation()
     bool source_ok = false;
     bool spherical_limit_ok = false;
 
+    const double interpolated_M25_sigma03 =
+        1.004260069 + (0.30 - 0.25) / (0.50 - 0.25) * (1.017865773 - 1.004260069);
     correction_ok =
         near(Access::LognormalCoagulationIntegralCorrection(2., 0.), 1.) &&
-        near(Access::LognormalCoagulationIntegralCorrection(2.5, 0.3), 0.65) &&
+        near(Access::LognormalCoagulationIntegralCorrection(2.5, 0.3),
+             interpolated_M25_sigma03) &&
+        near(Access::LognormalCoagulationIntegralCorrection(1.5, 2.0), 1.409752344) &&
         Access::LognormalCoagulationIntegralCorrection(2.5, -1.) == 0.;
 
     try

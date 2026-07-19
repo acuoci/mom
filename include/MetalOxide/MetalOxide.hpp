@@ -35,6 +35,7 @@
 
 #pragma once
 
+#include <array>
 #include <span>
 #include <stdexcept>
 #include <string>
