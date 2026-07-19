@@ -55,6 +55,7 @@
 
 // -- Registered variant headers ------------------------------------------------
 #include "HMOM/HMOM.hpp"
+#include "HMOM6/HMOM6.hpp"
 #include "BrookesMoss/BrookesMoss.hpp"
 #include "ThreeEquations/ThreeEquations.hpp"
 #include "MetalOxide/MetalOxide.hpp"
@@ -128,6 +129,6 @@ template <template <typename> class... Variants> struct TypeList
  * Every type listed here is available through `AnyMomentMethod<Thermo>` and
  * `MakeAnyMomentMethod()`.
  */
-using AllVariants = detail::TypeList<HMOM, BrookesMoss, ThreeEquations, MetalOxide>;
+using AllVariants = detail::TypeList<HMOM, HMOM6, BrookesMoss, ThreeEquations, MetalOxide>;
 
 } // namespace MOM

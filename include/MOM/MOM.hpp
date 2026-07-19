@@ -86,3 +86,5 @@ static_assert( MOM::HasReconstructedNDF<MOM::MetalOxide<MOM::BasicThermoData>>,
                "[MOM] MetalOxide must satisfy HasReconstructedNDF.");
 static_assert(!MOM::HasReconstructedNDF<MOM::BrookesMoss<MOM::BasicThermoData>>,
                "[MOM] BrookesMoss must NOT satisfy HasReconstructedNDF.");
+static_assert(!MOM::HasReconstructedNDF<MOM::HMOM6<MOM::BasicThermoData>>,
+               "[MOM] HMOM6 must NOT satisfy HasReconstructedNDF.");

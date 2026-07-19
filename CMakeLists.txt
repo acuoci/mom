@@ -57,6 +57,7 @@ mom_configure_target(MOM_headers INTERFACE)
 set(_MOM_SOURCES
     src/ThreeEquations/ThreeEquations_BasicThermoData.cpp
     src/HMOM/HMOM_BasicThermoData.cpp
+    src/HMOM6/HMOM6_BasicThermoData.cpp
     src/BrookesMoss/BrookesMoss_BasicThermoData.cpp
     src/MetalOxide/MetalOxide_BasicThermoData.cpp
     src/Utilities/OutputFileColumns.cpp
