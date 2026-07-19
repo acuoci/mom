@@ -1547,7 +1547,120 @@ void HMOM6<Thermo>::ComputeSources() noexcept
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::CalculateOmegaGas() noexcept
 {
-    // TODO: implement
+    // Gas-phase consumption rates [kg/m3/s] from soot processes.
+    // Logic and channel decomposition are identical to HMOM4::CalculateOmegaGas;
+    // the only structural difference is the moment index convention (7 equations
+    // instead of 4), but the M10 source is still at index 1 in both variants.
+    //
+    // Sign convention: negative = consumed, positive = produced.
+
+    this->omega_gas_.setZero();
+    omega_gas_oxidation_.setZero();
+    if (!this->gas_consumption_)
+        return;
+
+    // --- Nucleation: PAH precursor consumption ---
+    if (nucleation_model_ > 0 && pah_index_ >= 0)
+    {
+        const double R_PAH = PAHDimerizationRate(); // [kmol/m3/s] → converted below
+        if (R_PAH > 0. && std::isfinite(R_PAH))
+        {
+            const double MW_PAH = thermo_.MolecularWeight(static_cast<unsigned>(pah_index_));
+            this->omega_gas_[static_cast<unsigned>(pah_index_)] -= R_PAH * MW_PAH;
+        }
+    }
+
+    // --- Surface growth: C2H2 consumed, H2 produced ---
+    // R_C2H2 [mol/m3/s]: source_growth_(1) is the M10_norm source;
+    // multiplying by V0/VC2 recovers the molar C2H2 consumption rate.
+    if (surface_growth_model_ > 0 && VC2_ > 0. && index_C2H2_ >= 0)
+    {
+        const double R_C2H2 = source_growth_(1) * V0_ / VC2_;
+        if (R_C2H2 > 0. && std::isfinite(R_C2H2))
+        {
+            const double MW_C2H2 = thermo_.MolecularWeight(static_cast<unsigned>(index_C2H2_));
+            this->omega_gas_[static_cast<unsigned>(index_C2H2_)] -= R_C2H2 * MW_C2H2 / 1000.;
+
+            if (index_H2_ >= 0)
+            {
+                const double MW_H2 = thermo_.MolecularWeight(static_cast<unsigned>(index_H2_));
+                this->omega_gas_[static_cast<unsigned>(index_H2_)] += R_C2H2 * MW_H2 / 1000.;
+            }
+        }
+    }
+
+    // --- Oxidation: O2 and OH channels ---
+    // R_oxid_C2 [mol C2-pairs/m3/s]: rate of soot C-pairs removed by oxidation,
+    // derived from the M10_norm oxidation source (index 1) in the same way as growth.
+    if (oxidation_model_ > 0 && VC2_ > 0.)
+    {
+        // Snapshot before oxidation contributions are added, for the
+        // oxidation-only extraction used by operator splitting.
+        const Eigen::VectorXd omega_snap_before_ox = this->omega_gas_;
+
+        const double R_oxid_C2 = -source_oxidation_(1) * V0_ / VC2_;
+        if (R_oxid_C2 > 0. && std::isfinite(R_oxid_C2))
+        {
+            const double kox_sum = kox_O2_ + kox_OH_;
+            if (kox_sum > 0. && std::isfinite(kox_sum))
+            {
+                const double fO2 = kox_O2_ / kox_sum;
+                const double fOH = kox_OH_ / kox_sum;
+
+                // O2 channel: C(soot) + O2 → 2 CO
+                if (index_O2_ >= 0 && fO2 > 0.)
+                {
+                    const double R_O2  = fO2 * R_oxid_C2;
+                    const double MW_O2 = thermo_.MolecularWeight(static_cast<unsigned>(index_O2_));
+                    this->omega_gas_[static_cast<unsigned>(index_O2_)] -= R_O2 * MW_O2 / 1000.;
+                    if (index_CO_ >= 0)
+                    {
+                        const double MW_CO = thermo_.MolecularWeight(static_cast<unsigned>(index_CO_));
+                        this->omega_gas_[static_cast<unsigned>(index_CO_)] += R_O2 * 2. * MW_CO / 1000.;
+                    }
+                }
+
+                // OH channel: C(soot) + OH → CO + 0.5 H2
+                if (index_OH_ >= 0 && fOH > 0.)
+                {
+                    const double R_OH  = fOH * R_oxid_C2;
+                    const double MW_OH = thermo_.MolecularWeight(static_cast<unsigned>(index_OH_));
+                    this->omega_gas_[static_cast<unsigned>(index_OH_)] -= R_OH * MW_OH / 1000.;
+                    if (index_CO_ >= 0)
+                    {
+                        const double MW_CO = thermo_.MolecularWeight(static_cast<unsigned>(index_CO_));
+                        this->omega_gas_[static_cast<unsigned>(index_CO_)] += R_OH * MW_CO / 1000.;
+                    }
+                    if (index_H2_ >= 0)
+                    {
+                        const double MW_H2 = thermo_.MolecularWeight(static_cast<unsigned>(index_H2_));
+                        this->omega_gas_[static_cast<unsigned>(index_H2_)] += R_OH * 0.5 * MW_H2 / 1000.;
+                    }
+                }
+            }
+        }
+
+        // Capture the oxidation-only contribution for operator splitting.
+        omega_gas_oxidation_ = this->omega_gas_ - omega_snap_before_ox;
+    }
+
+    // --- Closure dummy species (mass conservation) ---
+    // If a closure dummy species is in use, its omega_gas entry is set to
+    // minus the sum of all other entries so that total mass is conserved.
+    if (this->is_closure_dummy_species_ && this->closure_dummy_index_ >= 0)
+    {
+        double sum = 0.;
+        for (Eigen::Index i = 0; i < this->omega_gas_.size(); ++i)
+            if (i != static_cast<Eigen::Index>(this->closure_dummy_index_))
+                sum += this->omega_gas_[i];
+        this->omega_gas_[static_cast<Eigen::Index>(this->closure_dummy_index_)] = -sum;
+
+        double sum_ox = 0.;
+        for (Eigen::Index i = 0; i < omega_gas_oxidation_.size(); ++i)
+            if (i != static_cast<Eigen::Index>(this->closure_dummy_index_))
+                sum_ox += omega_gas_oxidation_[i];
+        omega_gas_oxidation_[static_cast<Eigen::Index>(this->closure_dummy_index_)] = -sum_ox;
+    }
 }
 
 // ===========================================================================
