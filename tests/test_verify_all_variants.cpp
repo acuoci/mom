@@ -881,6 +881,81 @@ static bool validateHMOMGasConsumptionDisableClearsOutput()
     return ok;
 }
 
+static bool validateMetalOxideMonodisperseClosureRegression()
+{
+    const auto th = buildMetalOxideThermo();
+    const auto Y  = X2Y({0.050, 0.950}, th);
+
+    bool ok = false;
+
+    auto spans_equal_exact = [](std::span<const double> a, std::span<const double> b)
+    {
+        if (a.size() != b.size())
+            return false;
+        for (std::size_t i = 0; i < a.size(); ++i)
+            if (a[i] != b[i])
+                return false;
+        return true;
+    };
+
+    auto scalars_equal_exact = [](double a, double b)
+    {
+        return a == b;
+    };
+
+    try
+    {
+        MOM::MetalOxide<MOM::BasicThermoData>::Config base_cfg;
+        base_cfg.precursor_species = "TiOH4";
+        base_cfg.gas_consumption   = false;
+
+        auto explicit_cfg = base_cfg;
+        explicit_cfg.closure_model = "monodisperse";
+
+        MOM::MetalOxide<MOM::BasicThermoData> default_model(th);
+        default_model.SetupFromConfig(base_cfg);
+        default_model.SetViscosity(4.0e-5);
+        default_model.SetState(1500., 101325., Y.data());
+        default_model.SetMoments(1.e-3, 1.e6, 2.e3);
+        default_model.ComputeSources();
+
+        MOM::MetalOxide<MOM::BasicThermoData> explicit_model(th);
+        explicit_model.SetupFromConfig(explicit_cfg);
+        explicit_model.SetViscosity(4.0e-5);
+        explicit_model.SetState(1500., 101325., Y.data());
+        explicit_model.SetMoments(1.e-3, 1.e6, 2.e3);
+        explicit_model.ComputeSources();
+
+        ok = default_model.closure_model() ==
+                 MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Monodisperse &&
+             explicit_model.closure_model() ==
+                 MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Monodisperse &&
+             spans_equal_exact(default_model.sources(), explicit_model.sources()) &&
+             spans_equal_exact(default_model.sources_nucleation(), explicit_model.sources_nucleation()) &&
+             spans_equal_exact(default_model.sources_coagulation(), explicit_model.sources_coagulation()) &&
+             spans_equal_exact(default_model.sources_condensation(), explicit_model.sources_condensation()) &&
+             spans_equal_exact(default_model.sources_sintering(), explicit_model.sources_sintering()) &&
+             spans_equal_exact(default_model.omega_gas(), explicit_model.omega_gas()) &&
+             scalars_equal_exact(default_model.volume_fraction(), explicit_model.volume_fraction()) &&
+             scalars_equal_exact(default_model.particle_number_density(), explicit_model.particle_number_density()) &&
+             scalars_equal_exact(default_model.specific_surface_area(), explicit_model.specific_surface_area()) &&
+             scalars_equal_exact(default_model.particle_diameter(), explicit_model.particle_diameter()) &&
+             scalars_equal_exact(default_model.collision_diameter(), explicit_model.collision_diameter()) &&
+             scalars_equal_exact(default_model.number_primary_particles(), explicit_model.number_primary_particles()) &&
+             scalars_equal_exact(default_model.diffusion_coefficient(), explicit_model.diffusion_coefficient());
+    }
+    catch (const std::exception&)
+    {
+        ok = false;
+    }
+
+    std::cout << "\n=== MetalOxide monodisperse closure regression ===\n";
+    std::cout << (ok ? "  [PASS] Default closure and explicit monodisperse closure are bitwise identical\n"
+                     : "  [FAIL] Explicit monodisperse closure changed MetalOxide results\n");
+
+    return ok;
+}
+
 // ============================================================================
 // main
 // ============================================================================
@@ -910,6 +985,7 @@ int main()
     all_ok &= validateBrookesMossInvalidModelFlags();
     all_ok &= validateIntegerModelFlagValidation();
     all_ok &= validateHMOMGasConsumptionDisableClearsOutput();
+    all_ok &= validateMetalOxideMonodisperseClosureRegression();
 
     // ════════════════════════════════════════════════════════════════════
     // 1. HMOM  (NEq = 4)
