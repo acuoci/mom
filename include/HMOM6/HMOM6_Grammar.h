@@ -16,7 +16,7 @@
 |                                                                         |
 |   This file is part of the OpenSMOKEpp library.                         |
 |                                                                         |
-|   Copyright (C) 2026 Alberto Cuoci.                                     |
+|   Copyright (C) 2026 Alberto Cuoci, Benedetta Franzelli                 |
 |                                                                         |
 |   OpenSMOKEpp is free software: you can redistribute it and/or modify   |
 |   it under the terms of the GNU General Public License as published by  |
@@ -33,58 +33,35 @@
 |                                                                         |
 \*-----------------------------------------------------------------------*/
 
+#ifndef MOM_HMOM6_Grammar_H
+#define MOM_HMOM6_Grammar_H
+
+#include "Dictionary.h"
+#include "DictionaryManager.h"
+#include "DictionaryGrammar.h"
+#include "DictionaryKeyWord.h"
+
 /**
- * @file MOM.hpp
- * @brief Umbrella header for the Method of Moments particle source-term library.
- *
- * Include this header when a translation unit needs the complete public API:
- * concrete variants, compile-time concepts, runtime factory, per-cell dispatch,
- * source accessors, particle properties, splitting utilities, and reporting.
- *
- * @par Compile-time selection
- * @code
- *   #include "MOM/MOM.hpp"
- *
- *   using ParticleModel = MOM::ThreeEquations<MyThermo>;
- *   static_assert(MOM::MomentMethod<ParticleModel>);
- * @endcode
- *
- * @par Runtime selection
- * @code
- *   auto model = MOM::MakeAnyMomentMethod(thermo, "HMOM");
- *   MOM::ComputeCell(model, T, P, Y, mu, moments);
- *   auto sources = MOM::GetSources(model);
- * @endcode
+ * @file HMOM6_Grammar.h
+ * @brief OpenSMOKE++ dictionary grammar for HMOM6 configuration.
  */
 
-#pragma once
+namespace MOM
+{
 
-// -- Core infrastructure -------------------------------------------------------
-#include "ThermoProxy.hpp"
-#include "ProcessFlags.hpp"
-#include "MomentMethodBase.hpp"
-#include "MomentMethodConcept.hpp"
+/**
+ * @class HMOM6_Grammar
+ * @brief Defines dictionary keywords accepted by the HMOM6 variant
+ *        (6+1 bivariate MOMIC closure).
+ */
+class HMOM6_Grammar : public OpenSMOKEpp::DictionaryGrammar
+{
+protected:
 
-// -- Variant registry, runtime wrapper, and reporter ---------------------------
-#include "AnyMomentMethod.hpp"
-#include "MomentMethodReporter.hpp"
+    /** @brief Registers HMOM6 dictionary keywords and their value types. */
+    virtual void DefineRules();
+};
 
-// -- Free-function dispatch API -----------------------------------------------
-#include "Dispatch.hpp"
-#include "Properties.hpp"
-#include "Sources.hpp"
-#include "Splitting.hpp"
+} // namespace MOM
 
-/** @brief Checks every registered variant against the public MomentMethod concept. */
-template struct MOM::AllVariants::ConceptCheck<MOM::BasicThermoData>;
-
-static_assert( MOM::HasReconstructedNDF<MOM::HMOM<MOM::BasicThermoData>>,
-               "[MOM] HMOM must satisfy HasReconstructedNDF.");
-static_assert( MOM::HasReconstructedNDF<MOM::ThreeEquations<MOM::BasicThermoData>>,
-               "[MOM] ThreeEquations must satisfy HasReconstructedNDF.");
-static_assert( MOM::HasReconstructedNDF<MOM::MetalOxide<MOM::BasicThermoData>>,
-               "[MOM] MetalOxide must satisfy HasReconstructedNDF.");
-static_assert(!MOM::HasReconstructedNDF<MOM::BrookesMoss<MOM::BasicThermoData>>,
-               "[MOM] BrookesMoss must NOT satisfy HasReconstructedNDF.");
-static_assert(!MOM::HasReconstructedNDF<MOM::HMOM6<MOM::BasicThermoData>>,
-               "[MOM] HMOM6 must NOT satisfy HasReconstructedNDF.");
+#endif // MOM_HMOM6_Grammar_H
