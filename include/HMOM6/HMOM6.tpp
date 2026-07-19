@@ -1028,7 +1028,10 @@ void HMOM6<Thermo>::SootCondensationM7()
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::SootCoagulationM7()
 {
-    // TODO: implement
+    // Each sub-function guards itself with HasSoot() and zeroes its output.
+    SootCoagulationSmallSmallM7();
+    SootCoagulationSmallLargeM7();
+    SootCoagulationLargeLargeM7();
 }
 
 template <ThermoMap Thermo>
@@ -1193,25 +1196,155 @@ void HMOM6<Thermo>::SootCoagulationLargeLargeM7()
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::SootCoagulationContinuousM7()
 {
-    // TODO: implement
+    // Mean free path λ for air at standard conditions, temperature- and
+    // pressure-corrected (identical physical constants as HMOM4).
+    // λ₀ = kB·T₀ / (√2·π·d_air²·P₀)  with d_air = 200 pm, P₀ = 101325 Pa
+    double lambda = 8.2057e-5 / this->sqrt2_ / std::pow(200.e-12, 2.) / this->Nav_mol_;
+    lambda        = 1.257 * lambda * this->T_ / (this->P_Pa_ / 101325.);
+
+    // Stokes–Einstein prefactor: βᵢ₀ = 2·kB·T / (3·μ)
+    const double betai0 = 2. * this->kB_ * this->T_ / 3. / this->mu_;
+
+    SootCoagulationContinuousSmallSmallM7(lambda, betai0);
+    SootCoagulationContinuousSmallLargeM7(lambda, betai0);
+    SootCoagulationContinuousLargeLargeM7(lambda, betai0);
 }
 
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::SootCoagulationContinuousSmallSmallM7(double lambda, double betai0)
 {
-    // TODO: implement
+    source_coagulation_cont_ss_.setZero();
+    if (!HasSoot()) return;
+
+    // Continuum (Smoluchowski) kernel with Cunningham slip correction.
+    // For two identical (V0, S0) particles:
+    //   Dc   = K_diam · V0^{1/3}           (collision = spherical nucleation diameter)
+    //   CC0  = 1 + lambda/Dc               (Cunningham correction, Kn = lambda/Dc)
+    //   beta00 = betai0 · (CC1/Dc1 + CC2/Dc2) · (Dc1 + Dc2)
+    //          = betai0 · (2·CC0/Dc) · (2·Dc)   [both particles identical]
+    //          = 4 · betai0 · CC0
+    const double K_diam = K_diam_HMOM6(this->pi_);
+    const double DcNUCL = K_diam * std::pow(V0_, 1. / 3.);
+    const double CC0    = 1. + lambda / DcNUCL;
+    const double beta00 = betai0 * (2. * CC0 / DcNUCL) * (2. * DcNUCL);
+
+    // Coalesced particle surface area (spherical).
+    const double S00 = this->SphereSurfaceFromVolume(2. * V0_);
+
+    // Base rate (= ss0 in the free-molecular case, same sign convention).
+    const double ss0 = -0.5 * beta00 * N0_ * N0_ / this->Nav_mol_;
+    const double R   = S00 / S0_;   // surface ratio of coalesced to primary
+
+    // Unified formula: source[M_{x,y}] = -ss0 · (2^x · R^y − 2)
+    // Identical structure to SootCoagulationSmallSmallM7; only beta00 differs.
+    source_coagulation_cont_ss_(0) =  ss0;                       // M00
+    source_coagulation_cont_ss_(1) =  0.;                        // M10 (volume conserved)
+    source_coagulation_cont_ss_(2) = -ss0 * (R - 2.);            // M01
+    source_coagulation_cont_ss_(3) = -2. * ss0;                  // M20
+    source_coagulation_cont_ss_(4) = -ss0 * (2. * R - 2.);       // M11
+    source_coagulation_cont_ss_(5) = -ss0 * (R * R - 2.);        // M02
+    source_coagulation_cont_ss_(6) =  2. * ss0;                  // N0
 }
 
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::SootCoagulationContinuousSmallLargeM7(double lambda, double betai0)
 {
-    // TODO: implement
+    source_coagulation_cont_sl_.setZero();
+    if (!HasSoot()) return;
+
+    const double K_diam = K_diam_HMOM6(this->pi_);
+    const double DcNUCL = K_diam * std::pow(V0_, 1. / 3.);
+    const double Av_c   = Av_collisional_;
+    const double As_c   = As_collisional_;
+    const double Kc     = K_collisional_;
+    const double Av_f   = Av_fractal_;
+    const double As_f   = As_fractal_;
+    const double Kf     = K_fractal_;
+    const double Nav    = this->Nav_mol_;
+
+    // Continuum (Smoluchowski + Cunningham) collision integral for the small
+    // particle (V0, DcNUCL) against the large-mode distribution n_L.
+    //
+    // β(V0,Vₗ)/βᵢ₀ = (CC₀/Dc₀ + CC_L/Dc_L) · (Dc₀ + Dc_L)
+    //
+    // where CC = 1 + λ/Dc and Dc_L = Kc · V^{Av_c} · S^{As_c}.
+    //
+    // Expanding and integrating against n_L with moment shift (da, db):
+    //   CI(da,db) = (2 + λ/Dc₀)         · M^L(da,         db)
+    //             + (Dc₀ + λ)/Kc         · M^L(-Av_c+da, -As_c+db)
+    //             + (1 + λ/Dc₀)·Kc/Dc₀  · M^L(+Av_c+da, +As_c+db)
+    //             + λ·Dc₀·Kc²            · M^L(-2Av_c+da, -2As_c+db)
+    //
+    // Recovered exactly from HMOM4 at (da,db)=(0,0) for M00 and (Av_f,As_f+1) for M01.
+    auto CI = [&](double da, double db) noexcept -> double {
+        return
+            (2. + lambda / DcNUCL)       * GetMissingMoment(da,              db) +
+            (DcNUCL + lambda) / Kc       * GetMissingMoment(-Av_c + da, -As_c + db) +
+            (1. + lambda / DcNUCL) * Kc / DcNUCL
+                                         * GetMissingMoment( Av_c + da,  As_c + db) +
+            lambda * DcNUCL * Kc * Kc   * GetMissingMoment(-2.*Av_c + da, -2.*As_c + db);
+    };
+
+    // M00: Δ = −1 per collision
+    source_coagulation_cont_sl_(0) = -N0_ / Nav * betai0 * CI(0., 0.);
+
+    // M10: volume conserved
+    source_coagulation_cont_sl_(1) = 0.;
+
+    // M01: Δ(S)/S0 = Kf·V0·V_L^{Av_f}·S_L^{As_f+1}/S0 − 1
+    //   source = cont_sl_(0)  +  N0·V0·Kf/S0/Nav · βᵢ₀ · CI(Av_f, As_f+1)
+    source_coagulation_cont_sl_(2) = source_coagulation_cont_sl_(0)
+        + N0_ * V0_ * Kf / S0_ / Nav * betai0 * CI(Av_f, As_f + 1.);
+
+    // M20: Δ(V²)/V0² = 2·V_L/V0 (no constant term — V0² cancels)
+    //   source = +2·N0·βᵢ₀/(V0·Nav) · CI(1, 0)   [always positive]
+    source_coagulation_cont_sl_(3) = 2. * N0_ * betai0 / (V0_ * Nav) * CI(1., 0.);
+
+    // M11: Δ(V·S)/(V0·S0) = (S_L/S0−1) + Kf·V_L^{Av_f+1}·S_L^{As_f+1}/S0
+    //   source = cont_sl_(0)  +  N0·βᵢ₀/(S0·Nav) · [CI(0,1) + Kf·CI(Av_f+1, As_f+1)]
+    source_coagulation_cont_sl_(4) = source_coagulation_cont_sl_(0)
+        + N0_ * betai0 / (S0_ * Nav) * (CI(0., 1.) + Kf * CI(Av_f + 1., As_f + 1.));
+
+    // M02: Δ(S²)/S0² = 2·Kf·V0·V_L^{Av_f}·S_L^{As_f+2}/S0² − 1
+    //   source = cont_sl_(0)  +  2·N0·βᵢ₀·Kf·V0/(S0²·Nav) · CI(Av_f, As_f+2)
+    source_coagulation_cont_sl_(5) = source_coagulation_cont_sl_(0)
+        + 2. * N0_ * betai0 * Kf * V0_ / (S0_ * S0_ * Nav) * CI(Av_f, As_f + 2.);
+
+    // N0: one small-mode particle consumed per collision (same rate as M00)
+    source_coagulation_cont_sl_(6) = source_coagulation_cont_sl_(0);
 }
 
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::SootCoagulationContinuousLargeLargeM7(double lambda, double betai0)
 {
-    // TODO: implement
+    source_coagulation_cont_ll_.setZero();
+    if (!HasSoot()) return;
+
+    // Continuum L-L kernel uses only the fractal collision diameter
+    // Dc = Kc·V^{Av_c}·S^{As_c} (DcNUCL is irrelevant for large-large).
+    //
+    // Only M00 is computed (same HMOM convention as the free-molecular L-L):
+    //   M10  = 0  (volume exactly conserved)
+    //   M01/M20/M11/M02 = 0  (surface and higher-order L-L changes neglected)
+    //   N0   = 0  (small mode unaffected by L-L)
+    //
+    // The double integral  ½ ∫∫ β(V1,V2)·n_L·n_L dV1 dV2  for M00 evaluates
+    // to the same sum-of-moment-product expression as HMOM4; GetMissingMoment
+    // now uses the 6-coefficient bivariate MOMIC polynomial transparently.
+    const double Av_c = Av_collisional_;
+    const double As_c = As_collisional_;
+    const double Kc   = K_collisional_;
+
+    const double val =
+        GetMissingMoment(0., 0.) * GetMissingMoment(0., 0.) +
+        lambda / Kc *
+            (GetMissingMoment(0.,   0.)  * GetMissingMoment(-Av_c,    -As_c) +
+             GetMissingMoment(Av_c, As_c) * GetMissingMoment(-2.*Av_c, -2.*As_c) +
+             GetMissingMoment(Av_c, As_c) * GetMissingMoment(-Av_c,    -As_c));
+
+    // Guard: val should be non-negative; skip if numerical noise makes it negative.
+    if (val > 0.)
+        source_coagulation_cont_ll_(0) = -0.5 * betai0 / this->Nav_mol_ * val;
 }
 
 // ===========================================================================
