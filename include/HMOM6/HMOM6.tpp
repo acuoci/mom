@@ -1752,6 +1752,125 @@ double HMOM6<Thermo>::diffusion_coefficient() const noexcept
 }
 
 // ===========================================================================
+//  Morphological statistics and property convenience accessors
+// ===========================================================================
+
+template <ThermoMap Thermo>
+double HMOM6<Thermo>::soot_large_mean_volume() const noexcept
+{
+    return (L00_ > kSootNumberFloor && L10_ > kSootVolumeFloor) ? L10_ / L00_ : V0_;
+}
+
+template <ThermoMap Thermo>
+double HMOM6<Thermo>::soot_large_mean_surface() const noexcept
+{
+    return (L00_ > kSootNumberFloor && L01_ > kSootSurfaceFloor) ? L01_ / L00_ : S0_;
+}
+
+template <ThermoMap Thermo>
+double HMOM6<Thermo>::soot_large_primary_particle_diameter() const noexcept
+{
+    const double VL = soot_large_mean_volume();
+    const double SL = soot_large_mean_surface();
+    return (SL > 0.) ? 6. * VL / SL : 0.;
+}
+
+template <ThermoMap Thermo>
+double HMOM6<Thermo>::soot_large_primary_particle_number() const noexcept
+{
+    const double VL = soot_large_mean_volume();
+    const double SL = soot_large_mean_surface();
+    if (SL <= 0. || VL <= 0.)
+        return 1.;
+    return std::max(1., std::pow(SL, 3.) / (36. * this->pi_ * VL * VL));
+}
+
+template <ThermoMap Thermo>
+double HMOM6<Thermo>::LogGeomStdDevFromMoments(double M0, double M1, double M2) const noexcept
+{
+    if (M0 <= 0. || M1 <= 0. || M2 <= 0.)
+        return 0.;
+    const double ratio = M0 * M2 / (M1 * M1);
+    return (ratio > 1.) ? std::sqrt(std::log(ratio)) : 0.;
+}
+
+template <ThermoMap Thermo>
+double HMOM6<Thermo>::soot_log_geom_std_dev_primary_particle_diameter() const noexcept
+{
+    // dp ~ 6V/S; moments of the dp distribution via bivariate MOMIC.
+    return LogGeomStdDevFromMoments(GetMoment(0., 0.), GetMoment(-1., 1.5), GetMoment(-2., 3.));
+}
+
+template <ThermoMap Thermo>
+double HMOM6<Thermo>::soot_log_geom_std_dev_primary_particle_number() const noexcept
+{
+    // np ~ (S/S_primary)^3/36π/V^2; moments reduce to M(1,0), M(2,0).
+    return LogGeomStdDevFromMoments(GetMoment(0., 0.), GetMoment(1., 0.), GetMoment(2., 0.));
+}
+
+template <ThermoMap Thermo>
+double HMOM6<Thermo>::soot_large_log_geom_std_dev_primary_particle_diameter() const noexcept
+{
+    if (!HasSoot() || L00_ <= kSootNumberFloor)
+        return 0.;
+    const double M0L = GetMissingMoment(0.,  0.);
+    const double M1L = GetMissingMoment(1., -1.);
+    const double M2L = GetMissingMoment(2., -2.);
+    return LogGeomStdDevFromMoments(M0L, M1L, M2L);
+}
+
+template <ThermoMap Thermo>
+double HMOM6<Thermo>::soot_large_log_geom_std_dev_primary_particle_number() const noexcept
+{
+    if (!HasSoot() || L00_ <= kSootNumberFloor)
+        return 0.;
+    const double M0L = GetMissingMoment( 0., 0.);
+    const double M1L = GetMissingMoment(-2., 3.);
+    const double M2L = GetMissingMoment(-4., 6.);
+    return LogGeomStdDevFromMoments(M0L, M1L, M2L);
+}
+
+template <ThermoMap Thermo>
+double HMOM6<Thermo>::soot_d63() const noexcept
+{
+    const double M10 = GetMoment(1., 0.);
+    const double M43 = GetMoment(4. / 3., 0.);
+    if (M10 <= 0. || !std::isfinite(M10))
+        return 0.;
+    return 6. * std::pow(M43 / M10, 1. / 3.);
+}
+
+template <ThermoMap Thermo>
+void HMOM6<Thermo>::Properties(
+    double& fv, double& dp, double& dc, double& np, double& ss, double& vs) const noexcept
+{
+    const double N = GetMoment(0., 0.);
+    const double V = GetMoment(1., 0.);
+    const double S = GetMoment(0., 1.);
+
+    if (!std::isfinite(N) || !std::isfinite(V) || !std::isfinite(S) || N <= 0. || V <= 0. || S <= 0.)
+    {
+        fv = 0.;
+        vs = V0_;
+        ss = S0_;
+        dp = 6. * V0_ / S0_;
+        np = 1.;
+        dc = K_collisional_ * std::pow(V0_, Av_collisional_) * std::pow(S0_, As_collisional_);
+        return;
+    }
+    fv = V;
+    vs = V / N;
+    ss = S / N;
+    dp = 6. * vs / ss;
+    np = std::pow(ss, 3.) / (36. * this->pi_ * vs * vs);
+    if (!std::isfinite(np) || np < 1.)
+        np = 1.;
+    dc = K_collisional_ * std::pow(vs, Av_collisional_) * std::pow(ss, As_collisional_);
+    if (!std::isfinite(dc) || dc <= 0.)
+        dc = dp;
+}
+
+// ===========================================================================
 //  Diagnostics
 // ===========================================================================
 

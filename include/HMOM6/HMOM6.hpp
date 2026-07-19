@@ -381,12 +381,23 @@ public:
      */
     template <typename CB> void variant_prefix_output(CB&& cb) const
     {
-        cb("np[-]",     number_primary_particles());
-        cb("ss[m2/#]",  soot_mean_surface());
-        cb("vs[m3/#]",  soot_mean_volume());
-        cb("N0[#/m3]",  N0_);
-        cb("NL[#/m3]",  std::max(M00_ - N0_, 0.));
-        cb("alphaL[-]", soot_large_fraction());
+        cb("np[-]",        number_primary_particles());
+        cb("ss[m2/#]",     soot_mean_surface());
+        cb("vs[m3/#]",     soot_mean_volume());
+        cb("N0[#/m3]",     N0_);
+        cb("NL[#/m3]",     L00_);
+        cb("alphaL[-]",    soot_large_fraction());
+        cb("dpL[nm]",      soot_large_primary_particle_diameter() * 1.e9);
+        cb("npL[-]",       soot_large_primary_particle_number());
+        cb("d63[nm]",      soot_d63() * 1.e9);
+        cb("sigma_dp[-]",  soot_log_geom_std_dev_primary_particle_diameter());
+        cb("sigma_np[-]",  soot_log_geom_std_dev_primary_particle_number());
+        cb("sigma_dp_L[-]",soot_large_log_geom_std_dev_primary_particle_diameter());
+        cb("sigma_np_L[-]",soot_large_log_geom_std_dev_primary_particle_number());
+        cb("gsd_dp[-]",    std::exp(soot_log_geom_std_dev_primary_particle_diameter()));
+        cb("gsd_np[-]",    std::exp(soot_log_geom_std_dev_primary_particle_number()));
+        cb("gsd_dp_L[-]",  std::exp(soot_large_log_geom_std_dev_primary_particle_diameter()));
+        cb("gsd_np_L[-]",  std::exp(soot_large_log_geom_std_dev_primary_particle_number()));
 
         this->EmitStandardSootOmegaGas(
             cb, pah_index_, index_C2H2_, index_H2_, index_O2_, index_H2O_, index_OH_);
@@ -457,6 +468,15 @@ public:
             throw std::invalid_argument("[HMOM6] Invalid continuous-coagulation model flag.");
         coagulation_continuous_model_ = flag;
     }
+    // -- Model-state query accessors ------------------------------------------
+
+    [[nodiscard]] NucleationModel    nucleation_model()    const noexcept { return static_cast<NucleationModel>(nucleation_model_);             }
+    [[nodiscard]] SurfaceGrowthModel surface_growth_model() const noexcept { return static_cast<SurfaceGrowthModel>(surface_growth_model_);     }
+    [[nodiscard]] CondensationModel  condensation_model()  const noexcept { return static_cast<CondensationModel>(condensation_model_);         }
+    [[nodiscard]] OxidationModel     oxidation_model()     const noexcept { return static_cast<OxidationModel>(oxidation_model_);               }
+    [[nodiscard]] CoagulationModel   coagulation_model()   const noexcept { return static_cast<CoagulationModel>(coagulation_model_);           }
+    [[nodiscard]] int continuous_coagulation_model()       const noexcept { return coagulation_continuous_model_; }
+
     void SetFractalDiameterModel(int m)
     {
         if (m != 0 && m != 1)
@@ -525,6 +545,60 @@ public:
     {
         return (M00_ > kSootNumberFloor && M01_ > 0.) ? M01_ / M00_ : S0_;
     }
+
+    /** @brief Small-mode number fraction N0/(N0+NL) [-]. */
+    [[nodiscard]] double soot_small_fraction() const noexcept
+    {
+        return (M00_ > 0.) ? N0_ / M00_ : 1.;
+    }
+
+    /** @brief Mean volume of large-mode particles VL [m3/#]. */
+    [[nodiscard]] double soot_large_mean_volume() const noexcept;
+
+    /** @brief Mean surface of large-mode particles SL [m2/#]. */
+    [[nodiscard]] double soot_large_mean_surface() const noexcept;
+
+    /** @brief Primary particle diameter of large-mode particles dp,L [m]. */
+    [[nodiscard]] double soot_large_primary_particle_diameter() const noexcept;
+
+    /** @brief Mean primary particle count per large-mode aggregate np,L [-]. */
+    [[nodiscard]] double soot_large_primary_particle_number() const noexcept;
+
+    /**
+     * @brief Log geometric standard deviation of primary particle diameter (total NDF).
+     * @return sigma on the natural-log scale [-].
+     */
+    [[nodiscard]] double soot_log_geom_std_dev_primary_particle_diameter() const noexcept;
+
+    /**
+     * @brief Log geometric standard deviation of primary particle count (total NDF).
+     * @return sigma on the natural-log scale [-].
+     */
+    [[nodiscard]] double soot_log_geom_std_dev_primary_particle_number() const noexcept;
+
+    /** @brief Log geometric std dev of primary diameter for the large mode only. */
+    [[nodiscard]] double soot_large_log_geom_std_dev_primary_particle_diameter() const noexcept;
+
+    /** @brief Log geometric std dev of primary count for the large mode only. */
+    [[nodiscard]] double soot_large_log_geom_std_dev_primary_particle_number() const noexcept;
+
+    /**
+     * @brief Scattering effective diameter d63 [m].
+     * @return d63 = 6*(M(4/3,0)/M(1,0))^(1/3) [m].
+     */
+    [[nodiscard]] double soot_d63() const noexcept;
+
+    /**
+     * @brief Fill common particle properties in one call.
+     * @param[out] fv  Volume fraction [-].
+     * @param[out] dp  Mean primary particle diameter [m].
+     * @param[out] dc  Collision diameter [m].
+     * @param[out] np  Mean primary particles per aggregate [-].
+     * @param[out] ss  Mean surface per particle [m2/#].
+     * @param[out] vs  Mean volume per particle [m3/#].
+     */
+    void Properties(double& fv, double& dp, double& dc,
+                    double& np, double& ss, double& vs) const noexcept;
 
     /**
      * @brief Returns the MOMIC polynomial coefficients for the large mode.
@@ -597,6 +671,15 @@ private:
     [[nodiscard]] double PAHDimerizationRate() const noexcept;
     [[nodiscard]] bool   HasSoot() const noexcept;
     [[nodiscard]] double SafePowPositive(double x, double a) const noexcept;
+
+    /**
+     * @brief Compute log geometric standard deviation from three raw moments.
+     *
+     * Given M0 = ∫f, M1 = ∫x·f, M2 = ∫x²·f of a lognormal distribution,
+     * returns sqrt(ln(M0·M2/M1²)).  Returns 0 if any moment is non-positive
+     * or if the ratio ≤ 1 (perfectly monodisperse).
+     */
+    [[nodiscard]] double LogGeomStdDevFromMoments(double M0, double M1, double M2) const noexcept;
 
 private:
 
