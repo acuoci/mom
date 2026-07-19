@@ -1758,7 +1758,121 @@ double HMOM6<Thermo>::diffusion_coefficient() const noexcept
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::PrintSummary() const
 {
-    // TODO: implement
+    const auto sticking_str = [](StickingModel m) -> const char* {
+        switch (m) {
+            case StickingModel::Constant: return "constant";
+            case StickingModel::PAH4:     return "PAH 4-ring";
+            default:                       return "unknown";
+        }
+    };
+    const auto frac_str = [](FractalDiameterModel m) -> const char* {
+        switch (m) {
+            case FractalDiameterModel::Model0: return "Mueller et al. (2009)";
+            case FractalDiameterModel::Model1: return "Attili et al. (2014)";
+            default:                            return "unknown";
+        }
+    };
+    const auto coll_str = [](CollisionDiameterModel m) -> const char* {
+        switch (m) {
+            case CollisionDiameterModel::Model1: return "N^{1/3} dp (Mueller 2009)";
+            case CollisionDiameterModel::Model2: return "fractal geometry (Attili 2014)";
+            default:                              return "unknown";
+        }
+    };
+    const auto thermo_str = [](ThermophoreticModel m) -> const char* {
+        switch (m) {
+            case ThermophoreticModel::Off:      return "off";
+            case ThermophoreticModel::Standard: return "standard";
+            default:                             return "unknown";
+        }
+    };
+    const auto planck_str = [](PlanckCoeffModel m) -> const char* {
+        switch (m) {
+            case PlanckCoeffModel::None:   return "none";
+            case PlanckCoeffModel::Smooke: return "Smooke (1989)";
+            case PlanckCoeffModel::Kent:   return "Kent & Honnery (1990)";
+            case PlanckCoeffModel::Sazhin: return "Sazhin (1994)";
+            default:                        return "unknown";
+        }
+    };
+
+    std::cout
+        << "\n"
+        << "------------------------------------------------------------------------------------------\n"
+        << "             HMOM6 — Hybrid Method of Moments (6+1 bivariate MOMIC) Summary\n"
+        << "------------------------------------------------------------------------------------------\n"
+        << " * Active: " << (this->is_active_ ? "yes" : "no") << "\n"
+        << "\n"
+        << " [Physical properties]\n"
+        << "    + Soot density (kg/m3):          " << this->rho_particle_ << "\n"
+        << "\n"
+        << " [Species — PAH precursor]\n"
+        << "    + PAH species:                   " << pah_species_ << "\n"
+        << "\n"
+        << " [Nucleated particle geometry]\n"
+        << "    + V0 (m3):                       " << V0_ << "\n"
+        << "    + S0 (m2):                       " << S0_ << "\n"
+        << "\n"
+        << " [MOMIC geometry — fractal (∂S/∂V = Kf·V^Av_f·S^(As_f+1))]\n"
+        << "    + Fractal diameter model:        " << static_cast<int>(fractal_diameter_model_)
+                                                   << "  (" << frac_str(fractal_diameter_model_) << ")\n"
+        << "    + Av_fractal:                    " << Av_fractal_ << "\n"
+        << "    + As_fractal:                    " << As_fractal_ << "\n"
+        << "    + K_fractal:                     " << K_fractal_ << "\n"
+        << "\n"
+        << " [MOMIC geometry — collisional (dc = Kc·V^Av_c·S^As_c)]\n"
+        << "    + Collision diameter model:      " << static_cast<int>(collision_diameter_model_)
+                                                   << "  (" << coll_str(collision_diameter_model_) << ")\n"
+        << "    + Av_collisional:                " << Av_collisional_ << "\n"
+        << "    + As_collisional:                " << As_collisional_ << "\n"
+        << "    + K_collisional:                 " << K_collisional_ << "\n"
+        << "    + D_collisional:                 " << D_collisional_ << "\n"
+        << "\n"
+        << " [Processes]\n"
+        << "    + Nucleation:                    " << nucleation_model_ << "\n"
+        << "    + Condensation:                  " << condensation_model_ << "\n"
+        << "    + Surface growth:                " << surface_growth_model_ << "\n"
+        << "    + Oxidation:                     " << oxidation_model_ << "\n"
+        << "    + Coagulation:                   " << coagulation_model_ << "\n"
+        << "    + Coagulation (continuous):      " << coagulation_continuous_model_ << "\n"
+        << "    + Sticking model:                " << static_cast<int>(sticking_model_)
+                                                   << "  (" << sticking_str(sticking_model_) << ")\n"
+        << "    + Sticking coeff. (-):           " << sticking_coeff_constant_ << "\n"
+        << "\n"
+        << " [HACA surface kinetics]  A [cm3/mol/s or 1/s],  n [-],  E [kJ/mol]\n"
+        << "    + R1f (H-abs. fwd):  A=" << A1f_ << "  n=" << n1f_ << "  E=" << E1f_ * this->Rgas_mol_ / 1000. << "\n"
+        << "    + R1b (H-abs. rev):  A=" << A1b_ << "  n=" << n1b_ << "  E=" << E1b_ * this->Rgas_mol_ / 1000. << "\n"
+        << "    + R2f (OH-ox. fwd):  A=" << A2f_ << "  n=" << n2f_ << "  E=" << E2f_ * this->Rgas_mol_ / 1000. << "\n"
+        << "    + R2b (OH-ox. rev):  A=" << A2b_ << "  n=" << n2b_ << "  E=" << E2b_ * this->Rgas_mol_ / 1000. << "\n"
+        << "    + R3f (O2-ox. fwd):  A=" << A3f_ << "  n=" << n3f_ << "  E=" << E3f_ * this->Rgas_mol_ / 1000. << "\n"
+        << "    + R3b (O2-ox. rev):  A=" << A3b_ << "  n=" << n3b_ << "  E=" << E3b_ * this->Rgas_mol_ / 1000. << "\n"
+        << "    + R4  (C2H2 add.):   A=" << A4_  << "  n=" << n4_  << "  E=" << E4_  * this->Rgas_mol_ / 1000. << "\n"
+        << "    + R5  (O-ox.):       A=" << A5_  << "  n=" << n5_  << "  E=" << E5_  * this->Rgas_mol_ / 1000. << "\n"
+        << "    + eff6 (O-rad.):     " << eff6_ << "\n"
+        << "\n"
+        << " [Surface density]\n"
+        << "    + Chi (#/m2):                    " << surface_density_ << "\n"
+        << "    + T-dependent correction:        " << (surface_density_correction_ ? "yes" : "no") << "\n"
+        << "\n"
+        << " [Transport & radiation]\n"
+        << "    + Schmidt number (-):            " << this->schmidt_number_ << "\n"
+        << "    + Thermophoretic model:          " << static_cast<int>(this->thermophoretic_model())
+                                                   << "  (" << thermo_str(this->thermophoretic_model_) << ")\n"
+        << "    + Gas consumption:               " << (this->gas_consumption_ ? "yes" : "no") << "\n"
+        << "    + Radiative heat transfer:       " << (this->radiative_heat_transfer_ ? "yes" : "no") << "\n"
+        << "    + Planck coeff. model:           " << static_cast<int>(this->planck_model_)
+                                                   << "  (" << planck_str(this->planck_model_) << ")\n"
+        << "    + Closure dummy species:         "
+                                                   << (this->is_closure_dummy_species_ ? this->closure_dummy_species_ : "none") << "\n"
+        << "\n"
+        << " [Numerical floors]\n"
+        << "    + N floor (#/m3):                " << kSootNumberFloor << "\n"
+        << "    + fv floor (-):                  " << kSootVolumeFloor << "\n"
+        << "    + S floor (m2/m3):               " << kSootSurfaceFloor << "\n"
+        << "\n"
+        << " [Debug]\n"
+        << "    + Debug mode:                    " << (is_debug_mode_ ? "yes" : "no") << "\n"
+        << "------------------------------------------------------------------------------------------\n";
 }
 
 // ===========================================================================
@@ -1803,8 +1917,161 @@ template <typename DictType>
 std::expected<typename HMOM6<Thermo>::Config, std::string>
 HMOM6<Thermo>::ParseConfig(DictType& dict)
 {
-    // TODO: implement (mirrors HMOM::ParseConfig with HMOM6_Grammar)
-    return Config{};
+    HMOM6_Grammar grammar;
+    dict.SetGrammar(grammar);
+
+    Config cfg; // start from library defaults
+
+    if (dict.CheckOption("@HMOM6"))
+        dict.ReadBool("@HMOM6", cfg.is_active);
+
+    if (dict.CheckOption("@FractalDiameterModel"))
+        dict.ReadInt("@FractalDiameterModel", cfg.fractal_diameter_model);
+
+    if (dict.CheckOption("@CollisionDiameterModel"))
+        dict.ReadInt("@CollisionDiameterModel", cfg.collision_diameter_model);
+
+    if (dict.CheckOption("@GasClosureDummySpecies"))
+        dict.ReadString("@GasClosureDummySpecies", cfg.gas_closure_dummy_species);
+
+    if (dict.CheckOption("@GasConsumption"))
+        dict.ReadBool("@GasConsumption", cfg.gas_consumption);
+
+    if (dict.CheckOption("@SimplifiedPAHMass"))
+        dict.ReadBool("@SimplifiedPAHMass", cfg.simplified_pah_mass);
+
+    if (dict.CheckOption("@PAH"))
+        dict.ReadString("@PAH", cfg.pah_species);
+
+    if (dict.CheckOption("@NucleationModel"))
+        { int _tmp; dict.ReadInt("@NucleationModel", _tmp); cfg.nucleation_model = static_cast<NucleationModel>(_tmp); }
+
+    if (dict.CheckOption("@SurfaceGrowthModel"))
+        { int _tmp; dict.ReadInt("@SurfaceGrowthModel", _tmp); cfg.surface_growth_model = static_cast<SurfaceGrowthModel>(_tmp); }
+
+    if (dict.CheckOption("@OxidationModel"))
+        { int _tmp; dict.ReadInt("@OxidationModel", _tmp); cfg.oxidation_model = static_cast<OxidationModel>(_tmp); }
+
+    if (dict.CheckOption("@CondensationModel"))
+        { int _tmp; dict.ReadInt("@CondensationModel", _tmp); cfg.condensation_model = static_cast<CondensationModel>(_tmp); }
+
+    if (dict.CheckOption("@CoagulationModel"))
+        { int _tmp; dict.ReadInt("@CoagulationModel", _tmp); cfg.coagulation_model = static_cast<CoagulationModel>(_tmp); }
+
+    if (dict.CheckOption("@ContinuousCoagulationModel"))
+        dict.ReadInt("@ContinuousCoagulationModel", cfg.continuous_coagulation_model);
+
+    if (dict.CheckOption("@ThermophoreticModel"))
+        { int _tmp; dict.ReadInt("@ThermophoreticModel", _tmp); cfg.thermophoretic_model = static_cast<ThermophoreticModel>(_tmp); }
+
+    if (dict.CheckOption("@RadiativeHeatTransfer"))
+        dict.ReadBool("@RadiativeHeatTransfer", cfg.radiative_heat_transfer);
+
+    if (dict.CheckOption("@PlanckCoefficient"))
+        dict.ReadString("@PlanckCoefficient", cfg.planck_coefficient);
+
+    if (dict.CheckOption("@SchmidtNumber"))
+        dict.ReadDouble("@SchmidtNumber", cfg.schmidt_number);
+
+    if (dict.CheckOption("@SootDensity"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@SootDensity", v, u);
+        if (u == "kg/m3")      cfg.soot_density_kg_m3 = v;
+        else if (u == "g/cm3") cfg.soot_density_kg_m3 = v * 1000.;
+        else return std::unexpected(std::string{"@SootDensity: allowed units: kg/m3 | g/cm3"});
+    }
+
+    if (dict.CheckOption("@SurfaceDensity"))
+    {
+        double v; std::string u;
+        dict.ReadMeasure("@SurfaceDensity", v, u);
+        if (u == "#/m2")       cfg.surface_density_per_m2 = v;
+        else if (u == "#/cm2") cfg.surface_density_per_m2 = v * 1.e4;
+        else if (u == "#/mm2") cfg.surface_density_per_m2 = v * 1.e6;
+        else return std::unexpected(std::string{"@SurfaceDensity: allowed units: #/m2 | #/cm2 | #/mm2"});
+    }
+
+    if (dict.CheckOption("@SurfaceDensityCorrectionCoefficient"))
+        dict.ReadBool("@SurfaceDensityCorrectionCoefficient", cfg.surface_density_correction);
+    if (dict.CheckOption("@SurfaceDensityCorrectionCoefficientA1"))
+        dict.ReadDouble("@SurfaceDensityCorrectionCoefficientA1", cfg.surf_dens_a1);
+    if (dict.CheckOption("@SurfaceDensityCorrectionCoefficientA2"))
+        dict.ReadDouble("@SurfaceDensityCorrectionCoefficientA2", cfg.surf_dens_a2);
+    if (dict.CheckOption("@SurfaceDensityCorrectionCoefficientB1"))
+        dict.ReadDouble("@SurfaceDensityCorrectionCoefficientB1", cfg.surf_dens_b1);
+    if (dict.CheckOption("@SurfaceDensityCorrectionCoefficientB2"))
+        dict.ReadDouble("@SurfaceDensityCorrectionCoefficientB2", cfg.surf_dens_b2);
+
+    // HACA frequency factors [cm3/mol/s].
+    {
+        double v; std::string u;
+        auto readA = [&](const char* key, double& field) -> std::expected<void, std::string>
+        {
+            if (dict.CheckOption(key)) {
+                dict.ReadMeasure(key, v, u);
+                if (u != "cm3,mol,s")
+                    return std::unexpected(std::string{key} + ": allowed units: cm3,mol,s");
+                field = v;
+            }
+            return {};
+        };
+        if (auto r = readA("@A1f", cfg.A1f); !r) return std::unexpected(r.error());
+        if (auto r = readA("@A1b", cfg.A1b); !r) return std::unexpected(r.error());
+        if (auto r = readA("@A2f", cfg.A2f); !r) return std::unexpected(r.error());
+        if (auto r = readA("@A2b", cfg.A2b); !r) return std::unexpected(r.error());
+        if (auto r = readA("@A3f", cfg.A3f); !r) return std::unexpected(r.error());
+        if (auto r = readA("@A3b", cfg.A3b); !r) return std::unexpected(r.error());
+        if (auto r = readA("@A4",  cfg.A4);  !r) return std::unexpected(r.error());
+        if (auto r = readA("@A5",  cfg.A5);  !r) return std::unexpected(r.error());
+    }
+
+    // HACA activation energies [kJ/mol].
+    {
+        double v; std::string u;
+        auto readE = [&](const char* key, double& field) -> std::expected<void, std::string>
+        {
+            if (dict.CheckOption(key)) {
+                dict.ReadMeasure(key, v, u);
+                if (u != "kJ/mol")
+                    return std::unexpected(std::string{key} + ": allowed units: kJ/mol");
+                field = v;
+            }
+            return {};
+        };
+        if (auto r = readE("@E1f", cfg.E1f); !r) return std::unexpected(r.error());
+        if (auto r = readE("@E1b", cfg.E1b); !r) return std::unexpected(r.error());
+        if (auto r = readE("@E2f", cfg.E2f); !r) return std::unexpected(r.error());
+        if (auto r = readE("@E2b", cfg.E2b); !r) return std::unexpected(r.error());
+        if (auto r = readE("@E3f", cfg.E3f); !r) return std::unexpected(r.error());
+        if (auto r = readE("@E3b", cfg.E3b); !r) return std::unexpected(r.error());
+        if (auto r = readE("@E4",  cfg.E4);  !r) return std::unexpected(r.error());
+        if (auto r = readE("@E5",  cfg.E5);  !r) return std::unexpected(r.error());
+    }
+
+    // Temperature exponents.
+    if (dict.CheckOption("@n1f")) dict.ReadDouble("@n1f", cfg.n1f);
+    if (dict.CheckOption("@n1b")) dict.ReadDouble("@n1b", cfg.n1b);
+    if (dict.CheckOption("@n2f")) dict.ReadDouble("@n2f", cfg.n2f);
+    if (dict.CheckOption("@n2b")) dict.ReadDouble("@n2b", cfg.n2b);
+    if (dict.CheckOption("@n3f")) dict.ReadDouble("@n3f", cfg.n3f);
+    if (dict.CheckOption("@n3b")) dict.ReadDouble("@n3b", cfg.n3b);
+    if (dict.CheckOption("@n4"))  dict.ReadDouble("@n4",  cfg.n4);
+    if (dict.CheckOption("@n5"))  dict.ReadDouble("@n5",  cfg.n5);
+
+    if (dict.CheckOption("@Efficiency6"))
+        dict.ReadDouble("@Efficiency6", cfg.efficiency6);
+
+    if (dict.CheckOption("@StickingCoefficientModel"))
+        dict.ReadString("@StickingCoefficientModel", cfg.sticking_model);
+
+    if (dict.CheckOption("@StickingCoefficientConstant"))
+        dict.ReadDouble("@StickingCoefficientConstant", cfg.sticking_coeff_constant);
+
+    if (dict.CheckOption("@DebugMode"))
+        dict.ReadBool("@DebugMode", cfg.debug_mode);
+
+    return cfg;
 }
 
 #endif // MOM_USE_DICTIONARY

@@ -77,6 +77,7 @@ if(MOM_USE_DICTIONARY)
     list(APPEND _MOM_SOURCES
         src/ThreeEquations/ThreeEquations_Grammar.cpp
         src/HMOM/HMOM_Grammar.cpp
+        src/HMOM6/HMOM6_Grammar.cpp
         src/BrookesMoss/BrookesMoss_Grammar.cpp
         src/MetalOxide/MetalOxide_Grammar.cpp
     )
