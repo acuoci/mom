@@ -332,6 +332,35 @@ public:
         return {source_oxidation_.data(), this->n_equations};
     }
 
+    /**
+     * @brief Splitting-safe oxidation rate coefficients with MOMIC realizability guard.
+     *
+     * Shadows `MomentMethodBase::kappa_oxidation`.  The base-class formula
+     * κ_i = |source_i| / M_i is correct but can produce an anomalously large κ₅
+     * for M02: the source term requires `GetMoment(Av_f, As_f+3)`, which evaluates
+     * the quadratic MOMIC polynomial **outside** its calibrated y ∈ {0,1,2} domain
+     * (y=3 for the spherical model, y≈2.4 for the fractal model).  The quadratic
+     * `a₂₀·y²` term (a₂₀ = ½ σ_S² ≥ 0) can over-extrapolate by 10⁵–10⁷× for
+     * broad soot distributions, making `κ₅·dt ≫ 1` and collapsing M₀₂ to zero in a
+     * single splitting step.  Once M₀₂ drops below its small-mode floor N₀·S₀²,
+     * L₀₂ < 0, the MOMIC system becomes invalid, and the ODE integrator diverges.
+     *
+     * This override applies the Cauchy-Schwarz moment inequalities as upper bounds
+     * on the second-order kappas, preserving moment realizability after the split:
+     *   - κ₃ ≤ max(0, 2·κ₁ − κ₀)   ensures M₂₀·M₀₀ ≥ M₁₀²
+     *   - κ₅ ≤ max(0, 2·κ₂ − κ₀)   ensures M₀₂·M₀₀ ≥ M₀₁²
+     *   - κ₄ ≤ max(0, (κ₃+κ₅)/2)   ensures M₁₁² ≤ M₂₀·M₀₂
+     *
+     * @note The source terms themselves (computed by `SootOxidationM7`) are unchanged.
+     *       This guard only affects the operator-splitting path.
+     *
+     * @param current_moments  Transported moment values at the current time.
+     * @return Span of size 7 into the internal κ cache; valid until the next
+     *         `ComputeSources()` call.
+     */
+    [[nodiscard]] std::span<const double>
+    kappa_oxidation(std::span<const double> current_moments) const noexcept;
+
     /** @brief Oxidation-only gas-phase source terms [kg/m3/s]. */
     [[nodiscard, gnu::always_inline]] std::span<const double> omega_gas_oxidation_impl() const noexcept
     {

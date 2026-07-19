@@ -999,6 +999,62 @@ void HMOM6<Thermo>::SootOxidationM7()
 }
 
 template <ThermoMap Thermo>
+std::span<const double>
+HMOM6<Thermo>::kappa_oxidation(std::span<const double> current_moments) const noexcept
+{
+    // Step 1: populate kappa_oxidation_ using the standard first-order formula
+    //   κ_i = max(-source_oxidation[i], 0) / max(|M_i|, ε)
+    // The base-class method calls derived().sources_oxidation() (= source_oxidation_)
+    // and writes the result into the protected kappa_oxidation_ cache.
+    (void)Base::kappa_oxidation(current_moments);
+
+    // Step 2: apply Cauchy-Schwarz realizability bounds to the second-order kappas.
+    //
+    // Why this is needed
+    // ------------------
+    // The M02 source requires GetMoment(Av_f, As_f+3).  For the spherical model
+    // (Av_f=-1, As_f=0) this evaluates the MOMIC quadratic polynomial at y=3,
+    // outside its calibrated domain y ∈ {0,1,2}.  The quadratic term a20·9 vs a20·4
+    // at the calibration boundary y=2 can over-extrapolate GetMoment(-1,3) by 10^5–10^7×
+    // for broad soot distributions (a20 = σ_S²/2 >> 0).  The resulting κ₅ is so large
+    // that the splitting step M02 *= exp(-κ₅·dt) drives M02 to zero in one step,
+    // making L02 < 0 and invalidating the MOMIC closure.
+    //
+    // Physical justification for the bounds
+    // --------------------------------------
+    // For any moment set arising from a positive NDF, the Cauchy-Schwarz inequality
+    // requires  M_{2i,0}·M_{0,0} ≥ M_{i,0}²  etc.  After exponential-decay splitting
+    // (M_j_new = M_j · exp(-κ_j·dt)), the inequality is preserved iff:
+    //   κ_3 + κ_0 ≤ 2·κ_1   →  κ_3 ≤ max(0, 2·κ_1 − κ_0)
+    //   κ_5 + κ_0 ≤ 2·κ_2   →  κ_5 ≤ max(0, 2·κ_2 − κ_0)
+    //   2·κ_4     ≤ κ_3+κ_5  →  κ_4 ≤ max(0, (κ_3+κ_5)/2)
+    //
+    // These bounds do NOT change the source terms; they only guard the splitting path.
+
+    auto& k = this->kappa_oxidation_;  // Eigen vector of size 7
+
+    const double k0 = k(0);  // M00 kappa
+    const double k1 = k(1);  // M10 kappa
+    const double k2 = k(2);  // M01 kappa
+
+    // -- M20: kappa_3 ≤ 2·κ₁ − κ₀  (M20·M00 ≥ M10²)
+    const double k3_max = std::max(0., 2. * k1 - k0);
+    k(3) = std::min(k(3), k3_max);
+
+    // -- M02: kappa_5 ≤ 2·κ₂ − κ₀  (M02·M00 ≥ M01²)  ← primary fix
+    const double k5_max = std::max(0., 2. * k2 - k0);
+    k(5) = std::min(k(5), k5_max);
+
+    // -- M11: kappa_4 ≤ (κ₃+κ₅)/2  (M11² ≤ M20·M02; uses updated k(3), k(5))
+    const double k4_max = std::max(0., 0.5 * (k(3) + k(5)));
+    k(4) = std::min(k(4), k4_max);
+
+    const std::size_t N = std::min(
+        static_cast<std::size_t>(k.size()), current_moments.size());
+    return {k.data(), N};
+}
+
+template <ThermoMap Thermo>
 void HMOM6<Thermo>::SootCondensationM7()
 {
     // PAH dimer condensation onto existing soot particles (free-molecular regime).
