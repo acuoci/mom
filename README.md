@@ -10,9 +10,10 @@ Engineering, **Politecnico di Milano**.
 ## Overview
 
 The MOM library provides high-performance Method of Moments source terms for particle-laden
-reactive flows. It currently ships four variants:
+reactive flows. It currently ships five variants:
 
 - `HMOM`: four-equation Hybrid Method of Moments soot model.
+- `HMOM6`: seven-equation Hybrid Method of Moments soot model with bivariate MOMIC closure.
 - `ThreeEquations`: three-equation soot model with explicit surface-area transport.
 - `BrookesMoss`: compact two-equation soot model.
 - `MetalOxide`: generic metal-oxide nanoparticle model, including the TiO2 case.
@@ -126,20 +127,21 @@ to a compile-time model selection path.
 | Variant | Equations | Transported variables | Main use |
 |---|---:|---|---|
 | `HMOM` | 4 | `M00`, `M10`, `M01`, `N0` | Detailed soot with two-node HMOM reconstruction |
+| `HMOM6` | 7 | `M00`, `M10`, `M01`, `M20`, `M11`, `M02`, `N0` | Detailed soot with bivariate MOMIC closure |
 | `ThreeEquations` | 3 | `Ys`, `NsNorm`, `Ss` | Soot with explicit surface-area evolution |
 | `BrookesMoss` | 2 | `Ys`, `bs` | Economical soot model for large CFD calculations |
 | `MetalOxide` | 3 | `Ysolid`, `NsolidN`, `Ssolid` | Generic metal-oxide nanoparticle synthesis |
 
 ### Process Capability Matrix
 
-| Process | HMOM | ThreeEquations | BrookesMoss | MetalOxide |
-|---|---|---|---|---|
-| Nucleation | yes | yes | yes | yes |
-| Coagulation | yes | yes | yes | yes |
-| Condensation | yes | yes | zero span | yes |
-| Surface growth | yes | yes | yes | zero span |
-| Oxidation | yes | yes | yes | zero span |
-| Sintering | zero span | zero span | zero span | yes |
+| Process | HMOM | HMOM6 | ThreeEquations | BrookesMoss | MetalOxide |
+|---|---|---|---|---|---|
+| Nucleation | yes | yes | yes | yes | yes |
+| Coagulation | yes | yes | yes | yes | yes |
+| Condensation | yes | yes | yes | zero span | yes |
+| Surface growth | yes | yes | yes | yes | zero span |
+| Oxidation | yes | yes | yes | yes | zero span |
+| Sintering | zero span | zero span | zero span | zero span | yes |
 
 The zero-span entries are compile-time fallbacks supplied by `MomentMethodBase`.
 
@@ -169,6 +171,7 @@ cfg.gas_stoichiometry = {
 };
 
 cfg.nucleation_model = "binary";
+cfg.closure_model    = "monodisperse";   // or "lognormal"
 cfg.condensation_model = 1;
 cfg.coagulation_model = 1;
 cfg.sintering_model = 1;
@@ -209,7 +212,7 @@ when only a subset is required.
 
 ```cpp
 using AllVariants =
-    detail::TypeList<HMOM, BrookesMoss, ThreeEquations, MetalOxide>;
+    detail::TypeList<HMOM, HMOM6, BrookesMoss, ThreeEquations, MetalOxide>;
 ```
 
 The same registry drives:
@@ -596,6 +599,144 @@ Frequency factors must use the literal dictionary unit `cm3,mol,s`. Activation e
 
 ---
 
+## HMOM6 Dictionary Configuration
+
+The `HMOM6` dictionary configures the seven-equation Hybrid Method of Moments soot model with bivariate MOMIC closure. The transported variables are six normalized bivariate moments `[M00, M10, M01, M20, M11, M02]` plus the small-mode number density `N0`. The large mode is represented by a second-order polynomial in log-space (MOMIC, R=2), fitted analytically to the six large-mode moment residuals at each cell. The active source terms are identical to HMOM: PAH dimerization nucleation, HACA surface growth, PAH condensation, O2/OH oxidation, discrete coagulation, and continuum coagulation.
+
+```cpp
+Dictionary HMOM6
+{
+    @HMOM6                         true;
+
+    @PAH                           A2;
+    @SimplifiedPAHMass             true;
+    @GasClosureDummySpecies        CSOOT;
+
+    @CollisionDiameterModel        2;
+    @FractalDiameterModel          1;
+    @ThermophoreticModel           1;
+
+    @NucleationModel               1;
+    @SurfaceGrowthModel            1;
+    @OxidationModel                0;
+    @CondensationModel             1;
+    @CoagulationModel              1;
+    @ContinuousCoagulationModel    1;
+
+    @GasConsumption                true;
+
+    @DebugMode                     false;
+}
+```
+
+### Transported Variables
+
+| Index | Symbol | Physical meaning |
+|---:|---|---|
+| 0 | M00 | Zeroth-order moment ∝ total number density |
+| 1 | M10 | First-order volume moment ∝ volume fraction |
+| 2 | M01 | First-order surface moment ∝ specific surface area |
+| 3 | M20 | Second-order volume moment |
+| 4 | M11 | Cross volume-surface moment |
+| 5 | M02 | Second-order surface moment |
+| 6 | N0  | Small-mode (nucleation-mode) number density |
+
+All variables are normalized as `M_{x,y,norm} = M_{x,y} / (V0^x · S0^y · Nav)` in units of mol/m³, where V0 and S0 are the volume and surface area of the dimer-derived inception particle.
+
+### Required Keywords
+
+| Keyword | Type / units | Accepted values | Default in C++ config | Effect |
+|---|---:|---|---:|---|
+| `@HMOM6` | `bool` | `true`, `false` | `true` | Enables or disables the HMOM6 variant. |
+| `@GasClosureDummySpecies` | `string` | Mechanism species name or `none` | `none` | Optional gas species used to close the gas-phase mass balance. It must exist when not `none`, cannot be the PAH precursor, and cannot be `H`, `H2`, `O2`, `OH`, `H2O`, or `C2H2`. |
+
+### Core Species and Gas-Coupling Controls
+
+| Keyword | Type / units | Accepted values | Default | Effect |
+|---|---:|---|---:|---|
+| `@PAH` | `string` | Mechanism species name | `C2H2` | PAH precursor used for dimerization nucleation and condensation. The species must exist in the thermodynamic map. |
+| `@SimplifiedPAHMass` | `bool` | `true`, `false` | `false` | If enabled, the PAH molecular weight is computed as `nC * WC`, ignoring hydrogen. |
+| `@GasConsumption` | `bool` | `true`, `false` | `true` | If enabled, computes gas-phase source terms from active soot processes. |
+| `@DebugMode` | `bool` | `true`, `false` | `false` | Enables verbose diagnostics. |
+
+### Process and Geometry Model Switches
+
+| Keyword | Type | Accepted values | Default | Effect |
+|---|---:|---|---:|---|
+| `@NucleationModel` | `int` | `0`, `1` | `1` | Enables PAH dimerization nucleation when `1`. |
+| `@SurfaceGrowthModel` | `int` | `0`, `1` | `1` | Enables HACA surface growth when `1`. |
+| `@OxidationModel` | `int` | `0`, `1` | `1` | Enables O2/OH soot oxidation when `1`. |
+| `@CondensationModel` | `int` | `0`, `1` | `1` | Enables PAH condensation on soot particles when `1`. |
+| `@CoagulationModel` | `int` | `0`, `1` | `1` | Enables discrete coagulation when `1`. |
+| `@ContinuousCoagulationModel` | `int` | `0`, `1` | `1` | Enables the continuum coagulation correction when `1`. |
+| `@ThermophoreticModel` | `int` | `0`, `1` | `1` | Enables thermophoretic drift contribution when `1`. |
+| `@FractalDiameterModel` | `int` | `0`, `1` | `1` | Selects the primary-particle/fractal-diameter closure. Model 0 uses a spherical approximation; model 1 uses the Attili et al. fractal-aggregate law. |
+| `@CollisionDiameterModel` | `int` | `1`, `2` | `2` | Selects the aggregate collision-diameter closure. |
+
+### Transport, Radiation, and Material Properties
+
+These keywords are identical to HMOM:
+
+| Keyword | Type / units | Accepted values | Default | Effect |
+|---|---:|---|---:|---|
+| `@SootDensity` | measure | `kg/m3`, `g/cm3` | `1800 kg/m3` | Soot material density. |
+| `@SchmidtNumber` | `double` | Positive scalar expected | `50` | Schmidt number for particle diffusion. |
+| `@RadiativeHeatTransfer` | `bool` | `true`, `false` | `true` | Enables soot contribution to radiative heat transfer. |
+| `@PlanckCoefficient` | `string` | `Smooke`, `Kent`, `Sazhin`, `none` | `Smooke` | Planck mean absorption coefficient model. |
+
+### Surface Density and HACA Parameters
+
+All surface density and HACA kinetic keywords are identical to HMOM. See the HMOM section
+for `@SurfaceDensity`, `@SurfaceDensityCorrectionCoefficient`, `@StickingCoefficientModel`,
+`@StickingCoefficientConstant`, and the full set of `@A1f`–`@Efficiency6` parameters.
+
+### Operator-Splitting Notes
+
+When oxidation is treated via operator splitting (`GetOxidationRateCoefficients`), HMOM6
+applies a Cauchy-Schwarz realizability guard to the second-order moment decay rates. The
+MOMIC polynomial must be extrapolated beyond its calibrated domain y ∈ {0,1,2} to evaluate
+the M02 oxidation source (requires the moment at y = As_f+3, where As_f = 0 for the
+spherical geometry model). Unconstrained, this extrapolation can over-estimate the M02
+decay rate by several orders of magnitude for broad distributions, collapsing M02 to zero
+in a single splitting step and invalidating the MOMIC closure. The guard bounds each
+second-order kappa using the moment inequalities:
+
+```
+κ₃ ≤ max(0, 2·κ₁ − κ₀)   // M20·M00 ≥ M10²
+κ₅ ≤ max(0, 2·κ₂ − κ₀)   // M02·M00 ≥ M01²
+κ₄ ≤ max(0, (κ₃+κ₅)/2)   // M11² ≤ M20·M02
+```
+
+The source terms themselves are unaffected; only the splitting decay rates are bounded.
+
+### Reporter Output
+
+HMOM6 emits 17 model-specific prefix columns in addition to the standard gas-phase and source-term columns:
+
+| Column | Unit | Description |
+|---|---:|---|
+| `np[-]` | `[-]` | Mean primary particles per aggregate |
+| `ss[m2/#]` | `[m²/#]` | Mean surface per particle |
+| `vs[m3/#]` | `[m³/#]` | Mean volume per particle |
+| `N0[#/m3]` | `[#/m³]` | Small-mode number density |
+| `NL[#/m3]` | `[#/m³]` | Large-mode number density |
+| `alphaL[-]` | `[-]` | Large-mode number fraction |
+| `dpL[nm]` | `[nm]` | Large-mode mean primary particle diameter |
+| `npL[-]` | `[-]` | Large-mode mean primary particle count |
+| `d63[nm]` | `[nm]` | Scattering effective diameter d63 |
+| `sigma_dp[-]` | `[-]` | Log geometric std dev of dp (total NDF) |
+| `sigma_np[-]` | `[-]` | Log geometric std dev of np (total NDF) |
+| `sigma_dp_L[-]` | `[-]` | Log geometric std dev of dp (large mode) |
+| `sigma_np_L[-]` | `[-]` | Log geometric std dev of np (large mode) |
+| `gsd_dp[-]` | `[-]` | Geometric std dev of dp = exp(sigma_dp) |
+| `gsd_np[-]` | `[-]` | Geometric std dev of np = exp(sigma_np) |
+| `gsd_dp_L[-]` | `[-]` | Geometric std dev of dp for large mode |
+| `gsd_np_L[-]` | `[-]` | Geometric std dev of np for large mode |
+
+The `coagulation_detail()` accessor provides nine additional sub-vectors (discrete small-small, small-large, large-large, and their continuum counterparts) available through the `variant_suffix_output` hook.
+
+---
+
 ## ThreeEquations Dictionary Configuration
 
 The `ThreeEquations` dictionary configures the three-equation soot model. The transported variables are soot mass fraction `Ys`, scaled soot number density `NsNorm = Ns / 1e15`, and soot specific surface area `Ss`. The model supports PAH dimerization nucleation, PAH condensation, surface growth, oxidation, coagulation, thermophoretic transport, gas-phase coupling, and soot radiation.
@@ -698,6 +839,8 @@ These keys are marked as compulsory by the OpenSMOKE++ grammar for the dictionar
 ## MetalOxide Dictionary Configuration
 
 `MetalOxide` is a three-equation solid-oxide nanoparticle model. The transported variables are solid mass fraction `Ysolid`, scaled particle number density `NsolidN = N / 1e15`, and total particle surface area `Ssolid`. The model supports precursor-driven nucleation, condensation, coagulation, sintering, thermophoresis, explicit gas stoichiometry, and optional gas-phase mass closure.
+
+The source-term closure for coagulation, condensation, and sintering is selected by `@ClosureModel`. The default `monodisperse` closure uses the mean-particle approximation. The `lognormal` closure reconstructs a dimensionless log-normal size distribution from the three transported fields, providing more accurate rates for polydisperse populations.
 
 ```cpp
 Dictionary MetalOxide
@@ -884,7 +1027,7 @@ activation/capability queries.
 
 ## Single-File Extensibility
 
-Adding a fifth MOM variant is localized and mechanical.
+Adding a new MOM variant is localized and mechanical.
 
 1. Create `include/MyVariant/MyVariant.hpp`.
    - Define `template <ThermoMap Thermo> class MyVariant`.
@@ -910,7 +1053,7 @@ Adding a fifth MOM variant is localized and mechanical.
 #include "MyVariant/MyVariant.hpp"
 
 using AllVariants =
-    detail::TypeList<HMOM, BrookesMoss, ThreeEquations, MetalOxide, MyVariant>;
+    detail::TypeList<HMOM, HMOM6, BrookesMoss, ThreeEquations, MetalOxide, MyVariant>;
 ```
 
 No global factory switch, central enum, reporter change, dispatch-header edit, or global
@@ -1016,6 +1159,14 @@ Please cite the relevant physical model when using the library in scientific wor
   growth," *Combustion and Flame* **156** (2009) 1143-1155.
 - A. Attili, F. Bisetti, M.E. Mueller, H. Pitsch, soot moment-method extensions for
   turbulent flames.
+
+**HMOM6 (bivariate MOMIC closure)**
+
+- M.E. Mueller, G. Blanquart, H. Pitsch, "Hybrid Method of Moments for modeling soot
+  formation and growth," *Combustion and Flame* **156** (2009) 1143-1155.
+- M.E. Mueller, G. Blanquart, H. Pitsch, "A joint volume-surface model of soot aggregation
+  with the method of moments," *Proceedings of the Combustion Institute* **32** (2009)
+  785-792.
 
 **Three-Equation Soot Model**
 
