@@ -554,6 +554,22 @@ double MetalOxide<Thermo>::DimensionlessLognormalMoment(double exponent, double 
     return std::exp(std::clamp(log_moment, -700., 700.));
 }
 
+template <ThermoMap Thermo>
+double MetalOxide<Thermo>::LognormalCoagulationIntegralCorrection(double M,
+                                                                  double sigma) noexcept
+{
+    if (!std::isfinite(M) || !std::isfinite(sigma) || sigma < 0.)
+        return 0.;
+
+    constexpr double zero_width = 1.e-14;
+    if (sigma <= zero_width)
+        return 1.;
+
+    // Empirical dimensionless coagulation integral correction proposed for
+    // the log-normal closure when no lookup table is used.
+    return 0.65;
+}
+
 template <ThermoMap Thermo> double MetalOxide<Thermo>::volume_fraction() const noexcept
 {
     return this->rho_ / solid_density_kg_m3_ * std::max(solid_mass_fraction_, 0.);
@@ -697,6 +713,17 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::NucleationSourceTerms_Fixed
 
 template <ThermoMap Thermo> void MetalOxide<Thermo>::CoagulationSourceTerms()
 {
+    if (closure_model_ == ClosureModel::Lognormal)
+    {
+        CoagulationSourceTerms_Lognormal();
+        return;
+    }
+
+    CoagulationSourceTerms_Monodisperse();
+}
+
+template <ThermoMap Thermo> void MetalOxide<Thermo>::CoagulationSourceTerms_Monodisperse()
+{
     const double N = scaled_number_density_ * N0_scaling_;
     if (N <= N_min_)
         return;
@@ -728,6 +755,46 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::CoagulationSourceTerms()
 
     // Number density source [#/m3/s]
     const double OmegaN = -0.5 * beta_coag * N * N;
+
+    this->source_coagulation_(0) = 0.;
+    this->source_coagulation_(1) = OmegaN / N0_scaling_;
+    this->source_coagulation_(2) = 0.;
+}
+
+template <ThermoMap Thermo> void MetalOxide<Thermo>::CoagulationSourceTerms_Lognormal()
+{
+    const auto d = BuildLognormalClosureData();
+    if (!d.valid)
+        return;
+
+    const double dcSafe = std::max(d.dc_mean, d0_);
+
+    const double beta_fm = epsilon_coag_ *
+                           std::sqrt(this->pi_ * this->kB_ * this->T_ /
+                                     (2. * solid_density_kg_m3_)) *
+                           std::sqrt(2. / d.vmean) * std::pow(2. * dcSafe, 2.);
+
+    const double mGas = this->rho_ * this->kB_ * this->T_ / this->P_Pa_;
+    const double lambdaGas =
+        this->mu_ / this->rho_ * std::sqrt(this->pi_ * mGas / (2. * this->kB_ * this->T_));
+    const double Cu        = 1. + 2.154 * lambdaGas / dcSafe;
+    const double beta_cont = 8. * this->kB_ * this->T_ / (3. * this->mu_) * Cu * dcSafe;
+
+    const double beta_m    = std::max(beta_fm, beta_cont);
+    const double beta_coag = 1.82 * beta_m;
+    if (!std::isfinite(beta_coag) || beta_coag <= 0.)
+        return;
+
+    constexpr double Df = 1.8;
+    const double lognormal_correction =
+        std::exp(std::clamp(2. * (3. / Df - 1.) * std::log(d.Kmean), -700., 700.)) *
+        LognormalCoagulationIntegralCorrection(d.M, d.sigma);
+    if (!std::isfinite(lognormal_correction) || lognormal_correction <= 0.)
+        return;
+
+    const double OmegaN = -0.5 * beta_coag * d.N * d.N * lognormal_correction;
+    if (!std::isfinite(OmegaN) || OmegaN >= 0.)
+        return;
 
     this->source_coagulation_(0) = 0.;
     this->source_coagulation_(1) = OmegaN / N0_scaling_;

@@ -1150,6 +1150,167 @@ static bool validateMetalOxideDimensionlessLognormalMoment()
     return ok;
 }
 
+static bool validateMetalOxideLognormalCoagulation()
+{
+    using Access = MOM::detail::MetalOxideTestAccess<MOM::BasicThermoData>;
+
+    const auto th = buildMetalOxideThermo();
+    const auto Y  = X2Y({0.050, 0.950}, th);
+
+    constexpr double T = 1500.;
+    constexpr double P = 101325.;
+    constexpr double R = 8314.46261815324;
+    constexpr double kB = 1.380649e-23;
+    constexpr double pi = 3.141592653589793238462643383279502884;
+    constexpr double epsCoag = 2.2;
+    constexpr double Df = 1.8;
+    constexpr double mu = 4.e-5;
+
+    const double invMW = std::inner_product(
+        Y.begin(),
+        Y.end(),
+        th.mw.begin(),
+        0.,
+        std::plus<>(),
+        [](double y, double mw) { return y / mw; });
+    const double rho = P / (R * T) / invMW;
+
+    auto near = [](double value, double expected, double rtol = 1.e-12)
+    {
+        const double scale = std::max({1., std::abs(value), std::abs(expected)});
+        return std::abs(value - expected) <= rtol * scale;
+    };
+
+    bool correction_ok = false;
+    bool source_ok = false;
+    bool spherical_limit_ok = false;
+
+    correction_ok =
+        near(Access::LognormalCoagulationIntegralCorrection(2., 0.), 1.) &&
+        near(Access::LognormalCoagulationIntegralCorrection(2.5, 0.3), 0.65) &&
+        Access::LognormalCoagulationIntegralCorrection(2.5, -1.) == 0.;
+
+    try
+    {
+        MOM::MetalOxide<MOM::BasicThermoData>::Config cfg;
+        cfg.precursor_species = "TiOH4";
+        cfg.nucleation_model = "none";
+        cfg.coagulation_model = 1;
+        cfg.condensation_model = 0;
+        cfg.sintering_model = 0;
+        cfg.closure_model = "lognormal";
+
+        MOM::MetalOxide<MOM::BasicThermoData> model(th);
+        model.SetupFromConfig(cfg);
+        model.SetViscosity(mu);
+        model.SetState(T, P, Y.data());
+
+        const double N = 5.e17;
+        const double vmean = 4096. * model.v0();
+        const double smean = model.s0() * std::pow(vmean / model.v0(), 0.75);
+        const double fv = N * vmean;
+        const double solid_mass_fraction = model.solid_density() / rho * fv;
+        model.SetMoments(solid_mass_fraction, N / model.ScalingFactorNs(), N * smean);
+
+        const auto d = Access::BuildLognormalClosureData(model);
+
+        const double d0 = std::pow(6. / pi * model.v0(), 1. / 3.);
+        const double dcSafe = std::max(d.dc_mean, d0);
+        const double beta_fm =
+            epsCoag * std::sqrt(pi * kB * T / (2. * model.solid_density())) *
+            std::sqrt(2. / d.vmean) * std::pow(2. * dcSafe, 2.);
+
+        const double mGas = rho * kB * T / P;
+        const double lambdaGas = mu / rho * std::sqrt(pi * mGas / (2. * kB * T));
+        const double Cu = 1. + 2.154 * lambdaGas / dcSafe;
+        const double beta_cont = 8. * kB * T / (3. * mu) * Cu * dcSafe;
+        const double beta_coag = 1.82 * std::max(beta_fm, beta_cont);
+        const double lognormal_correction =
+            std::exp(2. * (3. / Df - 1.) * std::log(d.Kmean)) *
+            Access::LognormalCoagulationIntegralCorrection(d.M, d.sigma);
+        const double expected = -0.5 * beta_coag * d.N * d.N *
+                                lognormal_correction / model.ScalingFactorNs();
+
+        model.ComputeSources();
+        const auto coagulation = model.sources_coagulation();
+        const auto total = model.sources();
+
+        source_ok =
+            d.valid &&
+            expected < 0. &&
+            coagulation.size() == 3u &&
+            coagulation[0] == 0. &&
+            near(coagulation[1], expected) &&
+            coagulation[2] == 0. &&
+            near(total[1], expected);
+    }
+    catch (const std::exception&)
+    {
+        source_ok = false;
+    }
+
+    try
+    {
+        MOM::MetalOxide<MOM::BasicThermoData>::Config base_cfg;
+        base_cfg.precursor_species = "TiOH4";
+        base_cfg.nucleation_model = "none";
+        base_cfg.coagulation_model = 1;
+        base_cfg.condensation_model = 0;
+        base_cfg.sintering_model = 0;
+
+        auto lognormal_cfg = base_cfg;
+        lognormal_cfg.closure_model = "lognormal";
+
+        MOM::MetalOxide<MOM::BasicThermoData> mono(th);
+        mono.SetupFromConfig(base_cfg);
+        mono.SetViscosity(mu);
+        mono.SetState(T, P, Y.data());
+
+        MOM::MetalOxide<MOM::BasicThermoData> logn(th);
+        logn.SetupFromConfig(lognormal_cfg);
+        logn.SetViscosity(mu);
+        logn.SetState(T, P, Y.data());
+
+        const double N = 1.e18;
+        const double vmean = 8. * mono.v0();
+        const double smean = mono.s0() * std::pow(vmean / mono.v0(), 2. / 3.);
+        const double fv = N * vmean;
+        const double solid_mass_fraction = mono.solid_density() / rho * fv;
+
+        mono.SetMoments(solid_mass_fraction, N / mono.ScalingFactorNs(), N * smean);
+        logn.SetMoments(solid_mass_fraction, N / logn.ScalingFactorNs(), N * smean);
+        mono.ComputeSources();
+        logn.ComputeSources();
+
+        const auto mono_coag = mono.sources_coagulation();
+        const auto logn_coag = logn.sources_coagulation();
+        spherical_limit_ok =
+            mono_coag.size() == logn_coag.size() &&
+            mono_coag[0] == logn_coag[0] &&
+            near(mono_coag[1], logn_coag[1]) &&
+            mono_coag[2] == logn_coag[2];
+    }
+    catch (const std::exception&)
+    {
+        spherical_limit_ok = false;
+    }
+
+    const bool ok = correction_ok && source_ok && spherical_limit_ok;
+
+    std::cout << "\n=== MetalOxide lognormal coagulation source ===\n";
+    std::cout << (correction_ok
+                      ? "  [PASS] Lognormal coagulation integral correction is guarded\n"
+                      : "  [FAIL] Lognormal coagulation correction helper is inconsistent\n");
+    std::cout << (source_ok
+                      ? "  [PASS] Lognormal coagulation matches analytical correction expression\n"
+                      : "  [FAIL] Lognormal coagulation source is inconsistent\n");
+    std::cout << (spherical_limit_ok
+                      ? "  [PASS] Lognormal coagulation recovers monodisperse spherical limit\n"
+                      : "  [FAIL] Lognormal coagulation does not recover spherical limit\n");
+
+    return ok;
+}
+
 static bool validateMetalOxideLognormalCondensation()
 {
     const auto th = buildMetalOxideThermo();
@@ -1478,6 +1639,7 @@ int main()
     all_ok &= validateMetalOxideMonodisperseClosureRegression();
     all_ok &= validateMetalOxideLognormalClosureState();
     all_ok &= validateMetalOxideDimensionlessLognormalMoment();
+    all_ok &= validateMetalOxideLognormalCoagulation();
     all_ok &= validateMetalOxideLognormalCondensation();
     all_ok &= validateMetalOxideLognormalSintering();
 

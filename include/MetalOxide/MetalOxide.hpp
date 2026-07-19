@@ -622,6 +622,8 @@ private:
     void NucleationSourceTerms_Binary();
     void NucleationSourceTerms_FixedCluster();
     void CoagulationSourceTerms();
+    void CoagulationSourceTerms_Monodisperse();
+    void CoagulationSourceTerms_Lognormal();
     void CondensationSourceTerms();
     void CondensationSourceTerms_Monodisperse();
     void CondensationSourceTerms_Lognormal();
@@ -630,6 +632,8 @@ private:
     void SinteringSourceTerms_Lognormal();
     [[nodiscard]] LognormalClosureData BuildLognormalClosureData() const noexcept;
     [[nodiscard]] static double DimensionlessLognormalMoment(double exponent, double sigma) noexcept;
+    [[nodiscard]] static double LognormalCoagulationIntegralCorrection(double M,
+                                                                       double sigma) noexcept;
     void CalculateOmegaGas_internal() noexcept;
     void ClearGasStoichiometry() noexcept;
     void AddGasStoichiometryTerm(std::string_view species, double coefficient);
@@ -762,6 +766,12 @@ template <typename Thermo> struct MetalOxideTestAccess
     [[nodiscard]] static double DimensionlessLognormalMoment(double exponent, double sigma) noexcept
     {
         return MetalOxide<Thermo>::DimensionlessLognormalMoment(exponent, sigma);
+    }
+
+    [[nodiscard]] static double LognormalCoagulationIntegralCorrection(double M,
+                                                                       double sigma) noexcept
+    {
+        return MetalOxide<Thermo>::LognormalCoagulationIntegralCorrection(M, sigma);
     }
 };
 } // namespace detail
