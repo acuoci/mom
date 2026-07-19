@@ -240,6 +240,7 @@ FakeDictionary buildMetalOxideDictionary()
     dict.strings["@SolidName"] = "GenericOxide";
     dict.strings["@GasClosureDummySpecies"] = "none";
     dict.strings["@NucleationModel"] = "fixed-cluster";
+    dict.strings["@ClosureModel"] = "monodisperse";
 
     dict.measures["@SolidMolecularWeight"] = {100.0, "kg/kmol"};
     dict.measures["@SolidDensity"] = {4.5, "g/cm3"};
@@ -297,10 +298,10 @@ void checkHMOMDictionarySetup()
     require(cfg.has_value(), "HMOM ParseConfig returned an unexpected error");
     require(cfg->is_active, "@HMOM was not parsed");
     require(cfg->pah_species == "C2H2", "HMOM @PAH was not parsed");
-    require(cfg->nucleation_model == 0, "HMOM @NucleationModel was not parsed");
-    require(cfg->oxidation_model == 0, "HMOM @OxidationModel was not parsed");
-    require(cfg->coagulation_model == 0, "HMOM @CoagulationModel was not parsed");
-    require(cfg->thermophoretic_model == 0, "HMOM @ThermophoreticModel was not parsed");
+    require(cfg->nucleation_model    == MOM::NucleationModel::Off,    "HMOM @NucleationModel was not parsed");
+    require(cfg->oxidation_model     == MOM::OxidationModel::Off,     "HMOM @OxidationModel was not parsed");
+    require(cfg->coagulation_model   == MOM::CoagulationModel::Off,   "HMOM @CoagulationModel was not parsed");
+    require(cfg->thermophoretic_model == MOM::ThermophoreticModel::Off, "HMOM @ThermophoreticModel was not parsed");
     require(!cfg->gas_consumption, "HMOM @GasConsumption was not parsed");
     require(!cfg->radiative_heat_transfer, "HMOM @RadiativeHeatTransfer was not parsed");
     requireNear(cfg->soot_density_kg_m3, 2000.0, "HMOM @SootDensity unit conversion failed");
@@ -339,10 +340,10 @@ void checkThreeEquationsDictionarySetup()
     require(cfg.has_value(), "ThreeEquations ParseConfig returned an unexpected error");
     require(cfg->is_active, "ThreeEquations activation flag was not parsed");
     require(cfg->pah_species == "C2H2", "ThreeEquations @PAH was not parsed");
-    require(cfg->nucleation_model == 0, "ThreeEquations @NucleationModel was not parsed");
-    require(cfg->oxidation_model == 0, "ThreeEquations @OxidationModel was not parsed");
-    require(cfg->coagulation_model == 0, "ThreeEquations @CoagulationModel was not parsed");
-    require(cfg->thermophoretic_model == 0, "ThreeEquations @ThermophoreticModel was not parsed");
+    require(cfg->nucleation_model    == MOM::NucleationModel::Off,    "ThreeEquations @NucleationModel was not parsed");
+    require(cfg->oxidation_model     == MOM::OxidationModel::Off,     "ThreeEquations @OxidationModel was not parsed");
+    require(cfg->coagulation_model   == MOM::CoagulationModel::Off,   "ThreeEquations @CoagulationModel was not parsed");
+    require(cfg->thermophoretic_model == MOM::ThermophoreticModel::Off, "ThreeEquations @ThermophoreticModel was not parsed");
     require(!cfg->gas_consumption, "ThreeEquations @GasConsumption was not parsed");
     require(!cfg->radiative_heat_transfer, "ThreeEquations @RadiativeHeatTransfer was not parsed");
     requireNear(cfg->soot_density_kg_m3, 1900.0, "ThreeEquations @SootDensity conversion failed");
@@ -380,10 +381,10 @@ void checkBrookesMossDictionarySetup()
     require(cfg->is_active, "BrookesMoss activation flag was not parsed");
     require(cfg->precursors_species == "C2H2", "BrookesMoss @Precursors was not parsed");
     require(cfg->surface_growth_species == "C2H2", "BrookesMoss @SurfaceGrowthSpecies was not parsed");
-    require(cfg->nucleation_model == 1, "BrookesMoss @NucleationModel was not parsed");
-    require(cfg->oxidation_model == 0, "BrookesMoss @OxidationModel was not parsed");
-    require(cfg->coagulation_model == 0, "BrookesMoss @CoagulationModel was not parsed");
-    require(cfg->thermophoretic_model == 0, "BrookesMoss @ThermophoreticModel was not parsed");
+    require(cfg->nucleation_model    == MOM::NucleationModel::Standard,  "BrookesMoss @NucleationModel was not parsed");
+    require(cfg->oxidation_model     == MOM::OxidationModel::Off,        "BrookesMoss @OxidationModel was not parsed");
+    require(cfg->coagulation_model   == MOM::CoagulationModel::Off,      "BrookesMoss @CoagulationModel was not parsed");
+    require(cfg->thermophoretic_model == MOM::ThermophoreticModel::Off,  "BrookesMoss @ThermophoreticModel was not parsed");
     require(cfg->gas_consumption, "BrookesMoss @GasConsumption was not parsed");
     require(!cfg->radiative_heat_transfer, "BrookesMoss @RadiativeHeatTransfer was not parsed");
     requireNear(cfg->soot_density_kg_m3, 1800.0, "BrookesMoss @SootDensity conversion failed");
@@ -429,10 +430,11 @@ void checkMetalOxideDictionarySetup()
     requireNear(cfg->solid_formula_units_per_precursor, 2.0,
                 "MetalOxide @SolidFormulaUnitsPerPrecursor was not parsed");
     require(cfg->nucleation_model == "fixed-cluster", "MetalOxide @NucleationModel was not parsed");
+    require(cfg->closure_model == "monodisperse", "MetalOxide @ClosureModel was not parsed");
     require(cfg->sintering_model == 0, "MetalOxide @SinteringModel was not parsed");
     require(cfg->coagulation_model == 1, "MetalOxide @CoagulationModel was not parsed");
     require(cfg->condensation_model == 0, "MetalOxide @CondensationModel was not parsed");
-    require(cfg->thermophoretic_model == 0, "MetalOxide @ThermophoreticModel was not parsed");
+    require(cfg->thermophoretic_model == MOM::ThermophoreticModel::Off, "MetalOxide @ThermophoreticModel was not parsed");
     require(!cfg->gas_consumption, "MetalOxide @GasConsumption was not parsed");
     require(cfg->sintering_deferred, "MetalOxide @SinteringDeferred was not parsed");
     requireNear(cfg->sintering_dp_min_m, 3.e-9, "MetalOxide @SinteringDpMinimum conversion failed");
@@ -454,12 +456,65 @@ void checkMetalOxideDictionarySetup()
     requireNear(metaloxide.solid_formula_units_per_precursor(), 2.0,
                 "MetalOxide formula units per precursor was not applied");
     require(metaloxide.nucleation_model()  == MOM::NucleationModel::Extended,  "MetalOxide nucleation flag was not applied");
+    require(metaloxide.closure_model() == MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Monodisperse,
+            "MetalOxide closure model was not applied");
     require(metaloxide.sintering_model()   == MOM::SinteringModel::Off,         "MetalOxide sintering flag was not applied");
     require(metaloxide.coagulation_model() == MOM::CoagulationModel::Standard,  "MetalOxide coagulation flag was not applied");
     require(metaloxide.condensation_model()== MOM::CondensationModel::Off,      "MetalOxide condensation flag was not applied");
     require(metaloxide.thermophoretic_model() == MOM::ThermophoreticModel::Off, "MetalOxide thermophoretic flag was not applied");
     require(!metaloxide.gas_consumption(), "MetalOxide gas-consumption flag was not applied");
     requireNear(metaloxide.schmidt_number(), 39.0, "MetalOxide Schmidt number was not applied");
+}
+
+void checkMetalOxideLognormalDictionarySetup()
+{
+    const auto thermo = buildMetalOxideThermo();
+
+    auto parse_dict = buildMetalOxideDictionary();
+    parse_dict.strings["@ClosureModel"] = "lognormal";
+    parse_dict.bools["@SinteringDeferred"] = false;
+
+    auto cfg = MOM::MetalOxide<MOM::BasicThermoData>::ParseConfig(parse_dict);
+    require(parse_dict.grammar_was_set, "MetalOxide lognormal ParseConfig did not install grammar");
+    require(cfg.has_value(), "MetalOxide lognormal ParseConfig returned an unexpected error");
+    require(cfg->closure_model == "lognormal", "MetalOxide @ClosureModel lognormal was not parsed");
+    require(!cfg->sintering_deferred,
+            "MetalOxide @SinteringDeferred false was not parsed for lognormal setup");
+
+    auto setup_dict = buildMetalOxideDictionary();
+    setup_dict.strings["@ClosureModel"] = "lognormal";
+    setup_dict.bools["@SinteringDeferred"] = false;
+
+    auto model = MOM::MakeAnyMomentMethod<MOM::BasicThermoData>(thermo, "MetalOxide");
+    MOM::SetupFromDictionary(model, setup_dict);
+
+    const auto& metaloxide = std::get<MOM::MetalOxide<MOM::BasicThermoData>>(model);
+    require(metaloxide.closure_model() == MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Lognormal,
+            "MetalOxide @ClosureModel lognormal was not applied");
+}
+
+void checkMetalOxideDefaultClosureDictionarySetup()
+{
+    const auto thermo = buildMetalOxideThermo();
+
+    auto parse_dict = buildMetalOxideDictionary();
+    parse_dict.strings.erase("@ClosureModel");
+
+    auto cfg = MOM::MetalOxide<MOM::BasicThermoData>::ParseConfig(parse_dict);
+    require(parse_dict.grammar_was_set, "MetalOxide default-closure ParseConfig did not install grammar");
+    require(cfg.has_value(), "MetalOxide default-closure ParseConfig returned an unexpected error");
+    require(cfg->closure_model == "monodisperse",
+            "MetalOxide omitted @ClosureModel did not preserve monodisperse default");
+
+    auto setup_dict = buildMetalOxideDictionary();
+    setup_dict.strings.erase("@ClosureModel");
+
+    auto model = MOM::MakeAnyMomentMethod<MOM::BasicThermoData>(thermo, "MetalOxide");
+    MOM::SetupFromDictionary(model, setup_dict);
+
+    const auto& metaloxide = std::get<MOM::MetalOxide<MOM::BasicThermoData>>(model);
+    require(metaloxide.closure_model() == MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Monodisperse,
+            "MetalOxide omitted @ClosureModel did not apply monodisperse default");
 }
 
 void checkMetalOxideGasStoichiometrySetup()
@@ -544,10 +599,26 @@ void checkMetalOxideReporterLabels()
             "MetalOxide reporter is missing generic precursor gas-source label");
     require(containsLabel(labels, "omegaGas(H2O)[kg/m3/s]"),
             "MetalOxide reporter is missing generic gas-stoichiometry species label");
+    require(containsLabel(labels, "closureValid[-]"),
+            "MetalOxide reporter is missing lognormal closure validity label");
+    require(containsLabel(labels, "closureSigmaGM[-]"),
+            "MetalOxide reporter is missing lognormal mobility-width label");
+    require(containsLabel(labels, "closureSigma[-]"),
+            "MetalOxide reporter is missing lognormal volume-width label");
+    require(containsLabel(labels, "closureM[-]"),
+            "MetalOxide reporter is missing lognormal morphology-exponent label");
+    require(containsLabel(labels, "closureKmean[-]"),
+            "MetalOxide reporter is missing lognormal normalization label");
+    require(containsLabel(labels, "closureDppMean[nm]"),
+            "MetalOxide reporter is missing lognormal primary-diameter label");
+    require(containsLabel(labels, "closureDcMean[nm]"),
+            "MetalOxide reporter is missing lognormal collision-diameter label");
     require(!containsLabel(labels, "omegaPrec[kg/m3/s]"),
             "MetalOxide reporter still exposes deprecated omegaPrec label");
     require(!containsLabel(labels, "omegaH2O[kg/m3/s]"),
             "MetalOxide reporter still exposes fixed MetalOxide H2O label");
+    require(!containsLabel(labels, "lognormalSigma[-]"),
+            "MetalOxide reporter exposes an unapproved lognormal sigma alias");
 }
 
 void checkMetalOxideRequiresExplicitGasStoichiometry()
@@ -583,6 +654,8 @@ int main()
         checkThreeEquationsDictionarySetup();
         checkBrookesMossDictionarySetup();
         checkMetalOxideDictionarySetup();
+        checkMetalOxideLognormalDictionarySetup();
+        checkMetalOxideDefaultClosureDictionarySetup();
         checkMetalOxideGasStoichiometrySetup();
         checkMetalOxideReporterLabels();
         checkMetalOxideRequiresExplicitGasStoichiometry();

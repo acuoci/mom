@@ -16,7 +16,7 @@
 |                                                                         |
 |   This file is part of the OpenSMOKEpp library.                         |
 |                                                                         |
-|   Copyright (C) 2026 Alberto Cuoci.                                     |
+|   Copyright (C) 2026 Alberto Cuoci, Benedetta Franzelli                 |
 |                                                                         |
 |   OpenSMOKEpp is free software: you can redistribute it and/or modify   |
 |   it under the terms of the GNU General Public License as published by  |
@@ -34,57 +34,17 @@
 \*-----------------------------------------------------------------------*/
 
 /**
- * @file MOM.hpp
- * @brief Umbrella header for the Method of Moments particle source-term library.
- *
- * Include this header when a translation unit needs the complete public API:
- * concrete variants, compile-time concepts, runtime factory, per-cell dispatch,
- * source accessors, particle properties, splitting utilities, and reporting.
- *
- * @par Compile-time selection
- * @code
- *   #include "MOM/MOM.hpp"
- *
- *   using ParticleModel = MOM::ThreeEquations<MyThermo>;
- *   static_assert(MOM::MomentMethod<ParticleModel>);
- * @endcode
- *
- * @par Runtime selection
- * @code
- *   auto model = MOM::MakeAnyMomentMethod(thermo, "HMOM");
- *   MOM::ComputeCell(model, T, P, Y, mu, moments);
- *   auto sources = MOM::GetSources(model);
- * @endcode
+ * @file HMOM6_BasicThermoData.cpp
+ * @brief Explicit instantiation of `HMOM6<BasicThermoData>`.
  */
 
-#pragma once
+#if defined(MOM_COMPILED_LIBRARY)
+#error "Do not define MOM_COMPILED_LIBRARY when compiling library sources"
+#endif
 
-// -- Core infrastructure -------------------------------------------------------
-#include "ThermoProxy.hpp"
-#include "ProcessFlags.hpp"
-#include "MomentMethodBase.hpp"
-#include "MomentMethodConcept.hpp"
+#include "HMOM6/HMOM6.hpp"
 
-// -- Variant registry, runtime wrapper, and reporter ---------------------------
-#include "AnyMomentMethod.hpp"
-#include "MomentMethodReporter.hpp"
-
-// -- Free-function dispatch API -----------------------------------------------
-#include "Dispatch.hpp"
-#include "Properties.hpp"
-#include "Sources.hpp"
-#include "Splitting.hpp"
-
-/** @brief Checks every registered variant against the public MomentMethod concept. */
-template struct MOM::AllVariants::ConceptCheck<MOM::BasicThermoData>;
-
-static_assert( MOM::HasReconstructedNDF<MOM::HMOM<MOM::BasicThermoData>>,
-               "[MOM] HMOM must satisfy HasReconstructedNDF.");
-static_assert( MOM::HasReconstructedNDF<MOM::ThreeEquations<MOM::BasicThermoData>>,
-               "[MOM] ThreeEquations must satisfy HasReconstructedNDF.");
-static_assert( MOM::HasReconstructedNDF<MOM::MetalOxide<MOM::BasicThermoData>>,
-               "[MOM] MetalOxide must satisfy HasReconstructedNDF.");
-static_assert(!MOM::HasReconstructedNDF<MOM::BrookesMoss<MOM::BasicThermoData>>,
-               "[MOM] BrookesMoss must NOT satisfy HasReconstructedNDF.");
-static_assert(!MOM::HasReconstructedNDF<MOM::HMOM6<MOM::BasicThermoData>>,
-               "[MOM] HMOM6 must NOT satisfy HasReconstructedNDF.");
+namespace MOM
+{
+template class HMOM6<BasicThermoData>;
+}

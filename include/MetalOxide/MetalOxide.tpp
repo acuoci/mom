@@ -171,6 +171,85 @@ void MetalOxide<Thermo>::SetMinimumNumberOfFormulaUnits(unsigned n)
 }
 
 template <ThermoMap Thermo>
+void MetalOxide<Thermo>::SetNucleationCollisionEnhancementFactor(double eps)
+{
+    if (!std::isfinite(eps) || eps <= 0.)
+        throw std::invalid_argument(
+            "[MetalOxide] Nucleation collision enhancement factor must be positive.");
+
+    epsilon_nuc_ = eps;
+    Precalculations();
+}
+
+template <ThermoMap Thermo>
+void MetalOxide<Thermo>::SetCoagulationCollisionEnhancementFactor(double eps)
+{
+    if (!std::isfinite(eps) || eps <= 0.)
+        throw std::invalid_argument(
+            "[MetalOxide] Coagulation collision enhancement factor must be positive.");
+
+    epsilon_coag_ = eps;
+    Precalculations();
+}
+
+template <ThermoMap Thermo>
+void MetalOxide<Thermo>::SetCondensationCollisionEnhancementFactor(double eps)
+{
+    if (!std::isfinite(eps) || eps <= 0.)
+        throw std::invalid_argument(
+            "[MetalOxide] Condensation collision enhancement factor must be positive.");
+
+    epsilon_cond_ = eps;
+    Precalculations();
+}
+
+template <ThermoMap Thermo>
+void MetalOxide<Thermo>::SetSinteringFrequencyFactor(double As)
+{
+    if (!std::isfinite(As) || As <= 0.)
+        throw std::invalid_argument("[MetalOxide] Sintering frequency factor must be positive.");
+
+    As_ = As;
+}
+
+template <ThermoMap Thermo>
+void MetalOxide<Thermo>::SetSinteringActivationTemperature(double Ts)
+{
+    if (!std::isfinite(Ts))
+        throw std::invalid_argument("[MetalOxide] Sintering activation temperature must be finite.");
+
+    Ts_ = Ts;
+}
+
+template <ThermoMap Thermo>
+void MetalOxide<Thermo>::SetSinteringTemperatureExponent(double ns)
+{
+    if (!std::isfinite(ns))
+        throw std::invalid_argument("[MetalOxide] Sintering temperature exponent must be finite.");
+
+    ns_ = ns;
+}
+
+template <ThermoMap Thermo>
+void MetalOxide<Thermo>::SetNMinimum(double v)
+{
+    if (!std::isfinite(v) || v <= 0.)
+        throw std::invalid_argument("[MetalOxide] Minimum number-density floor must be positive.");
+
+    N_min_ = v;
+    Precalculations();
+}
+
+template <ThermoMap Thermo>
+void MetalOxide<Thermo>::SetFvMinimum(double v)
+{
+    if (!std::isfinite(v) || v <= 0.)
+        throw std::invalid_argument("[MetalOxide] Minimum volume-fraction floor must be positive.");
+
+    fv_min_ = v;
+}
+
+template <ThermoMap Thermo>
 void MetalOxide<Thermo>::SetState(double T, double P_Pa, const double* Y) noexcept
 {
     const double cTot = this->template UpdateMixtureState<>(T, P_Pa, Y, thermo_);
@@ -363,6 +442,25 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::SetGasClosureDummySpecies(s
 }
 
 template <ThermoMap Thermo>
+void MetalOxide<Thermo>::SetClosureModel(std::string_view label)
+{
+    if (label == "monodisperse" || label == "Monodisperse" || label == "mono" || label == "0")
+    {
+        closure_model_ = ClosureModel::Monodisperse;
+        return;
+    }
+
+    if (label == "lognormal" || label == "Lognormal" || label == "log-normal" || label == "1")
+    {
+        closure_model_ = ClosureModel::Lognormal;
+        return;
+    }
+
+    throw std::invalid_argument(
+        "[MetalOxide] Invalid closure model. Allowed values: monodisperse, lognormal.");
+}
+
+template <ThermoMap Thermo>
 void MetalOxide<Thermo>::Properties(double& fv,
                               double& dp,
                               double& dc,
@@ -414,6 +512,185 @@ void MetalOxide<Thermo>::Properties(double& fv,
 
     // Sintering time scale [s]: tau_s = As * T^ns * dp^4 * exp(Ts/T).
     tauS = As_ * std::pow(this->T_, ns_) * std::pow(dp, 4.) * std::exp(Ts_ / this->T_);
+}
+
+template <ThermoMap Thermo>
+typename MetalOxide<Thermo>::LognormalClosureData
+MetalOxide<Thermo>::BuildLognormalClosureData() const noexcept
+{
+    LognormalClosureData d{};
+
+    const double Y  = std::max(solid_mass_fraction_, 0.);
+    const double N  = std::max(scaled_number_density_ * N0_scaling_, 0.);
+    const double Sp = std::max(surface_area_concentration_, 0.);
+    const double fv = this->rho_ / solid_density_kg_m3_ * Y;
+
+    if (!std::isfinite(N) || !std::isfinite(Sp) || !std::isfinite(fv) ||
+        N <= N_min_ || fv <= fv_min_ || Sp <= S_min_ ||
+        v0_ <= 0. || s0_ <= 0. || this->T_ <= 0.)
+        return d;
+
+    d.N  = N;
+    d.fv = fv;
+    d.Sp = Sp;
+
+    d.vmean = std::max(fv / N, v_min_);
+    if (!std::isfinite(d.vmean) || d.vmean <= 0.)
+        return {};
+
+    d.ssph_mean = this->SphereSurfaceFromVolume(d.vmean);
+    d.dsph_mean = this->SphereDiameter(d.vmean);
+    if (!std::isfinite(d.ssph_mean) || !std::isfinite(d.dsph_mean) ||
+        d.ssph_mean <= 0. || d.dsph_mean <= 0.)
+        return {};
+
+    d.smean = std::max(Sp / N, d.ssph_mean);
+    if (!std::isfinite(d.smean) || d.smean <= 0.)
+        return {};
+
+    d.dpp_mean = 6. * d.vmean / d.smean;
+    d.dpp_mean = std::max(d.dpp_mean, d0_);
+    if (!std::isfinite(d.dpp_mean) || d.dpp_mean <= 0.)
+        return {};
+
+    d.npp_mean = this->NumberPrimaryParticles(d.smean, d.vmean);
+    if (!std::isfinite(d.npp_mean) || d.npp_mean < 1.)
+        d.npp_mean = 1.;
+
+    constexpr double Df = 1.8;
+    d.dc_mean = d.dpp_mean * std::pow(d.npp_mean, 1. / Df);
+    if (!std::isfinite(d.dc_mean) || d.dc_mean <= 0.)
+        return {};
+
+    d.tau_s_mean =
+        As_ * std::pow(this->T_, ns_) * std::pow(d.dpp_mean, 4.) * std::exp(Ts_ / this->T_);
+    if (!std::isfinite(d.tau_s_mean) || d.tau_s_mean <= 0.)
+        return {};
+
+    const double mobility_ratio = std::pow(std::max(d.npp_mean, 1.), 0.45);
+    if (mobility_ratio <= 1.)
+        d.sigma_g_m = 1.;
+    else if (mobility_ratio < 3.)
+        d.sigma_g_m = 1. + (1.7 - 1.) / (3. - 1.) * (mobility_ratio - 1.);
+    else if (mobility_ratio < 10.)
+        d.sigma_g_m = 1.7 + (1.48 - 1.7) / (10. - 3.) * (mobility_ratio - 3.);
+    else
+        d.sigma_g_m = 1.48;
+    d.sigma_g_m = std::clamp(d.sigma_g_m, 1., 1.7);
+    d.sigma     = 3. * std::log(d.sigma_g_m);
+    if (!std::isfinite(d.sigma) || d.sigma < 0.)
+        return {};
+
+    const double log_v = std::log(d.vmean / v0_);
+    const double log_s = std::log(d.smean / s0_);
+    if (!std::isfinite(log_v) || !std::isfinite(log_s))
+        return {};
+
+    constexpr double tiny = 1.e-14;
+    if (d.sigma <= tiny)
+    {
+        if (std::abs(log_v) <= tiny)
+            d.M = 2.;
+        else
+            d.M = 3. * log_s / log_v;
+    }
+    else
+    {
+        const double sigma2 = d.sigma * d.sigma;
+        const double A      = log_v - 0.5 * sigma2;
+        const double disc   = A * A + 2. * sigma2 * log_s;
+        if (!std::isfinite(disc) || disc < 0.)
+            return {};
+        d.M = 3. * (std::sqrt(disc) - A) / sigma2;
+    }
+
+    if (!std::isfinite(d.M))
+        return {};
+    d.M = std::clamp(d.M, 2., 3.);
+
+    const double logK = std::log(s0_ / d.smean) + (d.M / 3.) * std::log(d.vmean / v0_);
+    if (!std::isfinite(logK))
+        return {};
+    d.Kmean = std::exp(std::clamp(logK, -700., 700.));
+    if (!std::isfinite(d.Kmean) || d.Kmean <= 0.)
+        return {};
+
+    d.valid = true;
+    return d;
+}
+
+template <ThermoMap Thermo>
+double MetalOxide<Thermo>::DimensionlessLognormalMoment(double exponent, double sigma) noexcept
+{
+    if (!std::isfinite(exponent) || !std::isfinite(sigma) || sigma < 0.)
+        return 0.;
+
+    const double sigma2 = sigma * sigma;
+    const double log_moment = 0.5 * (exponent * exponent - exponent) * sigma2;
+    if (!std::isfinite(log_moment))
+        return 0.;
+
+    return std::exp(std::clamp(log_moment, -700., 700.));
+}
+
+template <ThermoMap Thermo>
+double MetalOxide<Thermo>::LognormalCoagulationIntegralCorrection(double M,
+                                                                  double sigma) noexcept
+{
+    if (!std::isfinite(M) || !std::isfinite(sigma) || sigma < 0.)
+        return 0.;
+
+    constexpr double zero_width = 1.e-14;
+    if (sigma <= zero_width)
+        return 1.;
+
+    constexpr std::array<double, 5> M_nodes{
+        2.00, 2.25, 2.50, 2.75, 3.00};
+    constexpr std::array<double, 8> sigma_nodes{
+        0.00, 0.25, 0.50, 0.75, 1.00, 1.25, 1.50, 1.70};
+
+    // Dimensionless integral I(M,sigma) from the log-normal coagulation
+    // correction. Values were generated from the Eq. (37) double integral.
+    constexpr std::array<std::array<double, 8>, 5> I_table{{
+        {{1.000000000, 1.006532090, 1.026439667, 1.060958207,
+          1.112899105, 1.187450945, 1.293315299, 1.409752344}},
+        {{1.000000000, 1.005101653, 1.020913133, 1.049262662,
+          1.094017440, 1.162078835, 1.264914720, 1.384396881}},
+        {{1.000000000, 1.004260069, 1.017865773, 1.043627900,
+          1.087199239, 1.158443034, 1.273741759, 1.415330366}},
+        {{1.000000000, 1.004006725, 1.017290649, 1.044043180,
+          1.092525960, 1.177151955, 1.322300379, 1.509027840}},
+        {{1.000000000, 1.004342159, 1.019200745, 1.050613230,
+          1.110519654, 1.220185674, 1.416934098, 1.680366832}}
+    }};
+
+    const double Mc = std::clamp(M, M_nodes.front(), M_nodes.back());
+    const double sc = std::clamp(sigma, sigma_nodes.front(), sigma_nodes.back());
+
+    auto bracket = [](const auto& nodes, double x) noexcept
+    {
+        if (x <= nodes.front())
+            return std::size_t{0};
+        if (x >= nodes.back())
+            return nodes.size() - 2u;
+        const auto upper = std::upper_bound(nodes.begin(), nodes.end(), x);
+        return static_cast<std::size_t>((upper - nodes.begin()) - 1);
+    };
+
+    const std::size_t iM = bracket(M_nodes, Mc);
+    const std::size_t is = bracket(sigma_nodes, sc);
+
+    const double tM = (Mc - M_nodes[iM]) / (M_nodes[iM + 1u] - M_nodes[iM]);
+    const double ts = (sc - sigma_nodes[is]) / (sigma_nodes[is + 1u] - sigma_nodes[is]);
+
+    const double I00 = I_table[iM][is];
+    const double I10 = I_table[iM + 1u][is];
+    const double I01 = I_table[iM][is + 1u];
+    const double I11 = I_table[iM + 1u][is + 1u];
+
+    const double I0 = I00 + tM * (I10 - I00);
+    const double I1 = I01 + tM * (I11 - I01);
+    return I0 + ts * (I1 - I0);
 }
 
 template <ThermoMap Thermo> double MetalOxide<Thermo>::volume_fraction() const noexcept
@@ -559,6 +836,17 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::NucleationSourceTerms_Fixed
 
 template <ThermoMap Thermo> void MetalOxide<Thermo>::CoagulationSourceTerms()
 {
+    if (closure_model_ == ClosureModel::Lognormal)
+    {
+        CoagulationSourceTerms_Lognormal();
+        return;
+    }
+
+    CoagulationSourceTerms_Monodisperse();
+}
+
+template <ThermoMap Thermo> void MetalOxide<Thermo>::CoagulationSourceTerms_Monodisperse()
+{
     const double N = scaled_number_density_ * N0_scaling_;
     if (N <= N_min_)
         return;
@@ -596,7 +884,58 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::CoagulationSourceTerms()
     this->source_coagulation_(2) = 0.;
 }
 
+template <ThermoMap Thermo> void MetalOxide<Thermo>::CoagulationSourceTerms_Lognormal()
+{
+    const auto d = BuildLognormalClosureData();
+    if (!d.valid)
+        return;
+
+    const double dcSafe = std::max(d.dc_mean, d0_);
+
+    const double beta_fm = epsilon_coag_ *
+                           std::sqrt(this->pi_ * this->kB_ * this->T_ /
+                                     (2. * solid_density_kg_m3_)) *
+                           std::sqrt(2. / d.vmean) * std::pow(2. * dcSafe, 2.);
+
+    const double mGas = this->rho_ * this->kB_ * this->T_ / this->P_Pa_;
+    const double lambdaGas =
+        this->mu_ / this->rho_ * std::sqrt(this->pi_ * mGas / (2. * this->kB_ * this->T_));
+    const double Cu        = 1. + 2.154 * lambdaGas / dcSafe;
+    const double beta_cont = 8. * this->kB_ * this->T_ / (3. * this->mu_) * Cu * dcSafe;
+
+    const double beta_m    = std::max(beta_fm, beta_cont);
+    const double beta_coag = 1.82 * beta_m;
+    if (!std::isfinite(beta_coag) || beta_coag <= 0.)
+        return;
+
+    constexpr double Df = 1.8;
+    const double lognormal_correction =
+        std::exp(std::clamp(2. * (3. / Df - 1.) * std::log(d.Kmean), -700., 700.)) *
+        LognormalCoagulationIntegralCorrection(d.M, d.sigma);
+    if (!std::isfinite(lognormal_correction) || lognormal_correction <= 0.)
+        return;
+
+    const double OmegaN = -0.5 * beta_coag * d.N * d.N * lognormal_correction;
+    if (!std::isfinite(OmegaN) || OmegaN >= 0.)
+        return;
+
+    this->source_coagulation_(0) = 0.;
+    this->source_coagulation_(1) = OmegaN / N0_scaling_;
+    this->source_coagulation_(2) = 0.;
+}
+
 template <ThermoMap Thermo> void MetalOxide<Thermo>::CondensationSourceTerms()
+{
+    if (closure_model_ == ClosureModel::Lognormal)
+    {
+        CondensationSourceTerms_Lognormal();
+        return;
+    }
+
+    CondensationSourceTerms_Monodisperse();
+}
+
+template <ThermoMap Thermo> void MetalOxide<Thermo>::CondensationSourceTerms_Monodisperse()
 {
     if (c_precursor_ <= 0. || vprec_ <= 0. || dprec_ <= 0.)
         return;
@@ -633,7 +972,89 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::CondensationSourceTerms()
     this->source_condensation_(2) = deltas * BetaNprecN;
 }
 
+template <ThermoMap Thermo> void MetalOxide<Thermo>::CondensationSourceTerms_Lognormal()
+{
+    if (c_precursor_ <= 0. || vprec_ <= 0. || dprec_ <= 0.)
+        return;
+
+    const auto d = BuildLognormalClosureData();
+    if (!d.valid)
+        return;
+
+    auto pow_positive = [](double base, double exponent) noexcept
+    {
+        if (!std::isfinite(base) || !std::isfinite(exponent) || base <= 0.)
+            return 0.;
+        return std::exp(std::clamp(exponent * std::log(base), -700., 700.));
+    };
+
+    constexpr double Df  = 1.8;
+    constexpr double chi = -0.2043;
+
+    const double reduced_volume_factor = std::sqrt(1. / vprec_ + 1. / d.vmean);
+    const double Nprec = c_precursor_ * this->Nav_kmol_;
+    const double prefactor =
+        epsilon_cond_ *
+        std::sqrt(this->pi_ * this->kB_ * this->T_ / (2. * solid_density_kg_m3_)) *
+        reduced_volume_factor * Nprec * d.N;
+
+    if (!std::isfinite(prefactor) || prefactor <= 0.)
+        return;
+
+    const double morphology = d.M / 3.;
+    const double Kdc        = pow_positive(d.Kmean, 3. / Df - 1.);
+    const double a_dc       = 1. - morphology + (d.M - 2.) / Df;
+    if (Kdc <= 0.)
+        return;
+
+    const double moment_dc  = DimensionlessLognormalMoment(a_dc, d.sigma);
+    const double moment_dc2 = DimensionlessLognormalMoment(2. * a_dc, d.sigma);
+    if (moment_dc <= 0. || moment_dc2 <= 0.)
+        return;
+
+    const double collision_moment =
+        d.dc_mean * d.dc_mean * Kdc * Kdc * moment_dc2 +
+        2. * dprec_ * d.dc_mean * Kdc * moment_dc +
+        dprec_ * dprec_;
+    if (!std::isfinite(collision_moment) || collision_moment <= 0.)
+        return;
+
+    const double delta_s_mean =
+        (2. / 3.) * (vprec_ / d.vmean) * d.smean *
+        pow_positive(std::max(d.npp_mean, 1.), chi);
+    const double Kdelta  = pow_positive(d.Kmean, 1. + 3. * chi);
+    const double a_delta = morphology - 1. + chi * (d.M - 2.);
+    if (!std::isfinite(delta_s_mean) || delta_s_mean <= 0. || Kdelta <= 0.)
+        return;
+
+    const double surface_moment =
+        d.dc_mean * d.dc_mean * Kdelta * Kdc * Kdc *
+            DimensionlessLognormalMoment(a_delta + 2. * a_dc, d.sigma) +
+        2. * dprec_ * d.dc_mean * Kdelta * Kdc *
+            DimensionlessLognormalMoment(a_delta + a_dc, d.sigma) +
+        dprec_ * dprec_ * Kdelta *
+            DimensionlessLognormalMoment(a_delta, d.sigma);
+    if (!std::isfinite(surface_moment) || surface_moment <= 0.)
+        return;
+
+    this->source_condensation_(0) =
+        solid_density_kg_m3_ / this->rho_ * vprec_ * prefactor * collision_moment;
+    this->source_condensation_(1) = 0.;
+    this->source_condensation_(2) = delta_s_mean * prefactor * surface_moment;
+}
+
 template <ThermoMap Thermo> void MetalOxide<Thermo>::SinteringSourceTerms()
+{
+    if (closure_model_ == ClosureModel::Lognormal)
+    {
+        SinteringSourceTerms_Lognormal();
+        return;
+    }
+
+    SinteringSourceTerms_Monodisperse();
+}
+
+template <ThermoMap Thermo> void MetalOxide<Thermo>::SinteringSourceTerms_Monodisperse()
 {
     const double N = scaled_number_density_ * N0_scaling_;
     const double S = surface_area_concentration_;
@@ -668,9 +1089,81 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::SinteringSourceTerms()
 
     // Physical sintering time scale [s]  
     const double tauPhysical = std::max(tauS, sintering_tau_min_);
+    double sinteringRate = activation / tauPhysical;
+    if (sintering_k_max_ > 0.)
+        sinteringRate = std::min(sinteringRate, sintering_k_max_);
+    if (!std::isfinite(sinteringRate) || sinteringRate <= 0.)
+        return;
 
     // Rate of surface area decrease toward spherical limit [m2/m3/s]
-    const double OmegaS = -activation * (S - S_sphere) / tauPhysical;
+    const double OmegaS = -sinteringRate * (S - S_sphere);
+
+    this->source_sintering_(0) = 0.;
+    this->source_sintering_(1) = 0.;
+    this->source_sintering_(2) = OmegaS;
+}
+
+template <ThermoMap Thermo> void MetalOxide<Thermo>::SinteringSourceTerms_Lognormal()
+{
+    const auto d = BuildLognormalClosureData();
+    if (!d.valid)
+        return;
+
+    if (d.dpp_mean < sintering_dp_min_)
+        return;
+
+    double activation = 1.;
+    if (sintering_activation_np_ > 1.)
+    {
+        const double x =
+            (d.npp_mean - sintering_activation_np_) / std::max(sintering_activation_width_np_, 1.e-300);
+        activation = 0.5 * (1. + std::tanh(x));
+    }
+    if (activation <= 0.)
+        return;
+
+    auto pow_positive = [](double base, double exponent) noexcept
+    {
+        if (!std::isfinite(base) || !std::isfinite(exponent) || base <= 0.)
+            return 0.;
+        return std::exp(std::clamp(exponent * std::log(base), -700., 700.));
+    };
+
+    // The current MetalOxide sintering law uses tau_s ~ dp^4.  The paper's
+    // dimensionless expression is therefore evaluated with a size exponent of 4.
+    constexpr double dp_exponent = 4.;
+    const double morphology = d.M / 3.;
+    const double eta_surface_exponent =
+        morphology + dp_exponent * (morphology - 1.);
+    const double eta_sphere_exponent =
+        2. / 3. + dp_exponent * (morphology - 1.);
+
+    const double K_surface = pow_positive(d.Kmean, dp_exponent + 1.);
+    const double K_sphere  = pow_positive(d.Kmean, dp_exponent);
+    if (K_surface <= 0. || K_sphere <= 0.)
+        return;
+
+    const double moment_surface = DimensionlessLognormalMoment(eta_surface_exponent, d.sigma);
+    const double moment_sphere  = DimensionlessLognormalMoment(eta_sphere_exponent, d.sigma);
+    if (moment_surface <= 0. || moment_sphere <= 0.)
+        return;
+
+    const double surface_term = d.Sp * K_surface * moment_surface;
+    const double sphere_term  = d.N * d.ssph_mean * K_sphere * moment_sphere;
+    const double driving      = surface_term - sphere_term;
+    if (!std::isfinite(driving) || driving <= 0.)
+        return;
+
+    const double tauPhysical = std::max(d.tau_s_mean, sintering_tau_min_);
+    double sinteringRate = activation / tauPhysical;
+    if (sintering_k_max_ > 0.)
+        sinteringRate = std::min(sinteringRate, sintering_k_max_);
+    if (!std::isfinite(sinteringRate) || sinteringRate <= 0.)
+        return;
+
+    const double OmegaS      = -sinteringRate * driving;
+    if (!std::isfinite(OmegaS) || OmegaS >= 0.)
+        return;
 
     this->source_sintering_(0) = 0.;
     this->source_sintering_(1) = 0.;
@@ -709,10 +1202,14 @@ template <ThermoMap Thermo> double MetalOxide<Thermo>::SinteringDeferredUpdate(d
         return S;
 
     const double tauS_phys = std::max(tauS, sintering_tau_min_);
-    const double tauSeff   = tauS_phys / activation;
+    double sinteringRate = activation / tauS_phys;
+    if (sintering_k_max_ > 0.)
+        sinteringRate = std::min(sinteringRate, sintering_k_max_);
+    if (!std::isfinite(sinteringRate) || sinteringRate <= 0.)
+        return S;
 
     // Analytical solution: S(t) = S_sphere + (S0 - S_sphere)*exp(-dt/tau).
-    const double S_new = S_sphere + (S - S_sphere) * std::exp(-dt_ode / tauSeff);
+    const double S_new = S_sphere + (S - S_sphere) * std::exp(-dt_ode * sinteringRate);
     return std::max(S_new, S_sphere);
 }
 
@@ -841,6 +1338,13 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::PrintSummary() const
             default:                        return "unknown";
         }
     };
+    const auto closure_str = [](ClosureModel m) -> const char* {
+        switch (m) {
+            case ClosureModel::Monodisperse: return "monodisperse";
+            case ClosureModel::Lognormal:    return "lognormal";
+            default:                         return "unknown";
+        }
+    };
 
     std::cout
         << "\n"
@@ -863,6 +1367,7 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::PrintSummary() const
         << "    + s0 (m2):                       " << s0_ << "\n"
         << "\n"
         << " [Processes]\n"
+        << "    + Closure model:                 " << closure_str(closure_model_) << "\n"
         << "    + Nucleation:                    " << static_cast<int>(nucleation_variant_) << "  (" << nuc_str(nucleation_variant_) << ")\n"
         << "    + Coagulation:                   " << coagulation_model_ << "\n"
         << "    + Condensation:                  " << condensation_model_ << "\n"
@@ -878,6 +1383,8 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::PrintSummary() const
         << "    + ns (-):                        " << ns_ << "\n"
         << "    + Ts (K):                        " << Ts_ << "\n"
         << "    + dp_min (m):                    " << sintering_dp_min_ << "\n"
+        << "    + tau_min (s):                   " << sintering_tau_min_ << "\n"
+        << "    + k_max (1/s):                   " << sintering_k_max_ << "\n"
         << "\n"
         << " [Species — precursor]\n"
         << "    + Name:                          " << precursor_species_ << "\n";
@@ -954,6 +1461,14 @@ void MetalOxide<Thermo>::ApplyConfig(const Config& cfg)
     this->SetGasClosureDummySpecies(cfg.gas_closure_dummy_species);
     this->SetGasConsumption(cfg.gas_consumption);
 
+    if (!cfg.gas_stoichiometry.empty() && precursor_index_ < 0)
+        throw std::invalid_argument(
+            "[MetalOxide] Explicit gas stoichiometry requires a valid precursor species.");
+
+    if (cfg.gas_consumption && precursor_index_ < 0)
+        throw std::invalid_argument(
+            "[MetalOxide] Gas consumption requires a valid precursor species.");
+
     if (cfg.gas_consumption && precursor_index_ >= 0)
     {
         if (gas_stoichiometry_.empty())
@@ -974,10 +1489,17 @@ void MetalOxide<Thermo>::ApplyConfig(const Config& cfg)
         throw std::invalid_argument(
             "[MetalOxide] Invalid nucleation model. Allowed values: none, binary, fixed-cluster.");
 
+    this->SetClosureModel(cfg.closure_model);
+
     // -- Other process models ----------------------------------------------
     this->SetSintering(cfg.sintering_model);
     this->SetCoagulation(cfg.coagulation_model);
     this->SetCondensation(cfg.condensation_model);
+
+    if (cfg.thermophoretic_model != ThermophoreticModel::Off &&
+        cfg.thermophoretic_model != ThermophoreticModel::Standard)
+        throw std::invalid_argument(
+            "[MetalOxide] Invalid thermophoretic model flag. Allowed values: 0, 1.");
     this->SetThermophoreticModel(cfg.thermophoretic_model);
 
     // -- Cluster sizes -----------------------------------------------------
@@ -989,28 +1511,44 @@ void MetalOxide<Thermo>::ApplyConfig(const Config& cfg)
     if (nucleated_units <= 0)
         throw std::invalid_argument(
             "[MetalOxide] nucleated-particle formula units must be positive.");
+    if (nucleated_units < minimum_units)
+        throw std::invalid_argument(
+            "[MetalOxide] nucleated-particle formula units must be greater than or equal to "
+            "minimum formula units.");
 
     this->SetMinimumNumberOfFormulaUnits(static_cast<unsigned int>(minimum_units));
     this->SetNumberOfFormulaUnitsPerNucleatedParticle(
         static_cast<unsigned int>(nucleated_units));
 
     // -- Sintering kinetics ------------------------------------------------
-    As_ = cfg.sintering_As_s_K_m;
-    Ts_ = cfg.sintering_Ts_K;
-    ns_ = cfg.sintering_ns;
+    this->SetSinteringFrequencyFactor(cfg.sintering_As_s_K_m);
+    this->SetSinteringActivationTemperature(cfg.sintering_Ts_K);
+    this->SetSinteringTemperatureExponent(cfg.sintering_ns);
 
     // -- Sintering regularization -----------------------------------------
+    if (!std::isfinite(cfg.sintering_dp_min_m) || cfg.sintering_dp_min_m < 0.)
+        throw std::invalid_argument("[MetalOxide] sintering minimum diameter must be non-negative.");
+    if (!std::isfinite(cfg.sintering_tau_min_s) || cfg.sintering_tau_min_s <= 0.)
+        throw std::invalid_argument("[MetalOxide] sintering minimum time scale must be positive.");
+    if (!std::isfinite(cfg.sintering_k_max_per_s) || cfg.sintering_k_max_per_s <= 0.)
+        throw std::invalid_argument("[MetalOxide] sintering maximum rate must be positive.");
     is_sintering_deferred_ = cfg.sintering_deferred;
     sintering_dp_min_      = cfg.sintering_dp_min_m;
     sintering_tau_min_     = cfg.sintering_tau_min_s;
     sintering_k_max_       = cfg.sintering_k_max_per_s;
 
+    if (closure_model_ == ClosureModel::Lognormal && is_sintering_deferred_)
+        throw std::invalid_argument(
+            "[MetalOxide] The lognormal closure does not currently support deferred sintering.");
+
     // -- Numerical floors + geometry recompute -----------------------------
-    N_min_  = cfg.ns_minimum_per_m3;
-    fv_min_ = cfg.fv_minimum;
+    this->SetNMinimum(cfg.ns_minimum_per_m3);
+    this->SetFvMinimum(cfg.fv_minimum);
     Precalculations();
 
     // -- Transport ---------------------------------------------------------
+    if (!std::isfinite(cfg.schmidt_number) || cfg.schmidt_number <= 0.)
+        throw std::invalid_argument("[MetalOxide] Schmidt number must be positive.");
     this->SetSchmidtNumber(cfg.schmidt_number);
 
     // -- Debug mode --------------------------------------------------------
@@ -1260,10 +1798,14 @@ MetalOxide<Thermo>::ParseConfig(DictType& dict)
     if (dict.CheckOption("@NucleationModel"))
         dict.ReadString("@NucleationModel", cfg.nucleation_model);
 
+    if (dict.CheckOption("@ClosureModel"))
+        dict.ReadString("@ClosureModel", cfg.closure_model);
+
     if (dict.CheckOption("@SinteringModel"))    dict.ReadInt("@SinteringModel",    cfg.sintering_model);
     if (dict.CheckOption("@CoagulationModel"))  dict.ReadInt("@CoagulationModel",  cfg.coagulation_model);
     if (dict.CheckOption("@CondensationModel")) dict.ReadInt("@CondensationModel", cfg.condensation_model);
-    if (dict.CheckOption("@ThermophoreticModel")) dict.ReadInt("@ThermophoreticModel", cfg.thermophoretic_model);
+    if (dict.CheckOption("@ThermophoreticModel"))
+        { int _tmp; dict.ReadInt("@ThermophoreticModel", _tmp); cfg.thermophoretic_model = static_cast<ThermophoreticModel>(_tmp); }
 
     if (dict.CheckOption("@MinimumFormulaUnits"))
     {

@@ -172,8 +172,8 @@ public:
 
     NewVariant(const NewVariant&)            = delete;
     NewVariant& operator=(const NewVariant&) = delete;
-    NewVariant(NewVariant&&)                 = default;
-    NewVariant& operator=(NewVariant&&)      = default;
+    NewVariant(NewVariant&&)                 = default;  ///< Move-constructible for placement in std::variant.
+    NewVariant& operator=(NewVariant&&)      = delete;   ///< Not move-assignable — const Thermo& member cannot be reseated.
 
     // =========================================================================
     // Config struct (optional but strongly recommended)
@@ -186,18 +186,64 @@ public:
     /** @brief All tunable parameters for NewVariant.  All fields carry safe defaults. */
     struct Config
     {
+        // -- Lifecycle --------------------------------------------------------
         bool   is_active        = false;
+
+        // -- Physical properties ----------------------------------------------
         double particle_density = 1800.;   // [kg/m3]  TODO: adjust for your material
-        // TODO: add your model-specific parameters
+
+        // -- Transport & radiation --------------------------------------------
+        // These mirror the fields in CommonConfig used by the four built-in
+        // variants.  Copy as-is or rename to suit your nomenclature.
+        double                schmidt_number         = 50.;           // [-]
+        ThermophoreticModel   thermophoretic_model   = ThermophoreticModel::Off;
+        bool                  radiative_heat_transfer = false;
+        std::string           planck_coefficient     = "None";        // or "Smooke", "Kent", "Sazhin"
+        bool                  gas_consumption        = false;
+
+        // TODO: add your model-specific parameters (process model flags, kinetic
+        //       constants, species names, numerical floors, …)
     };
 
-    /** @brief Applies @p cfg, re-computes derived quantities, allocates gas arrays. */
+    /**
+     * @brief Applies @p cfg, re-computes derived quantities, allocates gas arrays.
+     *
+     * @note  Follow this order for every variant:
+     *        1. is_active_ (gate — must come first)
+     *        2. Material / geometry setters whose output feeds later setters.
+     *        3. Process model flags.
+     *        4. Transport & radiation (independent of geometry).
+     *        5. Gas arrays: call MemoryAllocation(thermo_) after gas_consumption is set.
+     */
     void ApplyConfig(const Config& cfg)
     {
+        // 1. Lifecycle gate
         this->is_active_ = cfg.is_active;
+
+        // 2. Physical properties — set before any geometry that depends on density
         this->SetParticleDensity(cfg.particle_density);
-        // TODO: copy remaining config fields, call Precalculations() if needed,
-        //       call MemoryAllocation(thermo_) or equivalent to size omega_gas_.
+        // TODO: call Precalculations() here if your variant pre-computes geometry
+        //       (particle diameter, surface, volume) from density and other constants.
+
+        // 3. Process model flags — uncomment the ones your variant uses
+        // this->SetNucleation(static_cast<int>(cfg.nucleation_model));
+        // this->SetSurfaceGrowth(static_cast<int>(cfg.surface_growth_model));
+        // this->SetOxidation(static_cast<int>(cfg.oxidation_model));
+        // this->SetCondensation(static_cast<int>(cfg.condensation_model));
+        // this->SetCoagulation(static_cast<int>(cfg.coagulation_model));
+        // this->SetSintering(cfg.sintering_model);            // MetalOxide-style int
+        // this->SetThermophoreticModel(cfg.thermophoretic_model);
+
+        // 4. Transport & radiation
+        this->SetSchmidtNumber(cfg.schmidt_number);
+        this->SetThermophoreticModel(cfg.thermophoretic_model);
+        this->SetRadiativeHeatTransfer(cfg.radiative_heat_transfer);
+        this->SetPlanckAbsorptionCoefficient(cfg.planck_coefficient);  // may throw on bad label
+
+        // 5. Gas-phase coupling — MUST come after all flags that affect gas arrays
+        this->SetGasConsumption(cfg.gas_consumption);
+        // TODO: if gas_consumption is true, call MemoryAllocation(thermo_) here to
+        //       size omega_gas_ to thermo_.NumberOfSpecies().
     }
 
     // =========================================================================

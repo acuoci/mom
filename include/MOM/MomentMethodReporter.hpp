@@ -44,6 +44,7 @@
 #include "AnyMomentMethod.hpp"
 #include "Utilities/OutputFileColumns.h"
 
+#include <cassert>
 #include <cmath>
 #include <numbers>
 #include <numeric>
@@ -100,9 +101,16 @@ public:
     /**
      * @brief Registers all columns required by @p model.
      * @param model Configured moment method instance.
-     * @param precision Numeric precision used by `OutputFileColumns`.
+     * @param precision Numeric precision (significant digits) used by `OutputFileColumns`.
+     *                  Defaults to 8, which is sufficient for source-term diagnostics.
      *
      * Call once before `OutputFileColumns::Complete()` and before any row output.
+     *
+     * @note The default precision here (8) differs from `WriteHeaderLineReconstructedNDF`
+     *       (16).  The asymmetry is intentional: NDF reconstruction integrates moment
+     *       ratios that can be numerically sensitive, so higher output precision aids
+     *       post-processing and round-trip verification.  Source-term output does not
+     *       require that extra resolution.
      */
     template <MomentMethod Model> void WriteHeader(const Model& model, unsigned precision = 8);
 
@@ -141,13 +149,20 @@ public:
     /**
      * @brief Registers reconstructed NDF output columns.
      *
-     * Core columns use nm and nm3 units: particle volume, dimensional NDF,
+     * Core columns use nm and nm³ units: particle volume, dimensional NDF,
      * normalized NDF, sphere-equivalent diameter, diameter-space NDF, and
      * normalized diameter-space NDF.
      *
      * @param model NDF-capable moment method instance.
      * @param ndf_out Output file object for the NDF table.
-     * @param precision Numeric precision used by `OutputFileColumns`.
+     * @param precision Numeric precision (significant digits) used by `OutputFileColumns`.
+     *                  Defaults to 16 — see the note below.
+     *
+     * @note The default precision here (16) differs from `WriteHeader` (8).  The
+     *       asymmetry is intentional: NDF reconstruction integrates moment ratios
+     *       that can be numerically sensitive, so higher output precision aids
+     *       post-processing and round-trip verification.  Source-term output does
+     *       not require that extra resolution.
      */
     template <MomentMethod Model>
     requires HasReconstructedNDF<Model>
@@ -222,6 +237,7 @@ public:
     requires HasReconstructedNDF<Model>
     void WriteHeaderLineReconstructedNDF(const Model& model, unsigned precision = 16)
     {
+        assert(out_ != nullptr && "MomentMethodReporter: WriteHeaderLineReconstructedNDF called on a disconnected reporter (out_ is null).");
         WriteHeaderLineReconstructedNDF(model, *out_, precision);
     }
 
@@ -229,6 +245,7 @@ public:
     void WriteHeaderLineReconstructedNDF(const AnyMomentMethod<Thermo>& any,
                                          unsigned precision = 16)
     {
+        assert(out_ != nullptr && "MomentMethodReporter: WriteHeaderLineReconstructedNDF called on a disconnected reporter (out_ is null).");
         WriteHeaderLineReconstructedNDF(any, *out_, precision);
     }
 
@@ -240,6 +257,7 @@ public:
                                double vmax_nm3                = 1.0e6,
                                bool   use_regularized_moments = false)
     {
+        assert(out_ != nullptr && "MomentMethodReporter: WriteReconstructedNDF called on a disconnected reporter (out_ is null).");
         WriteReconstructedNDF(model, *out_, nv, vmin_nm3, vmax_nm3, use_regularized_moments);
     }
 
@@ -250,6 +268,7 @@ public:
                                double vmax_nm3                = 1.0e6,
                                bool   use_regularized_moments = false)
     {
+        assert(out_ != nullptr && "MomentMethodReporter: WriteReconstructedNDF called on a disconnected reporter (out_ is null).");
         WriteReconstructedNDF(any, *out_, nv, vmin_nm3, vmax_nm3, use_regularized_moments);
     }
 
@@ -281,6 +300,7 @@ private:
 template <MomentMethod Model>
 void MomentMethodReporter::WriteHeader(const Model& model, unsigned precision)
 {
+    assert(out_ != nullptr && "MomentMethodReporter: WriteHeader called on a disconnected reporter (out_ is null).");
     constexpr unsigned N = Model::n_equations;
 
     // [ZF] marks columns backed by the base-class zero fallback for this variant.
@@ -338,6 +358,7 @@ void MomentMethodReporter::WriteHeader(const Model& model, unsigned precision)
 
 template <MomentMethod Model> void MomentMethodReporter::WriteRow(const Model& model)
 {
+    assert(out_ != nullptr && "MomentMethodReporter: WriteRow called on a disconnected reporter (out_ is null).");
     // Row-mode callback for optional variant columns.
     auto add_val = [&](std::string_view /*unused_in_row*/, double value)
     {

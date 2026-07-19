@@ -855,8 +855,9 @@ void BrookesMoss<Thermo>::ApplyConfig(const Config& cfg)
     this->is_active_ = cfg.is_active;
 
     const Config defaults{};
-    const bool is_bmh_nucleation = cfg.nucleation_model == static_cast<int>(NucleationVariant::BrookesMossHall);
-    const bool is_bmh_oxidation  = cfg.oxidation_model  == static_cast<int>(OxidationVariant::BrookesMossHall);
+    // NucleationModel::Extended (=2) maps to NucleationVariant::BrookesMossHall (=2).
+    const bool is_bmh_nucleation = cfg.nucleation_model == NucleationModel::Extended;
+    const bool is_bmh_oxidation  = cfg.oxidation_model  == OxidationModel::Extended;
     const bool is_bmh_active     = is_bmh_nucleation || is_bmh_oxidation;
 
     double soot_particle_mw = cfg.soot_particle_mw_kg_kmol;
@@ -874,7 +875,7 @@ void BrookesMoss<Thermo>::ApplyConfig(const Config& cfg)
     // -- Gas species -------------------------------------------------------
     this->SetPrecursors(cfg.precursors_species);
     this->SetSurfaceGrowthSpecies(cfg.surface_growth_species);
-    if (cfg.nucleation_model == 2 || cfg.oxidation_model == 2)
+    if (cfg.nucleation_model == NucleationModel::Extended || cfg.oxidation_model == OxidationModel::Extended)
     {
         this->SetBenzeneSpecies(cfg.benzene_species);
         this->SetPhenylRadicalSpecies(cfg.phenylradical_species);
@@ -883,10 +884,10 @@ void BrookesMoss<Thermo>::ApplyConfig(const Config& cfg)
     this->SetGasConsumption(cfg.gas_consumption);
 
     // -- Process models ----------------------------------------------------
-    this->SetNucleation(cfg.nucleation_model);
-    this->SetSurfaceGrowth(cfg.surface_growth_model);
-    this->SetOxidation(cfg.oxidation_model);
-    SetCoagulation(cfg.coagulation_model);
+    this->SetNucleation(static_cast<int>(cfg.nucleation_model));
+    this->SetSurfaceGrowth(static_cast<int>(cfg.surface_growth_model));
+    this->SetOxidation(static_cast<int>(cfg.oxidation_model));
+    SetCoagulation(static_cast<int>(cfg.coagulation_model));
     this->SetThermophoreticModel(cfg.thermophoretic_model);
 
     // -- Particle properties -----------------------------------------------
@@ -948,29 +949,31 @@ BrookesMoss<Thermo>::ParseConfig(DictType& dict)
     {
         std::string name;
         dict.ReadString("@NucleationModel", name);
-        if      (name == "0" || name == "none")           cfg.nucleation_model = 0;
-        else if (name == "1" || name == "BrookesMoss")    cfg.nucleation_model = 1;
-        else if (name == "2" || name == "BrookesMossHall") cfg.nucleation_model = 2;
+        if      (name == "0" || name == "none")            cfg.nucleation_model = NucleationModel::Off;
+        else if (name == "1" || name == "BrookesMoss")     cfg.nucleation_model = NucleationModel::Standard;
+        else if (name == "2" || name == "BrookesMossHall") cfg.nucleation_model = NucleationModel::Extended;
         else return std::unexpected(std::string{
             "@NucleationModel: allowed: 0=none, 1=BrookesMoss, 2=BrookesMossHall"});
     }
 
     if (dict.CheckOption("@SurfaceGrowthModel"))
-        dict.ReadInt("@SurfaceGrowthModel", cfg.surface_growth_model);
+        { int _tmp; dict.ReadInt("@SurfaceGrowthModel", _tmp); cfg.surface_growth_model = static_cast<SurfaceGrowthModel>(_tmp); }
 
     if (dict.CheckOption("@OxidationModel"))
     {
         std::string name;
         dict.ReadString("@OxidationModel", name);
-        if      (name == "0" || name == "none")           cfg.oxidation_model = 0;
-        else if (name == "1" || name == "BrookesMoss")    cfg.oxidation_model = 1;
-        else if (name == "2" || name == "BrookesMossHall") cfg.oxidation_model = 2;
+        if      (name == "0" || name == "none")            cfg.oxidation_model = OxidationModel::Off;
+        else if (name == "1" || name == "BrookesMoss")     cfg.oxidation_model = OxidationModel::Standard;
+        else if (name == "2" || name == "BrookesMossHall") cfg.oxidation_model = OxidationModel::Extended;
         else return std::unexpected(std::string{
             "@OxidationModel: allowed: 0=none, 1=BrookesMoss, 2=BrookesMossHall"});
     }
 
-    if (dict.CheckOption("@CoagulationModel"))    dict.ReadInt("@CoagulationModel",    cfg.coagulation_model);
-    if (dict.CheckOption("@ThermophoreticModel")) dict.ReadInt("@ThermophoreticModel", cfg.thermophoretic_model);
+    if (dict.CheckOption("@CoagulationModel"))
+        { int _tmp; dict.ReadInt("@CoagulationModel", _tmp); cfg.coagulation_model = static_cast<CoagulationModel>(_tmp); }
+    if (dict.CheckOption("@ThermophoreticModel"))
+        { int _tmp; dict.ReadInt("@ThermophoreticModel", _tmp); cfg.thermophoretic_model = static_cast<ThermophoreticModel>(_tmp); }
 
     if (dict.CheckOption("@Precursors"))            dict.ReadString("@Precursors",            cfg.precursors_species);
     if (dict.CheckOption("@SurfaceGrowthSpecies"))  dict.ReadString("@SurfaceGrowthSpecies",  cfg.surface_growth_species);
@@ -1132,7 +1135,7 @@ BrookesMoss<Thermo>::ParseConfig(DictType& dict)
         dict.ReadBool("@DebugMode", cfg.debug_mode);
 
     // Cross-field validation: BM-Hall requires benzene and phenyl radical species.
-    if (cfg.nucleation_model == 2 || cfg.oxidation_model == 2)
+    if (cfg.nucleation_model == NucleationModel::Extended || cfg.oxidation_model == OxidationModel::Extended)
     {
         if (!dict.CheckOption("@Benzene"))
             return std::unexpected(std::string{

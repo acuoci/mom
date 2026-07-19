@@ -61,6 +61,12 @@ void MetalOxide_Grammar::DefineRules()
             false));
 
     AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
+        "@ClosureModel",
+        OpenSMOKEpp::SINGLE_STRING,
+        "Source-term closure for coagulation, condensation, and sintering: monodisperse | lognormal (default: monodisperse)",
+        false));
+
+    AddKeyWord(OpenSMOKEpp::DictionaryKeyWord(
         "@SinteringModel",
         OpenSMOKEpp::SINGLE_INT,
         "Sintering model: 0=off, 1=on (default: 1)",

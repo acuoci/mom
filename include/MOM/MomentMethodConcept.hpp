@@ -116,6 +116,22 @@ namespace MOM
  * - `is_closure_dummy_species()` — true if a dummy closure species is configured
  * - `closure_dummy_index()` — 0-based index of the dummy closure species
  *
+ * **Process activation flags** (per-instance configured state):
+ * - `model_nucleation()`   — active nucleation sub-model (`NucleationModel::Off` if disabled)
+ * - `model_coagulation()`  — active coagulation sub-model (`CoagulationModel::Off` if disabled)
+ * - `model_condensation()` — active condensation sub-model (`CondensationModel::Off` if disabled)
+ * - `model_growth()`       — active surface-growth sub-model (`SurfaceGrowthModel::Off` if disabled)
+ * - `model_oxidation()`    — active oxidation sub-model (`OxidationModel::Off` if disabled)
+ * - `model_sintering()`    — active sintering sub-model (`SinteringModel::Off` unless MetalOxide)
+ *
+ * **Process capability queries** (per-type, compile-time constant):
+ * - `capability_nucleation()`   — `true` if the variant TYPE computes nucleation
+ * - `capability_coagulation()`  — `true` if the variant TYPE computes coagulation
+ * - `capability_condensation()` — `true` if the variant TYPE computes condensation
+ * - `capability_growth()`       — `true` if the variant TYPE computes surface growth
+ * - `capability_oxidation()`    — `true` if the variant TYPE computes oxidation
+ * - `capability_sintering()`    — `true` if the variant TYPE computes sintering
+ *
  * **Radiative heat transfer:**
  * - `radiative_heat_transfer()` — true if particles contribute to radiative loss
  * - `planck_coefficient(T, fv)` — Planck mean absorption coefficient [1/m]
@@ -132,10 +148,15 @@ concept MomentMethod =
         // Number of transported moment equations
         { M::n_equations } -> std::convertible_to<unsigned>;
         // Factory label array — used by MakeAnyMomentMethod for runtime variant selection.
-        // Must be a non-empty, iterable range whose elements are convertible to string_view.
+        // Must be a non-empty, iterable range whose elements are non-empty string_views.
         // Concrete variants declare this as:
         //   static constexpr std::array<std::string_view, N> variant_labels{"Name", "alias"};
         { M::variant_labels[0] } -> std::convertible_to<std::string_view>;
+        // Nested requirement: the first label must be non-empty.  An empty label would
+        // match every string in MakeAnyMomentMethod's loop, silently selecting the wrong
+        // variant.  std::string_view::empty() is constexpr, so this is evaluated at
+        // concept-check time with zero runtime cost.
+        requires (!std::string_view{M::variant_labels[0]}.empty());
     }
 
     &&
@@ -189,6 +210,30 @@ concept MomentMethod =
         { cm.precursor_concentration() } -> std::same_as<double>;
         { cm.is_closure_dummy_species() } -> std::same_as<bool>;
         { cm.closure_dummy_index() } -> std::same_as<int>;
+
+        // -- Process activation flags (per-instance configured state) -------
+        // Required by the Sources.hpp free functions (GetNucleationModel etc.)
+        // that dispatch through AnyMomentMethod.  All concrete variants satisfy
+        // these via MomentMethodBase, but the concept must express the full
+        // contract so that any type claiming MomentMethod conformance is usable
+        // with the complete public API.
+        { cm.model_nucleation()   } -> std::same_as<NucleationModel>;
+        { cm.model_coagulation()  } -> std::same_as<CoagulationModel>;
+        { cm.model_condensation() } -> std::same_as<CondensationModel>;
+        { cm.model_growth()       } -> std::same_as<SurfaceGrowthModel>;
+        { cm.model_oxidation()    } -> std::same_as<OxidationModel>;
+        { cm.model_sintering()    } -> std::same_as<SinteringModel>;
+
+        // -- Process capability queries (per-type, compile-time constant) ----
+        // Required by the Sources.hpp GetXxxCapability() free functions.
+        // These are static constexpr in MomentMethodBase but are tested as
+        // instance calls here (both forms are valid for a static member).
+        { cm.capability_nucleation()   } -> std::same_as<bool>;
+        { cm.capability_coagulation()  } -> std::same_as<bool>;
+        { cm.capability_condensation() } -> std::same_as<bool>;
+        { cm.capability_growth()       } -> std::same_as<bool>;
+        { cm.capability_oxidation()    } -> std::same_as<bool>;
+        { cm.capability_sintering()    } -> std::same_as<bool>;
 
         // -- Radiative heat transfer ----------------------------------------
         { cm.radiative_heat_transfer() } -> std::same_as<bool>;

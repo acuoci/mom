@@ -190,7 +190,7 @@ public:
      *
      * @note No external dependencies: only standard C++ types.
      */
-    struct Config : CommonConfig<1>,
+    struct Config : CommonConfig<ThermophoreticModel::Standard>,
                     PAHConfig,
                     BinarySootProcessConfig,
                     GasConsumptionConfig<true>,

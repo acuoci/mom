@@ -35,6 +35,7 @@
 
 #pragma once
 
+#include <array>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -58,6 +59,11 @@
 
 namespace MOM
 {
+
+namespace detail
+{
+template <typename Thermo> struct MetalOxideTestAccess;
+}
 
 /**
  * @class MetalOxide
@@ -96,6 +102,7 @@ namespace MOM
 template <ThermoMap Thermo> class MetalOxide : public MomentMethodBase<MetalOxide<Thermo>, 3>
 {
     using Base = MomentMethodBase<MetalOxide<Thermo>, 3>;
+    friend struct detail::MetalOxideTestAccess<Thermo>;
 
 public:
 
@@ -112,6 +119,13 @@ public:
         Off          = 0, //!< Nucleation disabled.
         Binary       = 1, //!< Precursor + precursor free-molecular collision.
         FixedCluster = 2  //!< Nucleation via a fixed-size cluster of n0 formula units.
+    };
+
+    /** @brief Source-term closure used for condensation, coagulation, and sintering. */
+    enum class ClosureModel : int
+    {
+        Monodisperse = 0, //!< Mean-particle closure used by the current model.
+        Lognormal    = 1  //!< Dimensionless log-normal closure for polydisperse populations.
     };
 
     /**
@@ -134,6 +148,36 @@ public:
         double nu1mean; //!< Mean volume of the Pareto contribution [m3/#].
         double nu2mean; //!< Mean volume of the log-normal contribution [m3/#].
         double mu;      //!< Log-normal location parameter [log(m3)].
+    };
+
+    /**
+     * @struct LognormalClosureData
+     * @brief Local state reconstructed for the dimensionless log-normal closure.
+     *
+     * The data are derived from the three transported particle fields and are
+     * used by the log-normal condensation, coagulation, and sintering closures.
+     */
+    struct LognormalClosureData
+    {
+        bool valid = false; //!< True if all reconstructed quantities are usable.
+
+        double N  = 0.; //!< Particle number density [#/m3].
+        double fv = 0.; //!< Particle volume fraction [-].
+        double Sp = 0.; //!< Total particle surface area [m2/m3].
+
+        double vmean = 0.; //!< Mean particle volume [m3/#].
+        double smean = 0.; //!< Mean particle surface [m2/#].
+        double ssph_mean = 0.; //!< Spherical surface for @p vmean [m2/#].
+        double dsph_mean = 0.; //!< Sphere-equivalent diameter for @p vmean [m].
+        double dpp_mean  = 0.; //!< Mean primary-particle diameter [m].
+        double npp_mean  = 1.; //!< Mean number of primary particles per aggregate [-].
+        double dc_mean   = 0.; //!< Mean fractal collision diameter [m].
+        double tau_s_mean = 0.; //!< Mean sintering time scale [s].
+
+        double sigma_g_m = 1.; //!< Geometric standard deviation of mobility diameter [-].
+        double sigma     = 0.; //!< Volume log-normal width [-].
+        double M         = 2.; //!< Surface-volume morphology exponent [-].
+        double Kmean     = 1.; //!< Dimensionless surface normalization factor [-].
     };
 
     // -- Configuration struct ------------------------------------------------
@@ -160,7 +204,7 @@ public:
      *
      * @note No external dependencies: only standard C++ types.
      */
-    struct Config : CommonConfig<1>, GasConsumptionConfig<false>
+    struct Config : CommonConfig<ThermophoreticModel::Standard>, GasConsumptionConfig<false>
     {
         // ---- Activation / precursor ----------------------------------------
         std::string precursor_species = "none"; //!< Gas precursor species.
@@ -178,6 +222,8 @@ public:
         // ---- Process model selection ---------------------------------------
         /// Nucleation model: "none" | "binary" | "fixed-cluster".
         std::string nucleation_model = "binary";
+        /// Source-term closure: "monodisperse" | "lognormal".
+        std::string closure_model     = "monodisperse";
         int sintering_model          = 1; //!< Sintering model index
         int coagulation_model        = 1; //!< Coagulation model index
         int condensation_model       = 1; //!< Condensation model index
@@ -361,6 +407,15 @@ public:
         cb("nu2mean[m3/#]", ndf.nu2mean);
         cb("mu[log(m3)]", ndf.mu);
 
+        const auto lognormal = BuildLognormalClosureData();
+        cb("closureValid[-]", lognormal.valid ? 1. : 0.);
+        cb("closureSigmaGM[-]", lognormal.sigma_g_m);
+        cb("closureSigma[-]", lognormal.sigma);
+        cb("closureM[-]", lognormal.M);
+        cb("closureKmean[-]", lognormal.Kmean);
+        cb("closureDppMean[nm]", lognormal.dpp_mean * 1.e9);
+        cb("closureDcMean[nm]", lognormal.dc_mean * 1.e9);
+
         cb("omegaTot[kg/m3/s]", this->omega_gas_.sum());
         this->EmitOmegaGas(cb, "omegaPrecursor[kg/m3/s]", precursor_index_);
         for (const auto& term : gas_stoichiometry_)
@@ -474,6 +529,9 @@ public:
         sintering_model_ = flag;
     }
 
+    /** @brief Sets the source-term closure model by label. */
+    void SetClosureModel(std::string_view label);
+
     /** @brief Sets and validates solid material properties. */
     void SetSolidMaterial(std::string_view name, double molecular_weight_kg_kmol, double density_kg_m3);
 
@@ -486,22 +544,22 @@ public:
     /** @brief Sets the minimum formula-unit count used by regularized geometry. */
     void SetMinimumNumberOfFormulaUnits(unsigned n);
 
-    void SetNucleationCollisionEnhancementFactor(double eps) noexcept { epsilon_nuc_ = eps; }
+    void SetNucleationCollisionEnhancementFactor(double eps);
 
-    void SetCoagulationCollisionEnhancementFactor(double eps) noexcept { epsilon_coag_ = eps; }
+    void SetCoagulationCollisionEnhancementFactor(double eps);
 
-    void SetCondensationCollisionEnhancementFactor(double eps) noexcept { epsilon_cond_ = eps; }
+    void SetCondensationCollisionEnhancementFactor(double eps);
 
     /// Sintering kinetics: tau_s = As * T^ns * dp^4 * exp(Ts/T) [s].
-    void SetSinteringFrequencyFactor(double As) noexcept { As_ = As; }
+    void SetSinteringFrequencyFactor(double As);
 
-    void SetSinteringActivationTemperature(double Ts) noexcept { Ts_ = Ts; }
+    void SetSinteringActivationTemperature(double Ts);
 
-    void SetSinteringTemperatureExponent(double ns) noexcept { ns_ = ns; }
+    void SetSinteringTemperatureExponent(double ns);
 
-    void SetNMinimum(double v) noexcept { N_min_ = v; }
+    void SetNMinimum(double v);
 
-    void SetFvMinimum(double v) noexcept { fv_min_ = v; }
+    void SetFvMinimum(double v);
 
     /** @brief Sets and validates the gas precursor species. */
     void SetPrecursor(std::string_view name);
@@ -524,6 +582,8 @@ public:
     [[nodiscard]] CondensationModel condensation_model() const noexcept { return static_cast<CondensationModel>(condensation_model_); }
 
     [[nodiscard]] SinteringModel    sintering_model()    const noexcept { return static_cast<SinteringModel>(sintering_model_);       }
+
+    [[nodiscard]] ClosureModel closure_model() const noexcept { return closure_model_; }
 
     [[nodiscard]] bool is_sintering_deferred() const noexcept { return is_sintering_deferred_; }
 
@@ -572,8 +632,18 @@ private:
     void NucleationSourceTerms_Binary();
     void NucleationSourceTerms_FixedCluster();
     void CoagulationSourceTerms();
+    void CoagulationSourceTerms_Monodisperse();
+    void CoagulationSourceTerms_Lognormal();
     void CondensationSourceTerms();
+    void CondensationSourceTerms_Monodisperse();
+    void CondensationSourceTerms_Lognormal();
     void SinteringSourceTerms();
+    void SinteringSourceTerms_Monodisperse();
+    void SinteringSourceTerms_Lognormal();
+    [[nodiscard]] LognormalClosureData BuildLognormalClosureData() const noexcept;
+    [[nodiscard]] static double DimensionlessLognormalMoment(double exponent, double sigma) noexcept;
+    [[nodiscard]] static double LognormalCoagulationIntegralCorrection(double M,
+                                                                       double sigma) noexcept;
     void CalculateOmegaGas_internal() noexcept;
     void ClearGasStoichiometry() noexcept;
     void AddGasStoichiometryTerm(std::string_view species, double coefficient);
@@ -642,6 +712,9 @@ private:
     unsigned int n0_                      = 5;   //!< solid formula units per newly nucleated particle
     double epsilon_nuc_                   = 2.5; //!< nucleation collision enhancement factor
 
+    // -- Source-term closure ----------------------------------------------------
+    ClosureModel closure_model_ = ClosureModel::Monodisperse;
+
     // -- Sintering parameters ---------------------------------------------------
     double As_ = 7.44e16; //!< sintering frequency factor [1/s/K]
     double ns_ = 1.0;     //!< temperature exponent [-]
@@ -689,6 +762,29 @@ private:
 
     bool is_debug_mode_ = false; //!< enable verbose diagnostic output
 };
+
+namespace detail
+{
+template <typename Thermo> struct MetalOxideTestAccess
+{
+    [[nodiscard]] static typename MetalOxide<Thermo>::LognormalClosureData
+    BuildLognormalClosureData(const MetalOxide<Thermo>& model) noexcept
+    {
+        return model.BuildLognormalClosureData();
+    }
+
+    [[nodiscard]] static double DimensionlessLognormalMoment(double exponent, double sigma) noexcept
+    {
+        return MetalOxide<Thermo>::DimensionlessLognormalMoment(exponent, sigma);
+    }
+
+    [[nodiscard]] static double LognormalCoagulationIntegralCorrection(double M,
+                                                                       double sigma) noexcept
+    {
+        return MetalOxide<Thermo>::LognormalCoagulationIntegralCorrection(M, sigma);
+    }
+};
+} // namespace detail
 
 } // namespace MOM
 

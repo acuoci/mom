@@ -1137,11 +1137,11 @@ void HMOM<Thermo>::ApplyConfig(const Config& cfg)
     this->SetGasConsumption(cfg.gas_consumption);
     this->SetGasClosureDummySpecies(cfg.gas_closure_dummy_species);
 
-    this->SetNucleation(cfg.nucleation_model);
-    this->SetSurfaceGrowth(cfg.surface_growth_model);
-    this->SetOxidation(cfg.oxidation_model);
-    this->SetCondensation(cfg.condensation_model);
-    this->SetCoagulation(cfg.coagulation_model);
+    this->SetNucleation(static_cast<int>(cfg.nucleation_model));
+    this->SetSurfaceGrowth(static_cast<int>(cfg.surface_growth_model));
+    this->SetOxidation(static_cast<int>(cfg.oxidation_model));
+    this->SetCondensation(static_cast<int>(cfg.condensation_model));
+    this->SetCoagulation(static_cast<int>(cfg.coagulation_model));
     this->SetCoagulationContinuous(cfg.continuous_coagulation_model);
     this->SetThermophoreticModel(cfg.thermophoretic_model);
 
@@ -1749,25 +1749,25 @@ HMOM<Thermo>::ParseConfig(DictType& dict)
         dict.ReadString("@PAH", cfg.pah_species);
 
     if (dict.CheckOption("@NucleationModel"))
-        dict.ReadInt("@NucleationModel", cfg.nucleation_model);
+        { int _tmp; dict.ReadInt("@NucleationModel", _tmp); cfg.nucleation_model = static_cast<NucleationModel>(_tmp); }
 
     if (dict.CheckOption("@SurfaceGrowthModel"))
-        dict.ReadInt("@SurfaceGrowthModel", cfg.surface_growth_model);
+        { int _tmp; dict.ReadInt("@SurfaceGrowthModel", _tmp); cfg.surface_growth_model = static_cast<SurfaceGrowthModel>(_tmp); }
 
     if (dict.CheckOption("@OxidationModel"))
-        dict.ReadInt("@OxidationModel", cfg.oxidation_model);
+        { int _tmp; dict.ReadInt("@OxidationModel", _tmp); cfg.oxidation_model = static_cast<OxidationModel>(_tmp); }
 
     if (dict.CheckOption("@CondensationModel"))
-        dict.ReadInt("@CondensationModel", cfg.condensation_model);
+        { int _tmp; dict.ReadInt("@CondensationModel", _tmp); cfg.condensation_model = static_cast<CondensationModel>(_tmp); }
 
     if (dict.CheckOption("@CoagulationModel"))
-        dict.ReadInt("@CoagulationModel", cfg.coagulation_model);
+        { int _tmp; dict.ReadInt("@CoagulationModel", _tmp); cfg.coagulation_model = static_cast<CoagulationModel>(_tmp); }
 
     if (dict.CheckOption("@ContinuousCoagulationModel"))
         dict.ReadInt("@ContinuousCoagulationModel", cfg.continuous_coagulation_model);
 
     if (dict.CheckOption("@ThermophoreticModel"))
-        dict.ReadInt("@ThermophoreticModel", cfg.thermophoretic_model);
+        { int _tmp; dict.ReadInt("@ThermophoreticModel", _tmp); cfg.thermophoretic_model = static_cast<ThermophoreticModel>(_tmp); }
 
     if (dict.CheckOption("@RadiativeHeatTransfer"))
         dict.ReadBool("@RadiativeHeatTransfer", cfg.radiative_heat_transfer);

@@ -124,6 +124,22 @@ GetCondensationSources(const AnyMomentMethod<Thermo>& m) noexcept
     return std::visit([](const auto& mm) { return mm.sources_condensation(); }, m);
 }
 
+/**
+ * @brief Returns a zero-copy span over the **oxidation-only** moment source vector.
+ *
+ * Points directly into the model's internal oxidation source storage. For
+ * models without oxidation, the returned span is the standard zero fallback.
+ *
+ * @pre  `ComputeSources()` must have been called at the current state.
+ * @return Span of size `n_equations`; valid until next `ComputeSources()`.
+ */
+template <ThermoMap Thermo>
+[[nodiscard]] inline std::span<const double>
+GetOxidationSources(const AnyMomentMethod<Thermo>& m) noexcept
+{
+    return std::visit([](const auto& mm) { return mm.sources_oxidation(); }, m);
+}
+
 /** @brief Zero-copy span over sintering source terms. Zero span if not modelled (MetalOxide only). */
 template <ThermoMap Thermo>
 [[nodiscard]] inline std::span<const double>

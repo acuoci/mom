@@ -137,13 +137,17 @@ public:
 
     /**
      * @brief Sets the thermophoretic drift model by integer flag.
+     *
      * @param flag 0 = off, 1 = standard (drift encoded in effective diffusion coefficient).
+     *
+     * @note Out-of-range values are stored as-is and treated as `ThermophoreticModel::Off`
+     *       by `planck_coefficient()` and related internals.  Input validation (e.g.
+     *       rejecting values other than 0 or 1) belongs in `ApplyConfig()` or
+     *       `ParseConfig()`, which have access to rich error-reporting context.
+     *       Use `SetThermophoreticModel(ThermophoreticModel)` for a fully type-safe call.
      */
-    void SetThermophoreticModel(int flag)
+    void SetThermophoreticModel(int flag) noexcept
     {
-        if (flag != 0 && flag != 1)
-            throw std::invalid_argument(
-                "[MomentMethodBase] Invalid thermophoretic model flag. Allowed values: 0, 1.");
         thermophoretic_model_ = static_cast<ThermophoreticModel>(flag);
     }
 
@@ -158,11 +162,20 @@ public:
 
     /**
      * @brief Selects the Planck mean absorption coefficient correlation by label string.
+     *
      * @param label Case-insensitive label: `"Smooke"`, `"Kent"`, `"Sazhin"`, or `"None"`.
+     * @throws std::invalid_argument if @p label does not match any known model.
+     *         Use `SetPlanckAbsorptionCoefficient(PlanckCoeffModel)` for a `noexcept`
+     *         alternative when the model is already resolved.
      */
-    void SetPlanckAbsorptionCoefficient(std::string_view label) noexcept
+    void SetPlanckAbsorptionCoefficient(std::string_view label)
     {
-        planck_model_ = PlanckCoeffModelFromString(label);
+        const auto opt = PlanckCoeffModelFromString(label);
+        if (!opt.has_value())
+            throw std::invalid_argument(
+                "Unknown PlanckCoeffModel label: \"" + std::string(label) +
+                "\". Valid labels: \"Smooke\", \"Kent\", \"Sazhin\", \"None\".");
+        planck_model_ = *opt;
     }
 
     // -- Common getters -----------------------------------------------------
@@ -734,10 +747,18 @@ protected:
      * before accumulating new source terms.  This deliberately does not clear
      * `omega_gas_`; gas source vectors can be large and are reset only when gas
      * consumption is enabled.
+     *
+     * The operator-splitting caches `source_no_oxidation_` and `kappa_oxidation_`
+     * are also zeroed here so that any stale-read violation (calling
+     * `sources_without_oxidation()` or `kappa_oxidation()` before a fresh
+     * `ComputeSources()`) returns zeros rather than values from the previous
+     * iteration — making ordering bugs immediately visible in validation runs.
      */
     void ZeroSources() noexcept
     {
         source_all_.setZero();
+        source_no_oxidation_.setZero();
+        kappa_oxidation_.setZero();
     }
 
     // -- Safe gas-source accessor (for use in variant output hooks) ----------
