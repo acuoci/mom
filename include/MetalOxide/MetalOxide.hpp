@@ -624,6 +624,8 @@ private:
     void CoagulationSourceTerms();
     void CondensationSourceTerms();
     void SinteringSourceTerms();
+    void SinteringSourceTerms_Monodisperse();
+    void SinteringSourceTerms_Lognormal();
     [[nodiscard]] LognormalClosureData BuildLognormalClosureData() const noexcept;
     [[nodiscard]] static double DimensionlessLognormalMoment(double exponent, double sigma) noexcept;
     void CalculateOmegaGas_internal() noexcept;

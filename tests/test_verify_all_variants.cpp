@@ -1035,8 +1035,8 @@ static bool validateMetalOxideLognormalClosureState()
         model.SetState(T, P, Y.data());
 
         const double N = 5.e17;
-        const double vmean = 64. * model.v0();
-        const double smean = model.s0() * std::pow(vmean / model.v0(), 0.95);
+        const double vmean = 4096. * model.v0();
+        const double smean = model.s0() * std::pow(vmean / model.v0(), 0.75);
         const double fv = N * vmean;
         const double solid_mass_fraction = model.solid_density() / rho * fv;
         model.SetMoments(solid_mass_fraction, N / model.ScalingFactorNs(), N * smean);
@@ -1150,6 +1150,122 @@ static bool validateMetalOxideDimensionlessLognormalMoment()
     return ok;
 }
 
+static bool validateMetalOxideLognormalSintering()
+{
+    const auto th = buildMetalOxideThermo();
+    const auto Y  = X2Y({0.050, 0.950}, th);
+
+    constexpr double T = 1500.;
+    constexpr double P = 101325.;
+    constexpr double R = 8314.46261815324;
+
+    const double invMW = std::inner_product(
+        Y.begin(),
+        Y.end(),
+        th.mw.begin(),
+        0.,
+        std::plus<>(),
+        [](double y, double mw) { return y / mw; });
+    const double rho = P / (R * T) / invMW;
+
+    auto near = [](double value, double expected, double rtol = 1.e-12)
+    {
+        const double scale = std::max({1., std::abs(value), std::abs(expected)});
+        return std::abs(value - expected) <= rtol * scale;
+    };
+
+    bool source_ok = false;
+    bool deferred_rejected = false;
+
+    try
+    {
+        MOM::MetalOxide<MOM::BasicThermoData>::Config cfg;
+        cfg.precursor_species = "TiOH4";
+        cfg.nucleation_model = "none";
+        cfg.coagulation_model = 0;
+        cfg.condensation_model = 0;
+        cfg.sintering_model = 1;
+        cfg.closure_model = "lognormal";
+
+        MOM::MetalOxide<MOM::BasicThermoData> model(th);
+        model.SetupFromConfig(cfg);
+        model.SetState(T, P, Y.data());
+
+        const double N = 5.e17;
+        const double vmean = 4096. * model.v0();
+        const double smean = model.s0() * std::pow(vmean / model.v0(), 0.75);
+        const double fv = N * vmean;
+        const double solid_mass_fraction = model.solid_density() / rho * fv;
+        model.SetMoments(solid_mass_fraction, N / model.ScalingFactorNs(), N * smean);
+
+        const auto d =
+            MOM::detail::MetalOxideTestAccess<MOM::BasicThermoData>::BuildLognormalClosureData(model);
+
+        constexpr double dp_exponent = 4.;
+        const double morphology = d.M / 3.;
+        const double eta_surface_exponent =
+            morphology + dp_exponent * (morphology - 1.);
+        const double eta_sphere_exponent =
+            2. / 3. + dp_exponent * (morphology - 1.);
+
+        const double expected =
+            -(d.Sp * std::pow(d.Kmean, dp_exponent + 1.) *
+                  MOM::detail::MetalOxideTestAccess<MOM::BasicThermoData>::
+                      DimensionlessLognormalMoment(eta_surface_exponent, d.sigma)
+              - d.N * d.ssph_mean * std::pow(d.Kmean, dp_exponent) *
+                    MOM::detail::MetalOxideTestAccess<MOM::BasicThermoData>::
+                        DimensionlessLognormalMoment(eta_sphere_exponent, d.sigma))
+            / std::max(d.tau_s_mean, cfg.sintering_tau_min_s);
+
+        model.ComputeSources();
+        const auto sintering = model.sources_sintering();
+        const auto total = model.sources();
+
+        source_ok =
+            d.valid &&
+            expected < 0. &&
+            sintering.size() == 3u &&
+            sintering[0] == 0. &&
+            sintering[1] == 0. &&
+            near(sintering[2], expected) &&
+            near(total[2], expected);
+    }
+    catch (const std::exception&)
+    {
+        source_ok = false;
+    }
+
+    try
+    {
+        MOM::MetalOxide<MOM::BasicThermoData>::Config cfg;
+        cfg.closure_model = "lognormal";
+        cfg.sintering_deferred = true;
+
+        MOM::MetalOxide<MOM::BasicThermoData> model(th);
+        model.SetupFromConfig(cfg);
+    }
+    catch (const std::invalid_argument&)
+    {
+        deferred_rejected = true;
+    }
+    catch (...)
+    {
+        deferred_rejected = false;
+    }
+
+    const bool ok = source_ok && deferred_rejected;
+
+    std::cout << "\n=== MetalOxide lognormal sintering source ===\n";
+    std::cout << (source_ok
+                      ? "  [PASS] Lognormal sintering matches analytical closure expression\n"
+                      : "  [FAIL] Lognormal sintering source is inconsistent\n");
+    std::cout << (deferred_rejected
+                      ? "  [PASS] Lognormal closure rejects deferred sintering for now\n"
+                      : "  [FAIL] Lognormal closure accepted unsupported deferred sintering\n");
+
+    return ok;
+}
+
 // ============================================================================
 // main
 // ============================================================================
@@ -1182,6 +1298,7 @@ int main()
     all_ok &= validateMetalOxideMonodisperseClosureRegression();
     all_ok &= validateMetalOxideLognormalClosureState();
     all_ok &= validateMetalOxideDimensionlessLognormalMoment();
+    all_ok &= validateMetalOxideLognormalSintering();
 
     // ════════════════════════════════════════════════════════════════════
     // 1. HMOM  (NEq = 4)

@@ -773,6 +773,17 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::CondensationSourceTerms()
 
 template <ThermoMap Thermo> void MetalOxide<Thermo>::SinteringSourceTerms()
 {
+    if (closure_model_ == ClosureModel::Lognormal)
+    {
+        SinteringSourceTerms_Lognormal();
+        return;
+    }
+
+    SinteringSourceTerms_Monodisperse();
+}
+
+template <ThermoMap Thermo> void MetalOxide<Thermo>::SinteringSourceTerms_Monodisperse()
+{
     const double N = scaled_number_density_ * N0_scaling_;
     const double S = surface_area_concentration_;
 
@@ -809,6 +820,67 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::SinteringSourceTerms()
 
     // Rate of surface area decrease toward spherical limit [m2/m3/s]
     const double OmegaS = -activation * (S - S_sphere) / tauPhysical;
+
+    this->source_sintering_(0) = 0.;
+    this->source_sintering_(1) = 0.;
+    this->source_sintering_(2) = OmegaS;
+}
+
+template <ThermoMap Thermo> void MetalOxide<Thermo>::SinteringSourceTerms_Lognormal()
+{
+    const auto d = BuildLognormalClosureData();
+    if (!d.valid)
+        return;
+
+    if (d.dpp_mean < sintering_dp_min_)
+        return;
+
+    double activation = 1.;
+    if (sintering_activation_np_ > 1.)
+    {
+        const double x =
+            (d.npp_mean - sintering_activation_np_) / std::max(sintering_activation_width_np_, 1.e-300);
+        activation = 0.5 * (1. + std::tanh(x));
+    }
+    if (activation <= 0.)
+        return;
+
+    auto pow_positive = [](double base, double exponent) noexcept
+    {
+        if (!std::isfinite(base) || !std::isfinite(exponent) || base <= 0.)
+            return 0.;
+        return std::exp(std::clamp(exponent * std::log(base), -700., 700.));
+    };
+
+    // The current MetalOxide sintering law uses tau_s ~ dp^4.  The paper's
+    // dimensionless expression is therefore evaluated with a size exponent of 4.
+    constexpr double dp_exponent = 4.;
+    const double morphology = d.M / 3.;
+    const double eta_surface_exponent =
+        morphology + dp_exponent * (morphology - 1.);
+    const double eta_sphere_exponent =
+        2. / 3. + dp_exponent * (morphology - 1.);
+
+    const double K_surface = pow_positive(d.Kmean, dp_exponent + 1.);
+    const double K_sphere  = pow_positive(d.Kmean, dp_exponent);
+    if (K_surface <= 0. || K_sphere <= 0.)
+        return;
+
+    const double moment_surface = DimensionlessLognormalMoment(eta_surface_exponent, d.sigma);
+    const double moment_sphere  = DimensionlessLognormalMoment(eta_sphere_exponent, d.sigma);
+    if (moment_surface <= 0. || moment_sphere <= 0.)
+        return;
+
+    const double surface_term = d.Sp * K_surface * moment_surface;
+    const double sphere_term  = d.N * d.ssph_mean * K_sphere * moment_sphere;
+    const double driving      = surface_term - sphere_term;
+    if (!std::isfinite(driving) || driving <= 0.)
+        return;
+
+    const double tauPhysical = std::max(d.tau_s_mean, sintering_tau_min_);
+    const double OmegaS      = -activation * driving / tauPhysical;
+    if (!std::isfinite(OmegaS) || OmegaS >= 0.)
+        return;
 
     this->source_sintering_(0) = 0.;
     this->source_sintering_(1) = 0.;
@@ -1152,6 +1224,10 @@ void MetalOxide<Thermo>::ApplyConfig(const Config& cfg)
     sintering_dp_min_      = cfg.sintering_dp_min_m;
     sintering_tau_min_     = cfg.sintering_tau_min_s;
     sintering_k_max_       = cfg.sintering_k_max_per_s;
+
+    if (closure_model_ == ClosureModel::Lognormal && is_sintering_deferred_)
+        throw std::invalid_argument(
+            "[MetalOxide] The lognormal closure does not currently support deferred sintering.");
 
     // -- Numerical floors + geometry recompute -----------------------------
     N_min_  = cfg.ns_minimum_per_m3;
