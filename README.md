@@ -800,7 +800,7 @@ When `@GasConsumption true;`, `@GasStoichiometry` must include the precursor wit
 | `@SinteringDeferred` | `bool` | `true`, `false` | `false` | If enabled, sintering is removed from the direct source vector and handled through `SinteringDeferredUpdate(dt)`. |
 | `@SinteringDpMinimum` | measure | `m`, `mm`, `nm` | `2e-9 m` | Minimum primary particle diameter for active sintering. |
 | `@SinteringTauMinimum` | measure | `s` | `1e-10 s` | Lower bound for the sintering time scale. |
-| `@SinteringKMaximum` | measure | `1/s` | `1e6 1/s` | Configured maximum sintering rate. Stored in the model configuration. |
+| `@SinteringKMaximum` | measure | `1/s` | `1e6 1/s` | Upper bound applied to the effective sintering relaxation rate. |
 | `@As` | measure | `s,K,m` | `7.44e16 s,K,m` | Sintering pre-exponential factor in `tau_s = As * T^ns * dp^4 * exp(Ts/T)`. |
 | `@ns` | `double` | Scalar | `1` | Temperature exponent in the sintering time-scale law. |
 | `@Ts` | measure | `K` | `31000 K` | Sintering activation temperature used as `exp(Ts/T)`. |

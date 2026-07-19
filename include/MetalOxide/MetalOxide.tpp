@@ -1010,9 +1010,14 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::SinteringSourceTerms_Monodi
 
     // Physical sintering time scale [s]  
     const double tauPhysical = std::max(tauS, sintering_tau_min_);
+    double sinteringRate = activation / tauPhysical;
+    if (sintering_k_max_ > 0.)
+        sinteringRate = std::min(sinteringRate, sintering_k_max_);
+    if (!std::isfinite(sinteringRate) || sinteringRate <= 0.)
+        return;
 
     // Rate of surface area decrease toward spherical limit [m2/m3/s]
-    const double OmegaS = -activation * (S - S_sphere) / tauPhysical;
+    const double OmegaS = -sinteringRate * (S - S_sphere);
 
     this->source_sintering_(0) = 0.;
     this->source_sintering_(1) = 0.;
@@ -1071,7 +1076,13 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::SinteringSourceTerms_Lognor
         return;
 
     const double tauPhysical = std::max(d.tau_s_mean, sintering_tau_min_);
-    const double OmegaS      = -activation * driving / tauPhysical;
+    double sinteringRate = activation / tauPhysical;
+    if (sintering_k_max_ > 0.)
+        sinteringRate = std::min(sinteringRate, sintering_k_max_);
+    if (!std::isfinite(sinteringRate) || sinteringRate <= 0.)
+        return;
+
+    const double OmegaS      = -sinteringRate * driving;
     if (!std::isfinite(OmegaS) || OmegaS >= 0.)
         return;
 
@@ -1112,10 +1123,14 @@ template <ThermoMap Thermo> double MetalOxide<Thermo>::SinteringDeferredUpdate(d
         return S;
 
     const double tauS_phys = std::max(tauS, sintering_tau_min_);
-    const double tauSeff   = tauS_phys / activation;
+    double sinteringRate = activation / tauS_phys;
+    if (sintering_k_max_ > 0.)
+        sinteringRate = std::min(sinteringRate, sintering_k_max_);
+    if (!std::isfinite(sinteringRate) || sinteringRate <= 0.)
+        return S;
 
     // Analytical solution: S(t) = S_sphere + (S0 - S_sphere)*exp(-dt/tau).
-    const double S_new = S_sphere + (S - S_sphere) * std::exp(-dt_ode / tauSeff);
+    const double S_new = S_sphere + (S - S_sphere) * std::exp(-dt_ode * sinteringRate);
     return std::max(S_new, S_sphere);
 }
 
@@ -1289,6 +1304,8 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::PrintSummary() const
         << "    + ns (-):                        " << ns_ << "\n"
         << "    + Ts (K):                        " << Ts_ << "\n"
         << "    + dp_min (m):                    " << sintering_dp_min_ << "\n"
+        << "    + tau_min (s):                   " << sintering_tau_min_ << "\n"
+        << "    + k_max (1/s):                   " << sintering_k_max_ << "\n"
         << "\n"
         << " [Species — precursor]\n"
         << "    + Name:                          " << precursor_species_ << "\n";
@@ -1408,11 +1425,23 @@ void MetalOxide<Thermo>::ApplyConfig(const Config& cfg)
         static_cast<unsigned int>(nucleated_units));
 
     // -- Sintering kinetics ------------------------------------------------
+    if (!std::isfinite(cfg.sintering_As_s_K_m) || cfg.sintering_As_s_K_m <= 0.)
+        throw std::invalid_argument("[MetalOxide] sintering frequency factor must be positive.");
+    if (!std::isfinite(cfg.sintering_Ts_K))
+        throw std::invalid_argument("[MetalOxide] sintering activation temperature must be finite.");
+    if (!std::isfinite(cfg.sintering_ns))
+        throw std::invalid_argument("[MetalOxide] sintering temperature exponent must be finite.");
     As_ = cfg.sintering_As_s_K_m;
     Ts_ = cfg.sintering_Ts_K;
     ns_ = cfg.sintering_ns;
 
     // -- Sintering regularization -----------------------------------------
+    if (!std::isfinite(cfg.sintering_dp_min_m) || cfg.sintering_dp_min_m < 0.)
+        throw std::invalid_argument("[MetalOxide] sintering minimum diameter must be non-negative.");
+    if (!std::isfinite(cfg.sintering_tau_min_s) || cfg.sintering_tau_min_s <= 0.)
+        throw std::invalid_argument("[MetalOxide] sintering minimum time scale must be positive.");
+    if (!std::isfinite(cfg.sintering_k_max_per_s) || cfg.sintering_k_max_per_s <= 0.)
+        throw std::invalid_argument("[MetalOxide] sintering maximum rate must be positive.");
     is_sintering_deferred_ = cfg.sintering_deferred;
     sintering_dp_min_      = cfg.sintering_dp_min_m;
     sintering_tau_min_     = cfg.sintering_tau_min_s;
