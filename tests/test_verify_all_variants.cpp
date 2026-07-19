@@ -33,6 +33,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 // ============================================================================
@@ -1063,6 +1064,7 @@ static bool validateMetalOxideLognormalClosureState()
 
     bool spherical_ok = false;
     bool aggregate_ok = false;
+    bool reporter_ok = false;
     bool invalid_ok = false;
 
     try
@@ -1133,10 +1135,47 @@ static bool validateMetalOxideLognormalClosureState()
             near(d.sigma, sigma) &&
             near(d.M, M) &&
             near(d.Kmean, Kmean);
+
+        std::vector<std::pair<std::string, double>> reported;
+        model.variant_prefix_output(
+            [&reported](std::string_view label, double value)
+            {
+                reported.emplace_back(label, value);
+            });
+
+        auto find_value = [&reported](std::string_view label) -> const double*
+        {
+            const auto it = std::find_if(
+                reported.begin(),
+                reported.end(),
+                [label](const auto& entry) { return entry.first == label; });
+            return it == reported.end() ? nullptr : &it->second;
+        };
+
+        const double* valid_value = find_value("closureValid[-]");
+        const double* sigma_g_value = find_value("closureSigmaGM[-]");
+        const double* sigma_value = find_value("closureSigma[-]");
+        const double* m_value = find_value("closureM[-]");
+        const double* kmean_value = find_value("closureKmean[-]");
+        const double* dpp_value = find_value("closureDppMean[nm]");
+        const double* dc_value = find_value("closureDcMean[nm]");
+
+        reporter_ok =
+            valid_value != nullptr && sigma_g_value != nullptr && sigma_value != nullptr &&
+            m_value != nullptr && kmean_value != nullptr && dpp_value != nullptr &&
+            dc_value != nullptr &&
+            near(*valid_value, 1.) &&
+            near(*sigma_g_value, d.sigma_g_m) &&
+            near(*sigma_value, d.sigma) &&
+            near(*m_value, d.M) &&
+            near(*kmean_value, d.Kmean) &&
+            near(*dpp_value, d.dpp_mean * 1.e9) &&
+            near(*dc_value, d.dc_mean * 1.e9);
     }
     catch (const std::exception&)
     {
         aggregate_ok = false;
+        reporter_ok = false;
     }
 
     try
@@ -1153,7 +1192,7 @@ static bool validateMetalOxideLognormalClosureState()
         invalid_ok = false;
     }
 
-    const bool ok = spherical_ok && aggregate_ok && invalid_ok;
+    const bool ok = spherical_ok && aggregate_ok && reporter_ok && invalid_ok;
 
     std::cout << "\n=== MetalOxide lognormal closure state reconstruction ===\n";
     std::cout << (spherical_ok
@@ -1162,6 +1201,9 @@ static bool validateMetalOxideLognormalClosureState()
     std::cout << (aggregate_ok
                       ? "  [PASS] Aggregate state reconstructs sigma, M, and Kmean consistently\n"
                       : "  [FAIL] Aggregate lognormal reconstruction is inconsistent\n");
+    std::cout << (reporter_ok
+                      ? "  [PASS] Reporter exposes lognormal closure diagnostics consistently\n"
+                      : "  [FAIL] Reporter lognormal closure diagnostics are inconsistent\n");
     std::cout << (invalid_ok
                       ? "  [PASS] Empty particle state is rejected by the closure builder\n"
                       : "  [FAIL] Empty particle state produced a valid lognormal closure\n");

@@ -599,10 +599,26 @@ void checkMetalOxideReporterLabels()
             "MetalOxide reporter is missing generic precursor gas-source label");
     require(containsLabel(labels, "omegaGas(H2O)[kg/m3/s]"),
             "MetalOxide reporter is missing generic gas-stoichiometry species label");
+    require(containsLabel(labels, "closureValid[-]"),
+            "MetalOxide reporter is missing lognormal closure validity label");
+    require(containsLabel(labels, "closureSigmaGM[-]"),
+            "MetalOxide reporter is missing lognormal mobility-width label");
+    require(containsLabel(labels, "closureSigma[-]"),
+            "MetalOxide reporter is missing lognormal volume-width label");
+    require(containsLabel(labels, "closureM[-]"),
+            "MetalOxide reporter is missing lognormal morphology-exponent label");
+    require(containsLabel(labels, "closureKmean[-]"),
+            "MetalOxide reporter is missing lognormal normalization label");
+    require(containsLabel(labels, "closureDppMean[nm]"),
+            "MetalOxide reporter is missing lognormal primary-diameter label");
+    require(containsLabel(labels, "closureDcMean[nm]"),
+            "MetalOxide reporter is missing lognormal collision-diameter label");
     require(!containsLabel(labels, "omegaPrec[kg/m3/s]"),
             "MetalOxide reporter still exposes deprecated omegaPrec label");
     require(!containsLabel(labels, "omegaH2O[kg/m3/s]"),
             "MetalOxide reporter still exposes fixed MetalOxide H2O label");
+    require(!containsLabel(labels, "lognormalSigma[-]"),
+            "MetalOxide reporter exposes an unapproved lognormal sigma alias");
 }
 
 void checkMetalOxideRequiresExplicitGasStoichiometry()

@@ -407,6 +407,15 @@ public:
         cb("nu2mean[m3/#]", ndf.nu2mean);
         cb("mu[log(m3)]", ndf.mu);
 
+        const auto lognormal = BuildLognormalClosureData();
+        cb("closureValid[-]", lognormal.valid ? 1. : 0.);
+        cb("closureSigmaGM[-]", lognormal.sigma_g_m);
+        cb("closureSigma[-]", lognormal.sigma);
+        cb("closureM[-]", lognormal.M);
+        cb("closureKmean[-]", lognormal.Kmean);
+        cb("closureDppMean[nm]", lognormal.dpp_mean * 1.e9);
+        cb("closureDcMean[nm]", lognormal.dc_mean * 1.e9);
+
         cb("omegaTot[kg/m3/s]", this->omega_gas_.sum());
         this->EmitOmegaGas(cb, "omegaPrecursor[kg/m3/s]", precursor_index_);
         for (const auto& term : gas_stoichiometry_)

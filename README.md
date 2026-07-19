@@ -812,6 +812,11 @@ When `@GasConsumption true;`, `@GasStoichiometry` must include the precursor wit
 | `@SchmidtNumber` | `double` | Positive scalar expected | `50` | Schmidt number used by the particle diffusion coefficient. |
 | `@DebugMode` | `bool` | `true`, `false` | `false` | Enables verbose diagnostic output. |
 
+Reporter output includes lognormal-closure diagnostics in dedicated columns:
+`closureValid[-]`, `closureSigmaGM[-]`, `closureSigma[-]`, `closureM[-]`,
+`closureKmean[-]`, `closureDppMean[nm]`, and `closureDcMean[nm]`. These are
+separate from the legacy reconstructed-NDF fields such as `sigma[-]`.
+
 ### Code-Alignment Notes
 
 - `@epsNucleation`, `@epsCondensation`, and `@epsCoagulation` are not currently registered by `MetalOxide_Grammar.cpp` and are not parsed by `MetalOxide::ParseConfig()`. The model has internal enhancement-factor defaults `2.5`, `1.3`, and `2.2`, but they are not dictionary-configurable in the current implementation.
