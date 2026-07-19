@@ -435,6 +435,111 @@ void MetalOxide<Thermo>::Properties(double& fv,
     tauS = As_ * std::pow(this->T_, ns_) * std::pow(dp, 4.) * std::exp(Ts_ / this->T_);
 }
 
+template <ThermoMap Thermo>
+typename MetalOxide<Thermo>::LognormalClosureData
+MetalOxide<Thermo>::BuildLognormalClosureData() const noexcept
+{
+    LognormalClosureData d{};
+
+    const double Y  = std::max(solid_mass_fraction_, 0.);
+    const double N  = std::max(scaled_number_density_ * N0_scaling_, 0.);
+    const double Sp = std::max(surface_area_concentration_, 0.);
+    const double fv = this->rho_ / solid_density_kg_m3_ * Y;
+
+    if (!std::isfinite(N) || !std::isfinite(Sp) || !std::isfinite(fv) ||
+        N <= N_min_ || fv <= fv_min_ || Sp <= S_min_ ||
+        v0_ <= 0. || s0_ <= 0. || this->T_ <= 0.)
+        return d;
+
+    d.N  = N;
+    d.fv = fv;
+    d.Sp = Sp;
+
+    d.vmean = std::max(fv / N, v_min_);
+    if (!std::isfinite(d.vmean) || d.vmean <= 0.)
+        return {};
+
+    d.ssph_mean = this->SphereSurfaceFromVolume(d.vmean);
+    d.dsph_mean = this->SphereDiameter(d.vmean);
+    if (!std::isfinite(d.ssph_mean) || !std::isfinite(d.dsph_mean) ||
+        d.ssph_mean <= 0. || d.dsph_mean <= 0.)
+        return {};
+
+    d.smean = std::max(Sp / N, d.ssph_mean);
+    if (!std::isfinite(d.smean) || d.smean <= 0.)
+        return {};
+
+    d.dpp_mean = 6. * d.vmean / d.smean;
+    d.dpp_mean = std::max(d.dpp_mean, d0_);
+    if (!std::isfinite(d.dpp_mean) || d.dpp_mean <= 0.)
+        return {};
+
+    d.npp_mean = this->NumberPrimaryParticles(d.smean, d.vmean);
+    if (!std::isfinite(d.npp_mean) || d.npp_mean < 1.)
+        d.npp_mean = 1.;
+
+    constexpr double Df = 1.8;
+    d.dc_mean = d.dpp_mean * std::pow(d.npp_mean, 1. / Df);
+    if (!std::isfinite(d.dc_mean) || d.dc_mean <= 0.)
+        return {};
+
+    d.tau_s_mean =
+        As_ * std::pow(this->T_, ns_) * std::pow(d.dpp_mean, 4.) * std::exp(Ts_ / this->T_);
+    if (!std::isfinite(d.tau_s_mean) || d.tau_s_mean <= 0.)
+        return {};
+
+    const double mobility_ratio = std::pow(std::max(d.npp_mean, 1.), 0.45);
+    if (mobility_ratio <= 1.)
+        d.sigma_g_m = 1.;
+    else if (mobility_ratio < 3.)
+        d.sigma_g_m = 1. + (1.7 - 1.) / (3. - 1.) * (mobility_ratio - 1.);
+    else if (mobility_ratio < 10.)
+        d.sigma_g_m = 1.7 + (1.48 - 1.7) / (10. - 3.) * (mobility_ratio - 3.);
+    else
+        d.sigma_g_m = 1.48;
+    d.sigma_g_m = std::clamp(d.sigma_g_m, 1., 1.7);
+    d.sigma     = 3. * std::log(d.sigma_g_m);
+    if (!std::isfinite(d.sigma) || d.sigma < 0.)
+        return {};
+
+    const double log_v = std::log(d.vmean / v0_);
+    const double log_s = std::log(d.smean / s0_);
+    if (!std::isfinite(log_v) || !std::isfinite(log_s))
+        return {};
+
+    constexpr double tiny = 1.e-14;
+    if (d.sigma <= tiny)
+    {
+        if (std::abs(log_v) <= tiny)
+            d.M = 2.;
+        else
+            d.M = 3. * log_s / log_v;
+    }
+    else
+    {
+        const double sigma2 = d.sigma * d.sigma;
+        const double A      = log_v - 0.5 * sigma2;
+        const double disc   = A * A + 2. * sigma2 * log_s;
+        if (!std::isfinite(disc) || disc < 0.)
+            return {};
+        d.M = 3. * (std::sqrt(disc) - A) / sigma2;
+    }
+
+    if (!std::isfinite(d.M))
+        return {};
+    d.M = std::clamp(d.M, 2., 3.);
+
+    const double logK = std::log(s0_ / d.smean) + (d.M / 3.) * std::log(d.vmean / v0_);
+    if (!std::isfinite(logK))
+        return {};
+    d.Kmean = std::exp(std::clamp(logK, -700., 700.));
+    if (!std::isfinite(d.Kmean) || d.Kmean <= 0.)
+        return {};
+
+    d.valid = true;
+    return d;
+}
+
 template <ThermoMap Thermo> double MetalOxide<Thermo>::volume_fraction() const noexcept
 {
     return this->rho_ / solid_density_kg_m3_ * std::max(solid_mass_fraction_, 0.);

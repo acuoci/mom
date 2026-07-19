@@ -59,6 +59,11 @@
 namespace MOM
 {
 
+namespace detail
+{
+template <typename Thermo> struct MetalOxideTestAccess;
+}
+
 /**
  * @class MetalOxide
  * @brief Configurable solid oxide nanoparticle source-term model.
@@ -96,6 +101,7 @@ namespace MOM
 template <ThermoMap Thermo> class MetalOxide : public MomentMethodBase<MetalOxide<Thermo>, 3>
 {
     using Base = MomentMethodBase<MetalOxide<Thermo>, 3>;
+    friend struct detail::MetalOxideTestAccess<Thermo>;
 
 public:
 
@@ -141,6 +147,36 @@ public:
         double nu1mean; //!< Mean volume of the Pareto contribution [m3/#].
         double nu2mean; //!< Mean volume of the log-normal contribution [m3/#].
         double mu;      //!< Log-normal location parameter [log(m3)].
+    };
+
+    /**
+     * @struct LognormalClosureData
+     * @brief Local state reconstructed for the dimensionless log-normal closure.
+     *
+     * The data are derived from the three transported particle fields and are
+     * used by the log-normal condensation, coagulation, and sintering closures.
+     */
+    struct LognormalClosureData
+    {
+        bool valid = false; //!< True if all reconstructed quantities are usable.
+
+        double N  = 0.; //!< Particle number density [#/m3].
+        double fv = 0.; //!< Particle volume fraction [-].
+        double Sp = 0.; //!< Total particle surface area [m2/m3].
+
+        double vmean = 0.; //!< Mean particle volume [m3/#].
+        double smean = 0.; //!< Mean particle surface [m2/#].
+        double ssph_mean = 0.; //!< Spherical surface for @p vmean [m2/#].
+        double dsph_mean = 0.; //!< Sphere-equivalent diameter for @p vmean [m].
+        double dpp_mean  = 0.; //!< Mean primary-particle diameter [m].
+        double npp_mean  = 1.; //!< Mean number of primary particles per aggregate [-].
+        double dc_mean   = 0.; //!< Mean fractal collision diameter [m].
+        double tau_s_mean = 0.; //!< Mean sintering time scale [s].
+
+        double sigma_g_m = 1.; //!< Geometric standard deviation of mobility diameter [-].
+        double sigma     = 0.; //!< Volume log-normal width [-].
+        double M         = 2.; //!< Surface-volume morphology exponent [-].
+        double Kmean     = 1.; //!< Dimensionless surface normalization factor [-].
     };
 
     // -- Configuration struct ------------------------------------------------
@@ -588,6 +624,7 @@ private:
     void CoagulationSourceTerms();
     void CondensationSourceTerms();
     void SinteringSourceTerms();
+    [[nodiscard]] LognormalClosureData BuildLognormalClosureData() const noexcept;
     void CalculateOmegaGas_internal() noexcept;
     void ClearGasStoichiometry() noexcept;
     void AddGasStoichiometryTerm(std::string_view species, double coefficient);
@@ -706,6 +743,18 @@ private:
 
     bool is_debug_mode_ = false; //!< enable verbose diagnostic output
 };
+
+namespace detail
+{
+template <typename Thermo> struct MetalOxideTestAccess
+{
+    [[nodiscard]] static typename MetalOxide<Thermo>::LognormalClosureData
+    BuildLognormalClosureData(const MetalOxide<Thermo>& model) noexcept
+    {
+        return model.BuildLognormalClosureData();
+    }
+};
+} // namespace detail
 
 } // namespace MOM
 

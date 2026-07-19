@@ -956,6 +956,150 @@ static bool validateMetalOxideMonodisperseClosureRegression()
     return ok;
 }
 
+static bool validateMetalOxideLognormalClosureState()
+{
+    const auto th = buildMetalOxideThermo();
+    const auto Y  = X2Y({0.050, 0.950}, th);
+
+    constexpr double T = 1500.;
+    constexpr double P = 101325.;
+    constexpr double R = 8314.46261815324;
+
+    const double invMW = std::inner_product(
+        Y.begin(),
+        Y.end(),
+        th.mw.begin(),
+        0.,
+        std::plus<>(),
+        [](double y, double mw) { return y / mw; });
+    const double rho = P / (R * T) / invMW;
+
+    auto near = [](double value, double expected, double rtol = 1.e-12)
+    {
+        const double scale = std::max({1., std::abs(value), std::abs(expected)});
+        return std::abs(value - expected) <= rtol * scale;
+    };
+
+    auto expected_sigma_g = [](double npp)
+    {
+        const double mobility_ratio = std::pow(std::max(npp, 1.), 0.45);
+        if (mobility_ratio <= 1.)
+            return 1.;
+        if (mobility_ratio < 3.)
+            return 1. + (1.7 - 1.) / (3. - 1.) * (mobility_ratio - 1.);
+        if (mobility_ratio < 10.)
+            return 1.7 + (1.48 - 1.7) / (10. - 3.) * (mobility_ratio - 3.);
+        return 1.48;
+    };
+
+    bool spherical_ok = false;
+    bool aggregate_ok = false;
+    bool invalid_ok = false;
+
+    try
+    {
+        MOM::MetalOxide<MOM::BasicThermoData> model(th);
+        model.SetState(T, P, Y.data());
+
+        const double N = 1.e18;
+        const double vmean = 8. * model.v0();
+        const double smean = model.s0() * std::pow(vmean / model.v0(), 2. / 3.);
+        const double fv = N * vmean;
+        const double solid_mass_fraction = model.solid_density() / rho * fv;
+        model.SetMoments(solid_mass_fraction, N / model.ScalingFactorNs(), N * smean);
+
+        const auto d =
+            MOM::detail::MetalOxideTestAccess<MOM::BasicThermoData>::BuildLognormalClosureData(model);
+
+        spherical_ok =
+            d.valid &&
+            near(d.N, N) &&
+            near(d.fv, fv) &&
+            near(d.Sp, N * smean) &&
+            near(d.vmean, vmean) &&
+            near(d.smean, smean) &&
+            near(d.npp_mean, 1.) &&
+            near(d.sigma_g_m, 1.) &&
+            near(d.sigma, 0.) &&
+            near(d.M, 2.) &&
+            near(d.Kmean, 1.);
+    }
+    catch (const std::exception&)
+    {
+        spherical_ok = false;
+    }
+
+    try
+    {
+        MOM::MetalOxide<MOM::BasicThermoData> model(th);
+        model.SetState(T, P, Y.data());
+
+        const double N = 5.e17;
+        const double vmean = 64. * model.v0();
+        const double smean = model.s0() * std::pow(vmean / model.v0(), 0.95);
+        const double fv = N * vmean;
+        const double solid_mass_fraction = model.solid_density() / rho * fv;
+        model.SetMoments(solid_mass_fraction, N / model.ScalingFactorNs(), N * smean);
+
+        const auto d =
+            MOM::detail::MetalOxideTestAccess<MOM::BasicThermoData>::BuildLognormalClosureData(model);
+
+        const double sigma_g = std::clamp(expected_sigma_g(d.npp_mean), 1., 1.7);
+        const double sigma = 3. * std::log(sigma_g);
+        const double log_v = std::log(d.vmean / model.v0());
+        const double log_s = std::log(d.smean / model.s0());
+        const double sigma2 = sigma * sigma;
+        const double A = log_v - 0.5 * sigma2;
+        const double disc = A * A + 2. * sigma2 * log_s;
+        const double M = std::clamp(3. * (std::sqrt(disc) - A) / sigma2, 2., 3.);
+        const double Kmean = std::exp(std::log(model.s0() / d.smean) +
+                                      (M / 3.) * std::log(d.vmean / model.v0()));
+
+        aggregate_ok =
+            d.valid &&
+            d.npp_mean > 1. &&
+            d.sigma > 0. &&
+            d.M >= 2. && d.M <= 3. &&
+            near(d.sigma_g_m, sigma_g) &&
+            near(d.sigma, sigma) &&
+            near(d.M, M) &&
+            near(d.Kmean, Kmean);
+    }
+    catch (const std::exception&)
+    {
+        aggregate_ok = false;
+    }
+
+    try
+    {
+        MOM::MetalOxide<MOM::BasicThermoData> model(th);
+        model.SetState(T, P, Y.data());
+        model.SetMoments(0., 0., 0.);
+        const auto d =
+            MOM::detail::MetalOxideTestAccess<MOM::BasicThermoData>::BuildLognormalClosureData(model);
+        invalid_ok = !d.valid;
+    }
+    catch (const std::exception&)
+    {
+        invalid_ok = false;
+    }
+
+    const bool ok = spherical_ok && aggregate_ok && invalid_ok;
+
+    std::cout << "\n=== MetalOxide lognormal closure state reconstruction ===\n";
+    std::cout << (spherical_ok
+                      ? "  [PASS] Spherical limit reconstructs sigma=0, M=2, Kmean=1\n"
+                      : "  [FAIL] Spherical limit reconstruction is inconsistent\n");
+    std::cout << (aggregate_ok
+                      ? "  [PASS] Aggregate state reconstructs sigma, M, and Kmean consistently\n"
+                      : "  [FAIL] Aggregate lognormal reconstruction is inconsistent\n");
+    std::cout << (invalid_ok
+                      ? "  [PASS] Empty particle state is rejected by the closure builder\n"
+                      : "  [FAIL] Empty particle state produced a valid lognormal closure\n");
+
+    return ok;
+}
+
 // ============================================================================
 // main
 // ============================================================================
@@ -986,6 +1130,7 @@ int main()
     all_ok &= validateIntegerModelFlagValidation();
     all_ok &= validateHMOMGasConsumptionDisableClearsOutput();
     all_ok &= validateMetalOxideMonodisperseClosureRegression();
+    all_ok &= validateMetalOxideLognormalClosureState();
 
     // ════════════════════════════════════════════════════════════════════
     // 1. HMOM  (NEq = 4)
