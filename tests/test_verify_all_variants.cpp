@@ -1100,6 +1100,56 @@ static bool validateMetalOxideLognormalClosureState()
     return ok;
 }
 
+static bool validateMetalOxideDimensionlessLognormalMoment()
+{
+    using Access = MOM::detail::MetalOxideTestAccess<MOM::BasicThermoData>;
+
+    auto near = [](double value, double expected, double rtol = 1.e-12)
+    {
+        const double scale = std::max({1., std::abs(value), std::abs(expected)});
+        return std::abs(value - expected) <= rtol * scale;
+    };
+
+    const double sigma = 0.72;
+    const double sigma2 = sigma * sigma;
+
+    const bool zero_width_ok =
+        near(Access::DimensionlessLognormalMoment(-2., 0.), 1.) &&
+        near(Access::DimensionlessLognormalMoment(0., 0.), 1.) &&
+        near(Access::DimensionlessLognormalMoment(3., 0.), 1.);
+
+    const bool mean_preserving_ok =
+        near(Access::DimensionlessLognormalMoment(0., sigma), 1.) &&
+        near(Access::DimensionlessLognormalMoment(1., sigma), 1.);
+
+    const bool analytical_ok =
+        near(Access::DimensionlessLognormalMoment(2., sigma), std::exp(sigma2)) &&
+        near(Access::DimensionlessLognormalMoment(-1., sigma), std::exp(sigma2)) &&
+        near(Access::DimensionlessLognormalMoment(0.5, sigma), std::exp(-0.125 * sigma2));
+
+    const bool invalid_ok =
+        Access::DimensionlessLognormalMoment(std::numeric_limits<double>::quiet_NaN(), sigma) == 0. &&
+        Access::DimensionlessLognormalMoment(1., -1.) == 0.;
+
+    const bool ok = zero_width_ok && mean_preserving_ok && analytical_ok && invalid_ok;
+
+    std::cout << "\n=== MetalOxide dimensionless lognormal moment helper ===\n";
+    std::cout << (zero_width_ok
+                      ? "  [PASS] Zero-width distribution returns unit moments\n"
+                      : "  [FAIL] Zero-width lognormal moments are incorrect\n");
+    std::cout << (mean_preserving_ok
+                      ? "  [PASS] Dimensionless distribution preserves M0 and M1\n"
+                      : "  [FAIL] Dimensionless lognormal normalization is incorrect\n");
+    std::cout << (analytical_ok
+                      ? "  [PASS] Fractional and negative analytical moments match closed form\n"
+                      : "  [FAIL] Analytical lognormal moment formula is inconsistent\n");
+    std::cout << (invalid_ok
+                      ? "  [PASS] Invalid moment inputs return zero\n"
+                      : "  [FAIL] Invalid moment inputs were not guarded\n");
+
+    return ok;
+}
+
 // ============================================================================
 // main
 // ============================================================================
@@ -1131,6 +1181,7 @@ int main()
     all_ok &= validateHMOMGasConsumptionDisableClearsOutput();
     all_ok &= validateMetalOxideMonodisperseClosureRegression();
     all_ok &= validateMetalOxideLognormalClosureState();
+    all_ok &= validateMetalOxideDimensionlessLognormalMoment();
 
     // ════════════════════════════════════════════════════════════════════
     // 1. HMOM  (NEq = 4)

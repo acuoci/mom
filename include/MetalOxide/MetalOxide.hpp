@@ -625,6 +625,7 @@ private:
     void CondensationSourceTerms();
     void SinteringSourceTerms();
     [[nodiscard]] LognormalClosureData BuildLognormalClosureData() const noexcept;
+    [[nodiscard]] static double DimensionlessLognormalMoment(double exponent, double sigma) noexcept;
     void CalculateOmegaGas_internal() noexcept;
     void ClearGasStoichiometry() noexcept;
     void AddGasStoichiometryTerm(std::string_view species, double coefficient);
@@ -752,6 +753,11 @@ template <typename Thermo> struct MetalOxideTestAccess
     BuildLognormalClosureData(const MetalOxide<Thermo>& model) noexcept
     {
         return model.BuildLognormalClosureData();
+    }
+
+    [[nodiscard]] static double DimensionlessLognormalMoment(double exponent, double sigma) noexcept
+    {
+        return MetalOxide<Thermo>::DimensionlessLognormalMoment(exponent, sigma);
     }
 };
 } // namespace detail

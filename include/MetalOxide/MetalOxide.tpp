@@ -540,6 +540,20 @@ MetalOxide<Thermo>::BuildLognormalClosureData() const noexcept
     return d;
 }
 
+template <ThermoMap Thermo>
+double MetalOxide<Thermo>::DimensionlessLognormalMoment(double exponent, double sigma) noexcept
+{
+    if (!std::isfinite(exponent) || !std::isfinite(sigma) || sigma < 0.)
+        return 0.;
+
+    const double sigma2 = sigma * sigma;
+    const double log_moment = 0.5 * (exponent * exponent - exponent) * sigma2;
+    if (!std::isfinite(log_moment))
+        return 0.;
+
+    return std::exp(std::clamp(log_moment, -700., 700.));
+}
+
 template <ThermoMap Thermo> double MetalOxide<Thermo>::volume_fraction() const noexcept
 {
     return this->rho_ / solid_density_kg_m3_ * std::max(solid_mass_fraction_, 0.);
