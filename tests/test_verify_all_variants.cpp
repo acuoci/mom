@@ -1219,6 +1219,228 @@ static bool validateMetalOxideDimensionlessLognormalMoment()
     return ok;
 }
 
+static bool validateMetalOxideLognormalLimitingCases()
+{
+    using Access = MOM::detail::MetalOxideTestAccess<MOM::BasicThermoData>;
+
+    const auto th = buildMetalOxideThermo();
+    const auto Y  = X2Y({0.050, 0.950}, th);
+
+    constexpr double T = 1500.;
+    constexpr double P = 101325.;
+    constexpr double R = 8314.46261815324;
+    constexpr double mu = 4.e-5;
+
+    const double invMW = std::inner_product(
+        Y.begin(),
+        Y.end(),
+        th.mw.begin(),
+        0.,
+        std::plus<>(),
+        [](double y, double mw) { return y / mw; });
+    const double rho = P / (R * T) / invMW;
+
+    auto near = [](double value, double expected, double rtol = 2.e-12)
+    {
+        const double scale = std::max({1., std::abs(value), std::abs(expected)});
+        return std::abs(value - expected) <= rtol * scale;
+    };
+
+    auto span_near = [&](std::span<const double> a, std::span<const double> b)
+    {
+        if (a.size() != b.size())
+            return false;
+        for (std::size_t i = 0; i < a.size(); ++i)
+            if (!near(a[i], b[i]))
+                return false;
+        return true;
+    };
+
+    auto all_zero = [](std::span<const double> values)
+    {
+        return std::all_of(values.begin(), values.end(), [](double v) { return v == 0.; });
+    };
+
+    auto all_finite = [](std::span<const double> values)
+    {
+        return std::all_of(values.begin(), values.end(), [](double v) { return std::isfinite(v); });
+    };
+
+    auto lognormal_cfg = []()
+    {
+        MOM::MetalOxide<MOM::BasicThermoData>::Config cfg;
+        cfg.precursor_species = "TiOH4";
+        cfg.nucleation_model = "none";
+        cfg.coagulation_model = 1;
+        cfg.condensation_model = 1;
+        cfg.sintering_model = 1;
+        cfg.closure_model = "lognormal";
+        return cfg;
+    };
+
+    bool empty_state_ok = false;
+    bool compact_limit_ok = false;
+    bool subspherical_surface_ok = false;
+    bool sigma_cap_ok = false;
+
+    try
+    {
+        MOM::MetalOxide<MOM::BasicThermoData> model(th);
+        model.SetupFromConfig(lognormal_cfg());
+        model.SetViscosity(mu);
+        model.SetState(T, P, Y.data());
+        model.SetMoments(0., 0., 0.);
+
+        const auto d = Access::BuildLognormalClosureData(model);
+        model.ComputeSources();
+
+        empty_state_ok =
+            !d.valid &&
+            all_zero(model.sources()) &&
+            all_zero(model.sources_coagulation()) &&
+            all_zero(model.sources_condensation()) &&
+            all_zero(model.sources_sintering());
+    }
+    catch (const std::exception&)
+    {
+        empty_state_ok = false;
+    }
+
+    try
+    {
+        auto mono_cfg = lognormal_cfg();
+        mono_cfg.closure_model = "monodisperse";
+
+        MOM::MetalOxide<MOM::BasicThermoData> mono(th);
+        mono.SetupFromConfig(mono_cfg);
+        mono.SetViscosity(mu);
+        mono.SetState(T, P, Y.data());
+
+        MOM::MetalOxide<MOM::BasicThermoData> logn(th);
+        logn.SetupFromConfig(lognormal_cfg());
+        logn.SetViscosity(mu);
+        logn.SetState(T, P, Y.data());
+
+        const double N = 1.e18;
+        const double vmean = 8. * mono.v0();
+        const double smean = mono.s0() * std::pow(vmean / mono.v0(), 2. / 3.);
+        const double fv = N * vmean;
+        const double solid_mass_fraction = mono.solid_density() / rho * fv;
+
+        mono.SetMoments(solid_mass_fraction, N / mono.ScalingFactorNs(), N * smean);
+        logn.SetMoments(solid_mass_fraction, N / logn.ScalingFactorNs(), N * smean);
+
+        const auto d = Access::BuildLognormalClosureData(logn);
+        mono.ComputeSources();
+        logn.ComputeSources();
+
+        compact_limit_ok =
+            d.valid &&
+            near(d.sigma, 0.) &&
+            near(d.M, 2.) &&
+            near(d.Kmean, 1.) &&
+            span_near(mono.sources(), logn.sources()) &&
+            span_near(mono.sources_coagulation(), logn.sources_coagulation()) &&
+            span_near(mono.sources_condensation(), logn.sources_condensation()) &&
+            span_near(mono.sources_sintering(), logn.sources_sintering());
+    }
+    catch (const std::exception&)
+    {
+        compact_limit_ok = false;
+    }
+
+    try
+    {
+        auto cfg = lognormal_cfg();
+        cfg.coagulation_model = 0;
+        cfg.condensation_model = 0;
+
+        MOM::MetalOxide<MOM::BasicThermoData> model(th);
+        model.SetupFromConfig(cfg);
+        model.SetViscosity(mu);
+        model.SetState(T, P, Y.data());
+
+        const double N = 1.e18;
+        const double vmean = 8. * model.v0();
+        const double ssph = model.s0() * std::pow(vmean / model.v0(), 2. / 3.);
+        const double fv = N * vmean;
+        const double solid_mass_fraction = model.solid_density() / rho * fv;
+        model.SetMoments(solid_mass_fraction, N / model.ScalingFactorNs(), 0.25 * N * ssph);
+
+        const auto d = Access::BuildLognormalClosureData(model);
+        model.ComputeSources();
+
+        subspherical_surface_ok =
+            d.valid &&
+            near(d.smean, ssph) &&
+            all_zero(model.sources()) &&
+            all_zero(model.sources_sintering());
+    }
+    catch (const std::exception&)
+    {
+        subspherical_surface_ok = false;
+    }
+
+    try
+    {
+        MOM::MetalOxide<MOM::BasicThermoData> model(th);
+        model.SetupFromConfig(lognormal_cfg());
+        model.SetViscosity(mu);
+        model.SetState(T, P, Y.data());
+
+        const double N = 1.e7;
+        const double volume_ratio = 1.e13;
+        const double vmean = volume_ratio * model.v0();
+        const double smean = model.s0() * std::pow(volume_ratio, 0.95);
+        const double fv = N * vmean;
+        const double solid_mass_fraction = model.solid_density() / rho * fv;
+        model.SetMoments(solid_mass_fraction, N / model.ScalingFactorNs(), N * smean);
+
+        const auto d = Access::BuildLognormalClosureData(model);
+        model.ComputeSources();
+
+        const auto coag = model.sources_coagulation();
+        const auto cond = model.sources_condensation();
+        const auto sint = model.sources_sintering();
+
+        sigma_cap_ok =
+            d.valid &&
+            near(d.sigma_g_m, 1.48) &&
+            near(d.sigma, 3. * std::log(1.48)) &&
+            d.M >= 2. && d.M <= 3. &&
+            d.Kmean > 0. &&
+            all_finite(model.sources()) &&
+            all_finite(coag) &&
+            all_finite(cond) &&
+            all_finite(sint) &&
+            coag.size() == 3u && coag[1] < 0. &&
+            cond.size() == 3u && cond[0] > 0. && cond[2] > 0. &&
+            sint.size() == 3u && sint[2] <= 0.;
+    }
+    catch (const std::exception&)
+    {
+        sigma_cap_ok = false;
+    }
+
+    const bool ok = empty_state_ok && compact_limit_ok && subspherical_surface_ok && sigma_cap_ok;
+
+    std::cout << "\n=== MetalOxide lognormal closure limiting cases ===\n";
+    std::cout << (empty_state_ok
+                      ? "  [PASS] Empty/floored particle states leave lognormal sources at zero\n"
+                      : "  [FAIL] Empty/floored particle state was not handled cleanly\n");
+    std::cout << (compact_limit_ok
+                      ? "  [PASS] Zero-width compact limit recovers monodisperse sources\n"
+                      : "  [FAIL] Zero-width compact limit changed source terms\n");
+    std::cout << (subspherical_surface_ok
+                      ? "  [PASS] Sub-spherical input surface is clamped and produces no sintering source\n"
+                      : "  [FAIL] Sub-spherical surface limit is inconsistent\n");
+    std::cout << (sigma_cap_ok
+                      ? "  [PASS] Broad aggregate limit remains finite with capped sigma_g,m\n"
+                      : "  [FAIL] Broad aggregate sigma-cap limit is inconsistent\n");
+
+    return ok;
+}
+
 static bool validateMetalOxideLognormalCoagulation()
 {
     using Access = MOM::detail::MetalOxideTestAccess<MOM::BasicThermoData>;
@@ -1712,6 +1934,7 @@ int main()
     all_ok &= validateMetalOxideMonodisperseClosureRegression();
     all_ok &= validateMetalOxideLognormalClosureState();
     all_ok &= validateMetalOxideDimensionlessLognormalMoment();
+    all_ok &= validateMetalOxideLognormalLimitingCases();
     all_ok &= validateMetalOxideLognormalCoagulation();
     all_ok &= validateMetalOxideLognormalCondensation();
     all_ok &= validateMetalOxideLognormalSintering();
