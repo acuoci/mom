@@ -623,6 +623,8 @@ private:
     void NucleationSourceTerms_FixedCluster();
     void CoagulationSourceTerms();
     void CondensationSourceTerms();
+    void CondensationSourceTerms_Monodisperse();
+    void CondensationSourceTerms_Lognormal();
     void SinteringSourceTerms();
     void SinteringSourceTerms_Monodisperse();
     void SinteringSourceTerms_Lognormal();

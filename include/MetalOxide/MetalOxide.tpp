@@ -736,6 +736,17 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::CoagulationSourceTerms()
 
 template <ThermoMap Thermo> void MetalOxide<Thermo>::CondensationSourceTerms()
 {
+    if (closure_model_ == ClosureModel::Lognormal)
+    {
+        CondensationSourceTerms_Lognormal();
+        return;
+    }
+
+    CondensationSourceTerms_Monodisperse();
+}
+
+template <ThermoMap Thermo> void MetalOxide<Thermo>::CondensationSourceTerms_Monodisperse()
+{
     if (c_precursor_ <= 0. || vprec_ <= 0. || dprec_ <= 0.)
         return;
 
@@ -769,6 +780,77 @@ template <ThermoMap Thermo> void MetalOxide<Thermo>::CondensationSourceTerms()
     this->source_condensation_(0) = solid_density_kg_m3_ / this->rho_ * vprec_ * BetaNprecN;
     this->source_condensation_(1) = 0.;
     this->source_condensation_(2) = deltas * BetaNprecN;
+}
+
+template <ThermoMap Thermo> void MetalOxide<Thermo>::CondensationSourceTerms_Lognormal()
+{
+    if (c_precursor_ <= 0. || vprec_ <= 0. || dprec_ <= 0.)
+        return;
+
+    const auto d = BuildLognormalClosureData();
+    if (!d.valid)
+        return;
+
+    auto pow_positive = [](double base, double exponent) noexcept
+    {
+        if (!std::isfinite(base) || !std::isfinite(exponent) || base <= 0.)
+            return 0.;
+        return std::exp(std::clamp(exponent * std::log(base), -700., 700.));
+    };
+
+    constexpr double Df  = 1.8;
+    constexpr double chi = -0.2043;
+
+    const double reduced_volume_factor = std::sqrt(1. / vprec_ + 1. / d.vmean);
+    const double Nprec = c_precursor_ * this->Nav_kmol_;
+    const double prefactor =
+        epsilon_cond_ *
+        std::sqrt(this->pi_ * this->kB_ * this->T_ / (2. * solid_density_kg_m3_)) *
+        reduced_volume_factor * Nprec * d.N;
+
+    if (!std::isfinite(prefactor) || prefactor <= 0.)
+        return;
+
+    const double morphology = d.M / 3.;
+    const double Kdc        = pow_positive(d.Kmean, 3. / Df - 1.);
+    const double a_dc       = 1. - morphology + (d.M - 2.) / Df;
+    if (Kdc <= 0.)
+        return;
+
+    const double moment_dc  = DimensionlessLognormalMoment(a_dc, d.sigma);
+    const double moment_dc2 = DimensionlessLognormalMoment(2. * a_dc, d.sigma);
+    if (moment_dc <= 0. || moment_dc2 <= 0.)
+        return;
+
+    const double collision_moment =
+        d.dc_mean * d.dc_mean * Kdc * Kdc * moment_dc2 +
+        2. * dprec_ * d.dc_mean * Kdc * moment_dc +
+        dprec_ * dprec_;
+    if (!std::isfinite(collision_moment) || collision_moment <= 0.)
+        return;
+
+    const double delta_s_mean =
+        (2. / 3.) * (vprec_ / d.vmean) * d.smean *
+        pow_positive(std::max(d.npp_mean, 1.), chi);
+    const double Kdelta  = pow_positive(d.Kmean, 1. + 3. * chi);
+    const double a_delta = morphology - 1. + chi * (d.M - 2.);
+    if (!std::isfinite(delta_s_mean) || delta_s_mean <= 0. || Kdelta <= 0.)
+        return;
+
+    const double surface_moment =
+        d.dc_mean * d.dc_mean * Kdelta * Kdc * Kdc *
+            DimensionlessLognormalMoment(a_delta + 2. * a_dc, d.sigma) +
+        2. * dprec_ * d.dc_mean * Kdelta * Kdc *
+            DimensionlessLognormalMoment(a_delta + a_dc, d.sigma) +
+        dprec_ * dprec_ * Kdelta *
+            DimensionlessLognormalMoment(a_delta, d.sigma);
+    if (!std::isfinite(surface_moment) || surface_moment <= 0.)
+        return;
+
+    this->source_condensation_(0) =
+        solid_density_kg_m3_ / this->rho_ * vprec_ * prefactor * collision_moment;
+    this->source_condensation_(1) = 0.;
+    this->source_condensation_(2) = delta_s_mean * prefactor * surface_moment;
 }
 
 template <ThermoMap Thermo> void MetalOxide<Thermo>::SinteringSourceTerms()
