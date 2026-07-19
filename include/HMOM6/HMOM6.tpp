@@ -1034,19 +1034,156 @@ void HMOM6<Thermo>::SootCoagulationM7()
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::SootCoagulationSmallSmallM7()
 {
-    // TODO: implement
+    source_coagulation_ss_.setZero();
+    if (!HasSoot()) return;
+
+    // Collision diameter of a nucleation-size particle.
+    const double K_diam  = K_diam_HMOM6(this->pi_);
+    const double DcNUCL  = K_diam * std::pow(V0_, 1. / 3.);
+
+    // Free-molecular beta for two (V0, S0) particles (factor 2.20 = 2 * 1.10).
+    // Same expression as HMOM4::SootCoagulationSmallSmallM4.
+    const double beta00 = 2.20 * Cfm_ * std::sqrt(2. / V0_)
+                          * std::pow(2. * DcNUCL, 2.)
+                          * std::sqrt(this->T_);
+
+    // Surface area of the coalesced (2·V0, S00) particle.
+    const double S00 = this->SphereSurfaceFromVolume(2. * V0_);
+
+    // Base rate term (negative: net loss of one particle per collision).
+    // ss0 = d(M00_norm)/dt from small-small = -0.5 * beta00 * N0^2 / Nav
+    const double ss0  = -0.5 * beta00 * N0_ * N0_ / this->Nav_mol_;
+    const double R    = S00 / S0_;   // surface ratio of coalesced to primary
+
+    // Unified formula:  source[M_{x,y}] = -ss0 * (2^x * R^y  - 2)
+    //   M00 (x=0,y=0): -ss0*(1-2)   =  ss0          < 0  (net -1 particle)
+    //   M10 (x=1,y=0): -ss0*(2-2)   =  0            (volume conserved)
+    //   M01 (x=0,y=1): -ss0*(R-2)              < 0  (surface lost on merger)
+    //   M20 (x=2,y=0): -ss0*(4-2)   = -2*ss0   > 0  (second volume moment grows)
+    //   M11 (x=1,y=1): -ss0*(2R-2)             > 0
+    //   M02 (x=0,y=2): -ss0*(R²-2)             > 0
+    //   N0  (special):  2*ss0                   < 0  (both particles leave small mode)
+
+    source_coagulation_ss_(0) =  ss0;                       // M00
+    source_coagulation_ss_(1) =  0.;                        // M10
+    source_coagulation_ss_(2) = -ss0 * (R - 2.);            // M01
+    source_coagulation_ss_(3) = -2. * ss0;                  // M20
+    source_coagulation_ss_(4) = -ss0 * (2. * R - 2.);       // M11
+    source_coagulation_ss_(5) = -ss0 * (R * R - 2.);        // M02
+    source_coagulation_ss_(6) =  2. * ss0;                  // N0
 }
 
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::SootCoagulationSmallLargeM7()
 {
-    // TODO: implement
+    source_coagulation_sl_.setZero();
+    if (!HasSoot()) return;
+
+    const double K_diam       = K_diam_HMOM6(this->pi_);
+    const double DcNUCL       = K_diam * std::pow(V0_, 1. / 3.);
+    const double sqrtT        = std::sqrt(this->T_);
+    const double Av_c         = Av_collisional_;
+    const double As_c         = As_collisional_;
+    const double Kc           = K_collisional_;
+    const double Av_f         = Av_fractal_;
+    const double As_f         = As_fractal_;
+    const double Kf           = K_fractal_;
+    const double V0inv_sqrt   = std::pow(V0_, -0.5);
+
+    // Geometric-mean approximation for the weighted collision integral
+    //   Ψ(a,b) = ∫ V_L^a · S_L^b · β(V0, V_L) · n_L dV dS
+    //          ≈ 2.2 · Cfm · √T · √( p0(a,b) · p1(a,b) )
+    //
+    // with (Mueller 2009):
+    //   p0(a,b) = V0^{-½} · [ Kc²·M^L(2Av_c+a-½, 2As_c+b)
+    //                        + Dc²·M^L(a-½,         b)
+    //                        + 2·Dc·Kc·M^L(Av_c+a-½, As_c+b) ]
+    //   p1(a,b) = same with (a-½) → (a+½)  + V0·p0(a,b)
+    //
+    // Guard: returns 0 if p0·p1 < 0 (numerical noise prevention).
+    auto sqrtPsi = [&](double a, double b) noexcept -> double {
+        const double p0 = V0inv_sqrt * (
+            Kc * Kc     * GetMissingMoment(2.*Av_c + a - 0.5, 2.*As_c + b) +
+            DcNUCL * DcNUCL * GetMissingMoment(a - 0.5,              b) +
+            2. * DcNUCL * Kc * GetMissingMoment(Av_c + a - 0.5, As_c + b));
+        const double p1 = V0inv_sqrt * (
+            Kc * Kc     * GetMissingMoment(2.*Av_c + a + 0.5, 2.*As_c + b) +
+            DcNUCL * DcNUCL * GetMissingMoment(a + 0.5,              b) +
+            2. * DcNUCL * Kc * GetMissingMoment(Av_c + a + 0.5, As_c + b))
+            + V0_ * p0;
+        return (p0 * p1 >= 0.) ? std::sqrt(p0 * p1) : 0.;
+    };
+
+    // Common prefactor: 2.2·Cfm·√T·N0/Nav  [mol·m^{-3}·s^{-1}·(m³/s)^{-1}]
+    const double coeff = 2.2 * Cfm_ * sqrtT * N0_ / this->Nav_mol_;
+
+    // M00: Δ = −1 per collision (two particles → one)
+    source_coagulation_sl_(0) = -coeff * sqrtPsi(0., 0.);
+
+    // M10: total volume conserved — small-mode loss = large-mode gain → 0
+    source_coagulation_sl_(1) = 0.;
+
+    // M01: Δ(S)/S0 = Kf·V0·V_L^{Av_f}·S_L^{As_f+1}/S0 − 1
+    //   source = sl_(0)  +  coeff·Kf·V0/S0·Ψ(Av_f, As_f+1)
+    source_coagulation_sl_(2) = source_coagulation_sl_(0)
+        + coeff * Kf * V0_ / S0_ * sqrtPsi(Av_f, As_f + 1.);
+
+    // M20: Δ(V²)/V0² = 2·V_L/V0  (exact: (V_L+V0)²−V_L²−V0² = 2V_L·V0)
+    //   source = +2·coeff/V0·Ψ(1, 0)   [always positive]
+    source_coagulation_sl_(3) = 2. * coeff / V0_ * sqrtPsi(1., 0.);
+
+    // M11: Δ(V·S)/(V0·S0) = (S_L/S0−1) + Kf·V_L^{Av_f+1}·S_L^{As_f+1}/S0
+    //   source = sl_(0)  +  coeff/S0·[Ψ(0,1) + Kf·Ψ(Av_f+1, As_f+1)]
+    source_coagulation_sl_(4) = source_coagulation_sl_(0)
+        + coeff / S0_ * (sqrtPsi(0., 1.) + Kf * sqrtPsi(Av_f + 1., As_f + 1.));
+
+    // M02: Δ(S²)/S0² = 2·Kf·V0·V_L^{Av_f}·S_L^{As_f+2}/S0² − 1
+    //   source = sl_(0)  +  2·coeff·Kf·V0/S0²·Ψ(Av_f, As_f+2)
+    source_coagulation_sl_(5) = source_coagulation_sl_(0)
+        + 2. * coeff * Kf * V0_ / (S0_ * S0_) * sqrtPsi(Av_f, As_f + 2.);
+
+    // N0: one small-mode particle consumed per collision (same rate as M00)
+    source_coagulation_sl_(6) = source_coagulation_sl_(0);
 }
 
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::SootCoagulationLargeLargeM7()
 {
-    // TODO: implement
+    source_coagulation_ll_.setZero();
+    if (!HasSoot()) return;
+
+    // For large-large coagulation both collision diameters are fractal
+    // (Dc = Kc·V^{Av_c}·S^{As_c} >> DcNUCL), so no DcNUCL terms appear.
+    //
+    // Free-molecular beta for two large particles (Mueller 2009, §3.2):
+    //   β(V1,V2) ≈ Cfm·√T · Kc²·(V1^{Av_c}·S1^{As_c} + V2^{Av_c}·S2^{As_c})²
+    //              · √(1/V1 + 1/V2)
+    //
+    // Geometric-mean approximation for the symmetric double integral
+    //   ∫∫ β(V1,V2)·n_L(V1)·n_L(V2) dV1 dV2 ≈ 2.2·Cfm·√T·√(psi0·psi1)
+    //
+    // psi0 and psi1 bracket the integral using products of large-mode moments:
+    const double Av_c = Av_collisional_;
+    const double As_c = As_collisional_;
+    const double Kc   = K_collisional_;
+
+    const double psi0 = 2. * Kc * Kc * (
+        GetMissingMoment(2.*Av_c - 0.5, 2.*As_c) * GetMissingMoment(-0.5, 0.) +
+        GetMissingMoment(Av_c   - 0.5, As_c)    * GetMissingMoment(Av_c - 0.5, As_c));
+
+    const double psi1 = 2. * Kc * Kc * (
+        GetMissingMoment(2.*Av_c + 0.5, 2.*As_c) * GetMissingMoment(-0.5, 0.) +
+        GetMissingMoment(Av_c   + 0.5, As_c)    * GetMissingMoment(Av_c - 0.5, As_c) +
+        GetMissingMoment(2.*Av_c - 0.5, 2.*As_c) * GetMissingMoment( 0.5, 0.));
+
+    // M00: −½ per collision pair (0.5 from symmetric double-counting).
+    // All other sources (M10, M01, M20, M11, M02, N0) remain zero:
+    //   M10 is exactly conserved; M01/M20/M11/M02 changes are approximated as
+    //   negligible (same convention as HMOM4); N0 is unaffected by L-L.
+    if (psi0 * psi1 >= 0.)
+        source_coagulation_ll_(0) =
+            -0.5 * 2.2 * Cfm_ * std::sqrt(this->T_) / this->Nav_mol_
+            * std::sqrt(psi0 * psi1);
 }
 
 // ===========================================================================
