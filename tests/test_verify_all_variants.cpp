@@ -29,6 +29,7 @@
 #include <cstddef>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <numeric>
 #include <span>
 #include <stdexcept>
@@ -818,6 +819,132 @@ static bool validateIntegerModelFlagValidation()
     std::cout << (thermophoretic_ok
                       ? "  [PASS] Shared thermophoretic setter is noexcept (invalid int silently cast; validation deferred to ParseConfig)\n"
                       : "  [FAIL] Shared thermophoretic setter unexpectedly threw on an integer flag\n");
+
+    return ok;
+}
+
+static bool validateMetalOxideSetupValidation()
+{
+    const auto th = buildMetalOxideThermo();
+
+    auto throws_invalid_argument = [](auto&& fn)
+    {
+        try
+        {
+            fn();
+        }
+        catch (const std::invalid_argument&)
+        {
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+        return false;
+    };
+
+    auto valid_config = []()
+    {
+        MOM::MetalOxide<MOM::BasicThermoData>::Config cfg;
+        cfg.precursor_species = "TiOH4";
+        cfg.gas_consumption = false;
+        return cfg;
+    };
+
+    auto rejects_config = [&](auto mutate)
+    {
+        return throws_invalid_argument(
+            [&]
+            {
+                auto cfg = valid_config();
+                mutate(cfg);
+                MOM::MetalOxide<MOM::BasicThermoData> model(th);
+                model.SetupFromConfig(cfg);
+            });
+    };
+
+    const bool transport_ok =
+        rejects_config([](auto& cfg) { cfg.schmidt_number = 0.; }) &&
+        rejects_config([](auto& cfg) {
+            cfg.thermophoretic_model = static_cast<MOM::ThermophoreticModel>(99);
+        });
+
+    const bool floor_ok =
+        rejects_config([](auto& cfg) { cfg.ns_minimum_per_m3 = 0.; }) &&
+        rejects_config([](auto& cfg) { cfg.fv_minimum = -1.e-12; });
+
+    const bool sintering_ok =
+        rejects_config([](auto& cfg) { cfg.sintering_As_s_K_m = -1.; }) &&
+        rejects_config([](auto& cfg) {
+            cfg.sintering_Ts_K = std::numeric_limits<double>::quiet_NaN();
+        }) &&
+        rejects_config([](auto& cfg) {
+            cfg.sintering_ns = std::numeric_limits<double>::infinity();
+        }) &&
+        rejects_config([](auto& cfg) { cfg.sintering_dp_min_m = -1.e-9; }) &&
+        rejects_config([](auto& cfg) { cfg.sintering_tau_min_s = 0.; }) &&
+        rejects_config([](auto& cfg) { cfg.sintering_k_max_per_s = 0.; });
+
+    const bool cluster_ok =
+        rejects_config([](auto& cfg) {
+            cfg.minimum_formula_units = 8;
+            cfg.nucleated_particle_formula_units = 4;
+        });
+
+    const bool gas_ok =
+        rejects_config([](auto& cfg) {
+            cfg.precursor_species = "none";
+            cfg.gas_consumption = true;
+        }) &&
+        rejects_config([](auto& cfg) {
+            cfg.precursor_species = "none";
+            cfg.gas_stoichiometry = {{"TiOH4", -1.}};
+        });
+
+    const bool setters_ok = [&]
+    {
+        MOM::MetalOxide<MOM::BasicThermoData> model(th);
+        return throws_invalid_argument([&] { model.SetNucleationCollisionEnhancementFactor(0.); }) &&
+               throws_invalid_argument([&] {
+                   model.SetCoagulationCollisionEnhancementFactor(
+                       std::numeric_limits<double>::quiet_NaN());
+               }) &&
+               throws_invalid_argument([&] { model.SetCondensationCollisionEnhancementFactor(-1.); }) &&
+               throws_invalid_argument([&] { model.SetSinteringFrequencyFactor(0.); }) &&
+               throws_invalid_argument([&] {
+                   model.SetSinteringActivationTemperature(
+                       std::numeric_limits<double>::quiet_NaN());
+               }) &&
+               throws_invalid_argument([&] {
+                   model.SetSinteringTemperatureExponent(
+                       std::numeric_limits<double>::infinity());
+               }) &&
+               throws_invalid_argument([&] { model.SetNMinimum(0.); }) &&
+               throws_invalid_argument([&] { model.SetFvMinimum(-1.e-16); });
+    }();
+
+    const bool ok = transport_ok && floor_ok && sintering_ok && cluster_ok && gas_ok && setters_ok;
+
+    std::cout << "\n=== MetalOxide setup validation ===\n";
+    std::cout << (transport_ok
+                      ? "  [PASS] Invalid transport flags/scalars are rejected\n"
+                      : "  [FAIL] Invalid transport flags/scalars were accepted\n");
+    std::cout << (floor_ok
+                      ? "  [PASS] Invalid numerical floors are rejected\n"
+                      : "  [FAIL] Invalid numerical floors were accepted\n");
+    std::cout << (sintering_ok
+                      ? "  [PASS] Invalid sintering setup parameters are rejected\n"
+                      : "  [FAIL] Invalid sintering setup parameters were accepted\n");
+    std::cout << (cluster_ok
+                      ? "  [PASS] Inconsistent cluster-size setup is rejected\n"
+                      : "  [FAIL] Inconsistent cluster-size setup was accepted\n");
+    std::cout << (gas_ok
+                      ? "  [PASS] Gas coupling without precursor is rejected\n"
+                      : "  [FAIL] Gas coupling without precursor was accepted\n");
+    std::cout << (setters_ok
+                      ? "  [PASS] Direct scalar setters reject invalid values\n"
+                      : "  [FAIL] At least one direct scalar setter accepted an invalid value\n");
 
     return ok;
 }
@@ -2452,6 +2579,7 @@ int main()
     all_ok &= validateBrookesMossHallConfigDefaults();
     all_ok &= validateBrookesMossInvalidModelFlags();
     all_ok &= validateIntegerModelFlagValidation();
+    all_ok &= validateMetalOxideSetupValidation();
     all_ok &= validateHMOMGasConsumptionDisableClearsOutput();
     all_ok &= validateMetalOxideMonodisperseClosureRegression();
     all_ok &= validateMetalOxideLognormalClosureState();

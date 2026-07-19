@@ -171,6 +171,85 @@ void MetalOxide<Thermo>::SetMinimumNumberOfFormulaUnits(unsigned n)
 }
 
 template <ThermoMap Thermo>
+void MetalOxide<Thermo>::SetNucleationCollisionEnhancementFactor(double eps)
+{
+    if (!std::isfinite(eps) || eps <= 0.)
+        throw std::invalid_argument(
+            "[MetalOxide] Nucleation collision enhancement factor must be positive.");
+
+    epsilon_nuc_ = eps;
+    Precalculations();
+}
+
+template <ThermoMap Thermo>
+void MetalOxide<Thermo>::SetCoagulationCollisionEnhancementFactor(double eps)
+{
+    if (!std::isfinite(eps) || eps <= 0.)
+        throw std::invalid_argument(
+            "[MetalOxide] Coagulation collision enhancement factor must be positive.");
+
+    epsilon_coag_ = eps;
+    Precalculations();
+}
+
+template <ThermoMap Thermo>
+void MetalOxide<Thermo>::SetCondensationCollisionEnhancementFactor(double eps)
+{
+    if (!std::isfinite(eps) || eps <= 0.)
+        throw std::invalid_argument(
+            "[MetalOxide] Condensation collision enhancement factor must be positive.");
+
+    epsilon_cond_ = eps;
+    Precalculations();
+}
+
+template <ThermoMap Thermo>
+void MetalOxide<Thermo>::SetSinteringFrequencyFactor(double As)
+{
+    if (!std::isfinite(As) || As <= 0.)
+        throw std::invalid_argument("[MetalOxide] Sintering frequency factor must be positive.");
+
+    As_ = As;
+}
+
+template <ThermoMap Thermo>
+void MetalOxide<Thermo>::SetSinteringActivationTemperature(double Ts)
+{
+    if (!std::isfinite(Ts))
+        throw std::invalid_argument("[MetalOxide] Sintering activation temperature must be finite.");
+
+    Ts_ = Ts;
+}
+
+template <ThermoMap Thermo>
+void MetalOxide<Thermo>::SetSinteringTemperatureExponent(double ns)
+{
+    if (!std::isfinite(ns))
+        throw std::invalid_argument("[MetalOxide] Sintering temperature exponent must be finite.");
+
+    ns_ = ns;
+}
+
+template <ThermoMap Thermo>
+void MetalOxide<Thermo>::SetNMinimum(double v)
+{
+    if (!std::isfinite(v) || v <= 0.)
+        throw std::invalid_argument("[MetalOxide] Minimum number-density floor must be positive.");
+
+    N_min_ = v;
+    Precalculations();
+}
+
+template <ThermoMap Thermo>
+void MetalOxide<Thermo>::SetFvMinimum(double v)
+{
+    if (!std::isfinite(v) || v <= 0.)
+        throw std::invalid_argument("[MetalOxide] Minimum volume-fraction floor must be positive.");
+
+    fv_min_ = v;
+}
+
+template <ThermoMap Thermo>
 void MetalOxide<Thermo>::SetState(double T, double P_Pa, const double* Y) noexcept
 {
     const double cTot = this->template UpdateMixtureState<>(T, P_Pa, Y, thermo_);
@@ -1382,6 +1461,14 @@ void MetalOxide<Thermo>::ApplyConfig(const Config& cfg)
     this->SetGasClosureDummySpecies(cfg.gas_closure_dummy_species);
     this->SetGasConsumption(cfg.gas_consumption);
 
+    if (!cfg.gas_stoichiometry.empty() && precursor_index_ < 0)
+        throw std::invalid_argument(
+            "[MetalOxide] Explicit gas stoichiometry requires a valid precursor species.");
+
+    if (cfg.gas_consumption && precursor_index_ < 0)
+        throw std::invalid_argument(
+            "[MetalOxide] Gas consumption requires a valid precursor species.");
+
     if (cfg.gas_consumption && precursor_index_ >= 0)
     {
         if (gas_stoichiometry_.empty())
@@ -1408,6 +1495,11 @@ void MetalOxide<Thermo>::ApplyConfig(const Config& cfg)
     this->SetSintering(cfg.sintering_model);
     this->SetCoagulation(cfg.coagulation_model);
     this->SetCondensation(cfg.condensation_model);
+
+    if (cfg.thermophoretic_model != ThermophoreticModel::Off &&
+        cfg.thermophoretic_model != ThermophoreticModel::Standard)
+        throw std::invalid_argument(
+            "[MetalOxide] Invalid thermophoretic model flag. Allowed values: 0, 1.");
     this->SetThermophoreticModel(cfg.thermophoretic_model);
 
     // -- Cluster sizes -----------------------------------------------------
@@ -1419,21 +1511,19 @@ void MetalOxide<Thermo>::ApplyConfig(const Config& cfg)
     if (nucleated_units <= 0)
         throw std::invalid_argument(
             "[MetalOxide] nucleated-particle formula units must be positive.");
+    if (nucleated_units < minimum_units)
+        throw std::invalid_argument(
+            "[MetalOxide] nucleated-particle formula units must be greater than or equal to "
+            "minimum formula units.");
 
     this->SetMinimumNumberOfFormulaUnits(static_cast<unsigned int>(minimum_units));
     this->SetNumberOfFormulaUnitsPerNucleatedParticle(
         static_cast<unsigned int>(nucleated_units));
 
     // -- Sintering kinetics ------------------------------------------------
-    if (!std::isfinite(cfg.sintering_As_s_K_m) || cfg.sintering_As_s_K_m <= 0.)
-        throw std::invalid_argument("[MetalOxide] sintering frequency factor must be positive.");
-    if (!std::isfinite(cfg.sintering_Ts_K))
-        throw std::invalid_argument("[MetalOxide] sintering activation temperature must be finite.");
-    if (!std::isfinite(cfg.sintering_ns))
-        throw std::invalid_argument("[MetalOxide] sintering temperature exponent must be finite.");
-    As_ = cfg.sintering_As_s_K_m;
-    Ts_ = cfg.sintering_Ts_K;
-    ns_ = cfg.sintering_ns;
+    this->SetSinteringFrequencyFactor(cfg.sintering_As_s_K_m);
+    this->SetSinteringActivationTemperature(cfg.sintering_Ts_K);
+    this->SetSinteringTemperatureExponent(cfg.sintering_ns);
 
     // -- Sintering regularization -----------------------------------------
     if (!std::isfinite(cfg.sintering_dp_min_m) || cfg.sintering_dp_min_m < 0.)
@@ -1452,11 +1542,13 @@ void MetalOxide<Thermo>::ApplyConfig(const Config& cfg)
             "[MetalOxide] The lognormal closure does not currently support deferred sintering.");
 
     // -- Numerical floors + geometry recompute -----------------------------
-    N_min_  = cfg.ns_minimum_per_m3;
-    fv_min_ = cfg.fv_minimum;
+    this->SetNMinimum(cfg.ns_minimum_per_m3);
+    this->SetFvMinimum(cfg.fv_minimum);
     Precalculations();
 
     // -- Transport ---------------------------------------------------------
+    if (!std::isfinite(cfg.schmidt_number) || cfg.schmidt_number <= 0.)
+        throw std::invalid_argument("[MetalOxide] Schmidt number must be positive.");
     this->SetSchmidtNumber(cfg.schmidt_number);
 
     // -- Debug mode --------------------------------------------------------

@@ -544,22 +544,22 @@ public:
     /** @brief Sets the minimum formula-unit count used by regularized geometry. */
     void SetMinimumNumberOfFormulaUnits(unsigned n);
 
-    void SetNucleationCollisionEnhancementFactor(double eps) noexcept { epsilon_nuc_ = eps; }
+    void SetNucleationCollisionEnhancementFactor(double eps);
 
-    void SetCoagulationCollisionEnhancementFactor(double eps) noexcept { epsilon_coag_ = eps; }
+    void SetCoagulationCollisionEnhancementFactor(double eps);
 
-    void SetCondensationCollisionEnhancementFactor(double eps) noexcept { epsilon_cond_ = eps; }
+    void SetCondensationCollisionEnhancementFactor(double eps);
 
     /// Sintering kinetics: tau_s = As * T^ns * dp^4 * exp(Ts/T) [s].
-    void SetSinteringFrequencyFactor(double As) noexcept { As_ = As; }
+    void SetSinteringFrequencyFactor(double As);
 
-    void SetSinteringActivationTemperature(double Ts) noexcept { Ts_ = Ts; }
+    void SetSinteringActivationTemperature(double Ts);
 
-    void SetSinteringTemperatureExponent(double ns) noexcept { ns_ = ns; }
+    void SetSinteringTemperatureExponent(double ns);
 
-    void SetNMinimum(double v) noexcept { N_min_ = v; }
+    void SetNMinimum(double v);
 
-    void SetFvMinimum(double v) noexcept { fv_min_ = v; }
+    void SetFvMinimum(double v);
 
     /** @brief Sets and validates the gas precursor species. */
     void SetPrecursor(std::string_view name);
