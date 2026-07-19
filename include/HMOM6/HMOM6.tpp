@@ -1426,7 +1426,118 @@ void HMOM6<Thermo>::SootCoagulationContinuousLargeLargeM7(double lambda, double 
 template <ThermoMap Thermo>
 void HMOM6<Thermo>::ComputeSources() noexcept
 {
-    // TODO: implement
+    // Zero all per-process source vectors and the base-class totals.
+    this->ZeroSources();
+    source_nucleation_.setZero();
+    source_coagulation_.setZero();
+    source_condensation_.setZero();
+    source_growth_.setZero();
+    source_oxidation_.setZero();
+
+    source_coagulation_discrete_   = MomentVector::Zero();
+    source_coagulation_ss_         = MomentVector::Zero();
+    source_coagulation_sl_         = MomentVector::Zero();
+    source_coagulation_ll_         = MomentVector::Zero();
+    source_coagulation_continuous_ = MomentVector::Zero();
+    source_coagulation_cont_ss_    = MomentVector::Zero();
+    source_coagulation_cont_sl_    = MomentVector::Zero();
+    source_coagulation_cont_ll_    = MomentVector::Zero();
+    source_coagulation_all_        = MomentVector::Zero();
+
+    // When the variant is disabled, leave all sources at zero (gas consumption
+    // is already zeroed by ZeroSources above).
+    if (!this->is_active_)
+    {
+        if (this->gas_consumption_)
+            this->omega_gas_.setZero();
+        return;
+    }
+
+    // --- Temperature-dependent alpha correction (if enabled) ---
+    if (surface_density_correction_)
+        CalculateAlphaCoefficient();
+
+    // --- PAH dimer concentration (required by nucleation and condensation) ---
+    DimerConcentration();
+
+    // --- Per-process sources ---
+    if (nucleation_model_ > 0)
+        SootNucleationM7();
+
+    if (surface_growth_model_ > 0 || oxidation_model_ > 0)
+    {
+        SootKineticConstants();
+        if (surface_growth_model_ > 0)
+            SootSurfaceGrowthM7();
+        if (oxidation_model_ > 0)
+            SootOxidationM7();
+    }
+
+    if (condensation_model_ > 0)
+        SootCondensationM7();
+
+    if (coagulation_model_ > 0)
+        SootCoagulationM7();
+
+    if (coagulation_continuous_model_ > 0)
+        SootCoagulationContinuousM7();
+
+    // --- Sanitize and combine ---
+    // NaN-guard each per-process entry; then combine discrete and continuous
+    // coagulation via the harmonic-mean interpolation used in HMOM4.
+    for (unsigned i = 0; i < 7u; ++i)
+    {
+        auto nanZ = [](double& v) noexcept
+        {
+            if (std::isnan(v))
+                v = 0.;
+        };
+
+        nanZ(source_nucleation_(i));
+        nanZ(source_growth_(i));
+        nanZ(source_oxidation_(i));
+        nanZ(source_condensation_(i));
+        nanZ(source_coagulation_ss_(i));
+        nanZ(source_coagulation_sl_(i));
+        nanZ(source_coagulation_ll_(i));
+        nanZ(source_coagulation_cont_ss_(i));
+        nanZ(source_coagulation_cont_sl_(i));
+        nanZ(source_coagulation_cont_ll_(i));
+
+        const double disc =
+            source_coagulation_ss_(i) +
+            source_coagulation_sl_(i) +
+            source_coagulation_ll_(i);
+
+        const double cont =
+            source_coagulation_cont_ss_(i) +
+            source_coagulation_cont_sl_(i) +
+            source_coagulation_cont_ll_(i);
+
+        source_coagulation_discrete_(i)   = disc;
+        source_coagulation_continuous_(i) = cont;
+
+        // Harmonic-mean interpolation between free-molecular (disc) and
+        // continuum (cont) coagulation — identical to the HMOM4 formulation.
+        if (disc == 0.)
+            source_coagulation_all_(i) = cont;
+        else if (cont == 0.)
+            source_coagulation_all_(i) = disc;
+        else
+            source_coagulation_all_(i) = cont * disc / (cont + disc);
+
+        source_coagulation_(i) = source_coagulation_all_(i);
+
+        this->source_all_(i) =
+            source_nucleation_(i)      +
+            source_growth_(i)          +
+            source_oxidation_(i)       +
+            source_condensation_(i)    +
+            source_coagulation_all_(i);
+    }
+
+    if (this->gas_consumption_)
+        CalculateOmegaGas();
 }
 
 // ===========================================================================
