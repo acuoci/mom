@@ -705,6 +705,7 @@ Dictionary MetalOxide
     @MetalOxide                     true;
 
     @NucleationModel                binary;
+    @ClosureModel                   monodisperse;
     @SinteringModel                 1;
     @CondensationModel              1;
     @CoagulationModel               1;
@@ -762,6 +763,7 @@ Dictionary MetalOxide
 |---|---:|---|---:|---|
 | `@MetalOxide` | `bool` | `true`, `false` | `true` | Enables or disables the MetalOxide variant. |
 | `@NucleationModel` | `string` | `0`, `none`, `1`, `binary`, `2`, `fixed-cluster` | `binary` | Selects the nucleation model. `binary` uses precursor-precursor collisions; `fixed-cluster` nucleates a cluster with `@NucleatedParticleFormulaUnits` formula units. |
+| `@ClosureModel` | `string` | `monodisperse`, `lognormal` | `monodisperse` | Selects the closure used by coagulation, condensation, and sintering source terms. `lognormal` reconstructs a dimensionless log-normal population from `Ysolid`, `NsolidN`, and `Ssolid`. |
 | `@SinteringModel` | `int` | `0`, `1` | `1` | Enables sintering source terms when `1`. |
 | `@CondensationModel` | `int` | `0`, `1` | `1` | Enables precursor condensation on existing particles when `1`. |
 | `@CoagulationModel` | `int` | `0`, `1` | `1` | Enables particle coagulation when `1`. |
@@ -779,6 +781,8 @@ Dictionary MetalOxide
 | `@GasStoichiometryMassTolerance` | `double` | Non-negative scalar | `1e-3` | Relative tolerance used to validate gas/solid mass balance when gas stoichiometry is supplied. |
 
 When `@GasConsumption true;`, `@GasStoichiometry` must include the precursor with coefficient `-1`. The parser validates that gas stoichiometry plus `@SolidFormulaUnitsPerPrecursor * @SolidMolecularWeight` is mass-balanced within `@GasStoichiometryMassTolerance`.
+
+`@ClosureModel lognormal;` currently requires `@SinteringDeferred false;` because deferred sintering is implemented only for the monodisperse closure.
 
 ### Cluster Size and Numerical Floors
 

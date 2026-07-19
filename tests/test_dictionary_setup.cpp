@@ -466,6 +466,33 @@ void checkMetalOxideDictionarySetup()
     requireNear(metaloxide.schmidt_number(), 39.0, "MetalOxide Schmidt number was not applied");
 }
 
+void checkMetalOxideLognormalDictionarySetup()
+{
+    const auto thermo = buildMetalOxideThermo();
+
+    auto parse_dict = buildMetalOxideDictionary();
+    parse_dict.strings["@ClosureModel"] = "lognormal";
+    parse_dict.bools["@SinteringDeferred"] = false;
+
+    auto cfg = MOM::MetalOxide<MOM::BasicThermoData>::ParseConfig(parse_dict);
+    require(parse_dict.grammar_was_set, "MetalOxide lognormal ParseConfig did not install grammar");
+    require(cfg.has_value(), "MetalOxide lognormal ParseConfig returned an unexpected error");
+    require(cfg->closure_model == "lognormal", "MetalOxide @ClosureModel lognormal was not parsed");
+    require(!cfg->sintering_deferred,
+            "MetalOxide @SinteringDeferred false was not parsed for lognormal setup");
+
+    auto setup_dict = buildMetalOxideDictionary();
+    setup_dict.strings["@ClosureModel"] = "lognormal";
+    setup_dict.bools["@SinteringDeferred"] = false;
+
+    auto model = MOM::MakeAnyMomentMethod<MOM::BasicThermoData>(thermo, "MetalOxide");
+    MOM::SetupFromDictionary(model, setup_dict);
+
+    const auto& metaloxide = std::get<MOM::MetalOxide<MOM::BasicThermoData>>(model);
+    require(metaloxide.closure_model() == MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Lognormal,
+            "MetalOxide @ClosureModel lognormal was not applied");
+}
+
 void checkMetalOxideGasStoichiometrySetup()
 {
     const auto thermo = buildMetalOxideGasThermo();
@@ -587,6 +614,7 @@ int main()
         checkThreeEquationsDictionarySetup();
         checkBrookesMossDictionarySetup();
         checkMetalOxideDictionarySetup();
+        checkMetalOxideLognormalDictionarySetup();
         checkMetalOxideGasStoichiometrySetup();
         checkMetalOxideReporterLabels();
         checkMetalOxideRequiresExplicitGasStoichiometry();
