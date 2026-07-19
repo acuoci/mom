@@ -493,6 +493,30 @@ void checkMetalOxideLognormalDictionarySetup()
             "MetalOxide @ClosureModel lognormal was not applied");
 }
 
+void checkMetalOxideDefaultClosureDictionarySetup()
+{
+    const auto thermo = buildMetalOxideThermo();
+
+    auto parse_dict = buildMetalOxideDictionary();
+    parse_dict.strings.erase("@ClosureModel");
+
+    auto cfg = MOM::MetalOxide<MOM::BasicThermoData>::ParseConfig(parse_dict);
+    require(parse_dict.grammar_was_set, "MetalOxide default-closure ParseConfig did not install grammar");
+    require(cfg.has_value(), "MetalOxide default-closure ParseConfig returned an unexpected error");
+    require(cfg->closure_model == "monodisperse",
+            "MetalOxide omitted @ClosureModel did not preserve monodisperse default");
+
+    auto setup_dict = buildMetalOxideDictionary();
+    setup_dict.strings.erase("@ClosureModel");
+
+    auto model = MOM::MakeAnyMomentMethod<MOM::BasicThermoData>(thermo, "MetalOxide");
+    MOM::SetupFromDictionary(model, setup_dict);
+
+    const auto& metaloxide = std::get<MOM::MetalOxide<MOM::BasicThermoData>>(model);
+    require(metaloxide.closure_model() == MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Monodisperse,
+            "MetalOxide omitted @ClosureModel did not apply monodisperse default");
+}
+
 void checkMetalOxideGasStoichiometrySetup()
 {
     const auto thermo = buildMetalOxideGasThermo();
@@ -615,6 +639,7 @@ int main()
         checkBrookesMossDictionarySetup();
         checkMetalOxideDictionarySetup();
         checkMetalOxideLognormalDictionarySetup();
+        checkMetalOxideDefaultClosureDictionarySetup();
         checkMetalOxideGasStoichiometrySetup();
         checkMetalOxideReporterLabels();
         checkMetalOxideRequiresExplicitGasStoichiometry();

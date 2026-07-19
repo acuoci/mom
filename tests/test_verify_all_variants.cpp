@@ -884,9 +884,7 @@ static bool validateHMOMGasConsumptionDisableClearsOutput()
 static bool validateMetalOxideMonodisperseClosureRegression()
 {
     const auto th = buildMetalOxideThermo();
-    const auto Y  = X2Y({0.050, 0.950}, th);
-
-    bool ok = false;
+    bool ok = true;
 
     auto spans_equal_exact = [](std::span<const double> a, std::span<const double> b)
     {
@@ -903,49 +901,120 @@ static bool validateMetalOxideMonodisperseClosureRegression()
         return a == b;
     };
 
+    struct RuntimeCase
+    {
+        MOM::MetalOxide<MOM::BasicThermoData>::Config cfg;
+        double precursor_mole_fraction;
+        double T;
+        double P;
+        double mu;
+        double solid_mass_fraction;
+        double scaled_number_density;
+        double surface_area_concentration;
+    };
+
+    auto compare_default_and_explicit = [&](const RuntimeCase& c, const char*& mismatch)
+    {
+        auto base_cfg = c.cfg;
+        auto explicit_cfg = base_cfg;
+        explicit_cfg.closure_model = "monodisperse";
+
+        const auto Y = X2Y({c.precursor_mole_fraction, 1. - c.precursor_mole_fraction}, th);
+
+        MOM::MetalOxide<MOM::BasicThermoData> default_model(th);
+        default_model.SetupFromConfig(base_cfg);
+        default_model.SetViscosity(c.mu);
+        default_model.SetState(c.T, c.P, Y.data());
+        default_model.SetMoments(c.solid_mass_fraction,
+                                 c.scaled_number_density,
+                                 c.surface_area_concentration);
+        default_model.ComputeSources();
+
+        MOM::MetalOxide<MOM::BasicThermoData> explicit_model(th);
+        explicit_model.SetupFromConfig(explicit_cfg);
+        explicit_model.SetViscosity(c.mu);
+        explicit_model.SetState(c.T, c.P, Y.data());
+        explicit_model.SetMoments(c.solid_mass_fraction,
+                                  c.scaled_number_density,
+                                  c.surface_area_concentration);
+        explicit_model.ComputeSources();
+
+        if (default_model.closure_model() !=
+            MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Monodisperse)
+            { mismatch = "default closure"; return false; }
+        if (explicit_model.closure_model() !=
+            MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Monodisperse)
+            { mismatch = "explicit closure"; return false; }
+        if (!spans_equal_exact(default_model.initial_moments(), explicit_model.initial_moments()))
+            { mismatch = "initial_moments"; return false; }
+        if (!spans_equal_exact(default_model.sources(), explicit_model.sources()))
+            { mismatch = "sources"; return false; }
+        if (!spans_equal_exact(default_model.sources_nucleation(), explicit_model.sources_nucleation()))
+            { mismatch = "sources_nucleation"; return false; }
+        if (!spans_equal_exact(default_model.sources_coagulation(), explicit_model.sources_coagulation()))
+            { mismatch = "sources_coagulation"; return false; }
+        if (!spans_equal_exact(default_model.sources_condensation(), explicit_model.sources_condensation()))
+            { mismatch = "sources_condensation"; return false; }
+        if (!spans_equal_exact(default_model.sources_sintering(), explicit_model.sources_sintering()))
+            { mismatch = "sources_sintering"; return false; }
+        if (!spans_equal_exact(default_model.omega_gas(), explicit_model.omega_gas()))
+            { mismatch = "omega_gas"; return false; }
+        if (!scalars_equal_exact(default_model.volume_fraction(), explicit_model.volume_fraction()))
+            { mismatch = "volume_fraction"; return false; }
+        if (!scalars_equal_exact(default_model.particle_number_density(), explicit_model.particle_number_density()))
+            { mismatch = "particle_number_density"; return false; }
+        if (!scalars_equal_exact(default_model.specific_surface_area(), explicit_model.specific_surface_area()))
+            { mismatch = "specific_surface_area"; return false; }
+        if (!scalars_equal_exact(default_model.particle_diameter(), explicit_model.particle_diameter()))
+            { mismatch = "particle_diameter"; return false; }
+        if (!scalars_equal_exact(default_model.collision_diameter(), explicit_model.collision_diameter()))
+            { mismatch = "collision_diameter"; return false; }
+        if (!scalars_equal_exact(default_model.number_primary_particles(), explicit_model.number_primary_particles()))
+            { mismatch = "number_primary_particles"; return false; }
+        if (!scalars_equal_exact(default_model.diffusion_coefficient(), explicit_model.diffusion_coefficient()))
+            { mismatch = "diffusion_coefficient"; return false; }
+        return true;
+    };
+
     try
     {
         MOM::MetalOxide<MOM::BasicThermoData>::Config base_cfg;
         base_cfg.precursor_species = "TiOH4";
         base_cfg.gas_consumption   = false;
 
-        auto explicit_cfg = base_cfg;
-        explicit_cfg.closure_model = "monodisperse";
+        auto no_nucleation_cfg = base_cfg;
+        no_nucleation_cfg.nucleation_model = "none";
 
-        MOM::MetalOxide<MOM::BasicThermoData> default_model(th);
-        default_model.SetupFromConfig(base_cfg);
-        default_model.SetViscosity(4.0e-5);
-        default_model.SetState(1500., 101325., Y.data());
-        default_model.SetMoments(1.e-3, 1.e6, 2.e3);
-        default_model.ComputeSources();
+        auto fixed_cluster_cfg = base_cfg;
+        fixed_cluster_cfg.nucleation_model = "fixed-cluster";
+        fixed_cluster_cfg.condensation_model = 0;
+        fixed_cluster_cfg.sintering_model = 0;
 
-        MOM::MetalOxide<MOM::BasicThermoData> explicit_model(th);
-        explicit_model.SetupFromConfig(explicit_cfg);
-        explicit_model.SetViscosity(4.0e-5);
-        explicit_model.SetState(1500., 101325., Y.data());
-        explicit_model.SetMoments(1.e-3, 1.e6, 2.e3);
-        explicit_model.ComputeSources();
+        const std::vector<RuntimeCase> cases{
+            RuntimeCase{base_cfg, 0.050, 1500., 101325., 4.0e-5, 1.e-3, 1.e6, 2.e3},
+            RuntimeCase{base_cfg, 0.020, 1850., 202650., 6.0e-5, 2.e-5, 5.e3, 1.e-1},
+            RuntimeCase{no_nucleation_cfg, 0.080, 1700., 101325., 5.0e-5, 1.e-6, 1.e2, 5.e-6},
+            RuntimeCase{fixed_cluster_cfg, 0.010, 1400., 50662.5, 3.5e-5, 5.e-7, 1.e4, 2.e-4}
+        };
 
-        ok = default_model.closure_model() ==
-                 MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Monodisperse &&
-             explicit_model.closure_model() ==
-                 MOM::MetalOxide<MOM::BasicThermoData>::ClosureModel::Monodisperse &&
-             spans_equal_exact(default_model.sources(), explicit_model.sources()) &&
-             spans_equal_exact(default_model.sources_nucleation(), explicit_model.sources_nucleation()) &&
-             spans_equal_exact(default_model.sources_coagulation(), explicit_model.sources_coagulation()) &&
-             spans_equal_exact(default_model.sources_condensation(), explicit_model.sources_condensation()) &&
-             spans_equal_exact(default_model.sources_sintering(), explicit_model.sources_sintering()) &&
-             spans_equal_exact(default_model.omega_gas(), explicit_model.omega_gas()) &&
-             scalars_equal_exact(default_model.volume_fraction(), explicit_model.volume_fraction()) &&
-             scalars_equal_exact(default_model.particle_number_density(), explicit_model.particle_number_density()) &&
-             scalars_equal_exact(default_model.specific_surface_area(), explicit_model.specific_surface_area()) &&
-             scalars_equal_exact(default_model.particle_diameter(), explicit_model.particle_diameter()) &&
-             scalars_equal_exact(default_model.collision_diameter(), explicit_model.collision_diameter()) &&
-             scalars_equal_exact(default_model.number_primary_particles(), explicit_model.number_primary_particles()) &&
-             scalars_equal_exact(default_model.diffusion_coefficient(), explicit_model.diffusion_coefficient());
+        std::size_t case_index = 0u;
+        const char* mismatch = "none";
+        for (const auto& c : cases)
+        {
+            if (!compare_default_and_explicit(c, mismatch))
+            {
+                std::cout << "\n  [FAIL detail] MetalOxide monodisperse regression case "
+                          << case_index << " mismatch: " << mismatch << "\n";
+                ok = false;
+                break;
+            }
+            ++case_index;
+        }
     }
-    catch (const std::exception&)
+    catch (const std::exception& e)
     {
+        std::cout << "\n  [FAIL detail] MetalOxide monodisperse regression exception: "
+                  << e.what() << "\n";
         ok = false;
     }
 
